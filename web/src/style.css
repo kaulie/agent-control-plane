@@ -127,6 +127,39 @@ body {
   font-weight: 600;
 }
 
+.project-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-workspace-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.project-workspace-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.project-workspace-path {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .icon-btn {
   flex-shrink: 0;
   width: 34px;

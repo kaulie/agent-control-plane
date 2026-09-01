@@ -7,6 +7,7 @@ interface Props {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onRenameProject: () => void;
+  onSetWorkspaceRoot: () => void;
   tasks: Task[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -19,11 +20,14 @@ export default function TaskList({
   onSelectProject,
   onCreateProject,
   onRenameProject,
+  onSetWorkspaceRoot,
   tasks,
   selectedId,
   onSelect,
   onCreate,
 }: Props) {
+  const selectedProject = projects.find((p) => p.projectId === selectedProjectId);
+
   return (
     <aside className="task-list">
       <div className="project-section">
@@ -49,6 +53,25 @@ export default function TaskList({
           >
             ✎
           </button>
+        </div>
+        <div className="project-workspace">
+          <div className="project-workspace-label">文件主目录</div>
+          <div className="project-workspace-row">
+            <div
+              className="project-workspace-path"
+              title={selectedProject?.workspaceRoot ?? "使用系统默认目录"}
+            >
+              {selectedProject?.workspaceRoot ?? "（系统默认）"}
+            </div>
+            <button
+              className="icon-btn"
+              title="Set file root directory"
+              onClick={onSetWorkspaceRoot}
+              disabled={!selectedProjectId}
+            >
+              📁
+            </button>
+          </div>
         </div>
         <button className="new-project" onClick={onCreateProject}>
           + New Project

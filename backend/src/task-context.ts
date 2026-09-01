@@ -82,9 +82,11 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     `- createdAt: ${task.createdAt}`,
     "",
     "## Workspace isolation",
-    "- This task owns a private directory under `/Users/gaolei/agent-workspace/<taskId>/` (see workspace above).",
+    project?.workspaceRoot
+      ? `- This project uses file root \`${project.workspaceRoot}\`; this task's cwd is \`${task.workspace}\`.`
+      : `- workspace: ${task.workspace}`,
     "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
-    "- Do not edit other tasks' directories under agent-workspace, and never edit `/Users/gaolei/runtime/**`.",
+    "- Do not edit other tasks' directories, and never edit `/Users/gaolei/runtime/**`.",
     "- Prefer not to edit the shared canonical tree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks; that tree is for merge/deploy.",
     "",
     "## Your role",

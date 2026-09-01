@@ -28,11 +28,11 @@ export const api = {
 
   listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
-  createProject: (name: string) =>
+  createProject: (name: string, workspaceRoot?: string) =>
     fetch(`${BASE}/projects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, ...(workspaceRoot ? { workspaceRoot } : {}) }),
     }).then((r) => j<Project>(r)),
 
   renameProject: (projectId: string, name: string) =>
@@ -40,6 +40,16 @@ export const api = {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
+    }).then((r) => j<Project>(r)),
+
+  updateProject: (
+    projectId: string,
+    body: { name?: string; workspaceRoot?: string | null },
+  ) =>
+    fetch(`${BASE}/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
     }).then((r) => j<Project>(r)),
 
   listTasks: (projectId?: string) => {

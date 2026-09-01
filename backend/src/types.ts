@@ -3,6 +3,8 @@ export type TaskStatus = "active" | "completed" | "error";
 export interface Project {
   projectId: string;
   name: string;
+  /** Per-project agent sandbox root; new tasks use `<workspaceRoot>/<taskId>/`. */
+  workspaceRoot?: string;
   createdAt: string;
   updatedAt: string;
 }

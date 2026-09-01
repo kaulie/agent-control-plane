@@ -33,13 +33,15 @@ export async function registerRoutes(
 
   app.get("/api/projects", async () => gateway.listProjects());
 
-  app.post<{ Body: { name?: string } }>("/api/projects", async (req, reply) => {
+  app.post<{ Body: { name?: string; workspaceRoot?: string } }>(
+    "/api/projects",
+    async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
       return reply.code(400).send({ error: "name is required" });
     }
     try {
-      const project = gateway.createProject(name);
+      const project = gateway.createProject(name, req.body?.workspaceRoot?.trim());
       reply.code(201);
       return project;
     } catch (err) {
@@ -47,17 +49,28 @@ export async function registerRoutes(
         .code(400)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  },
+  );
 
-  app.patch<{ Params: { projectId: string }; Body: { name?: string } }>(
+  app.patch<{
+    Params: { projectId: string };
+    Body: { name?: string; workspaceRoot?: string | null };
+  }>(
     "/api/projects/:projectId",
     async (req, reply) => {
       const name = req.body?.name?.trim();
-      if (!name) {
-        return reply.code(400).send({ error: "name is required" });
+      const hasName = name !== undefined && name.length > 0;
+      const hasWorkspaceRoot = req.body?.workspaceRoot !== undefined;
+      if (!hasName && !hasWorkspaceRoot) {
+        return reply
+          .code(400)
+          .send({ error: "name or workspaceRoot is required" });
       }
       try {
-        const project = gateway.renameProject(req.params.projectId, name);
+        const project = gateway.updateProject(req.params.projectId, {
+          ...(hasName ? { name } : {}),
+          ...(hasWorkspaceRoot ? { workspaceRoot: req.body?.workspaceRoot } : {}),
+        });
         if (!project) {
           return reply.code(404).send({ error: "project not found" });
         }

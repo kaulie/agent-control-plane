@@ -26,6 +26,7 @@ export const WATCHDOG_USER_NAME = "Watchdog";
 interface ProjectRow {
   project_id: string;
   name: string;
+  workspace_root: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -138,10 +139,11 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, seq);
       CREATE TABLE IF NOT EXISTS projects (
-        project_id  TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
+        project_id     TEXT PRIMARY KEY,
+        name           TEXT NOT NULL,
+        workspace_root TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS users (
         user_id   TEXT PRIMARY KEY,
@@ -167,6 +169,13 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
     );
+
+    const projectCols = this.db
+      .prepare(`PRAGMA table_info(projects)`)
+      .all() as unknown as Array<{ name: string }>;
+    if (!projectCols.some((c) => c.name === "workspace_root")) {
+      this.db.exec(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
+    }
 
     // Backfill: bind each task to its most recent non-empty run agent_id.
     this.db.exec(`
@@ -350,41 +359,88 @@ export class Store {
     return row ? this.toProject(row) : undefined;
   }
 
-  createProject(name: string): Project {
+  createProject(name: string, workspaceRoot?: string): Project {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("project name is required");
     const now = new Date().toISOString();
+    const root = workspaceRoot?.trim() || null;
     const project: Project = {
       projectId: newId("project"),
       name: trimmed,
+      ...(root ? { workspaceRoot: root } : {}),
       createdAt: now,
       updatedAt: now,
     };
     this.db
       .prepare(
-        `INSERT INTO projects (project_id, name, created_at, updated_at)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO projects (project_id, name, workspace_root, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(project.projectId, project.name, project.createdAt, project.updatedAt);
+      .run(
+        project.projectId,
+        project.name,
+        root,
+        project.createdAt,
+        project.updatedAt,
+      );
     return project;
   }
 
   renameProject(projectId: string, name: string): Project | undefined {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error("project name is required");
+    return this.updateProject(projectId, { name });
+  }
+
+  updateProject(
+    projectId: string,
+    input: { name?: string; workspaceRoot?: string | null },
+  ): Project | undefined {
     const existing = this.getProject(projectId);
     if (!existing) return undefined;
+
+    const updates: string[] = [];
+    const values: Array<string | null> = [];
+    let next = { ...existing };
+
+    if (input.name !== undefined) {
+      const trimmed = input.name.trim();
+      if (!trimmed) throw new Error("project name is required");
+      updates.push("name = ?");
+      values.push(trimmed);
+      next = { ...next, name: trimmed };
+    }
+
+    if (input.workspaceRoot !== undefined) {
+      const root = input.workspaceRoot?.trim() || null;
+      updates.push("workspace_root = ?");
+      values.push(root);
+      if (root) {
+        next = { ...next, workspaceRoot: root };
+      } else {
+        const { workspaceRoot: _removed, ...rest } = next;
+        next = rest;
+      }
+    }
+
+    if (!updates.length) return existing;
+
     const updatedAt = new Date().toISOString();
+    updates.push("updated_at = ?");
+    values.push(updatedAt);
+    values.push(projectId);
+
     this.db
-      .prepare(`UPDATE projects SET name = ?, updated_at = ? WHERE project_id = ?`)
-      .run(trimmed, updatedAt, projectId);
-    return { ...existing, name: trimmed, updatedAt };
+      .prepare(`UPDATE projects SET ${updates.join(", ")} WHERE project_id = ?`)
+      .run(...values);
+
+    return { ...next, updatedAt };
   }
 
   private toProject(r: ProjectRow): Project {
+    const root = r.workspace_root?.trim();
     return {
       projectId: r.project_id,
       name: r.name,
+      ...(root ? { workspaceRoot: root } : {}),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

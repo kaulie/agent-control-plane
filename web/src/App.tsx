@@ -413,6 +413,23 @@ export default function App() {
     }
   }, [projects, refreshProjects, selectedProjectId]);
 
+  const setProjectWorkspaceRoot = useCallback(async () => {
+    if (!selectedProjectId) return;
+    const current = projects.find((p) => p.projectId === selectedProjectId);
+    const hint =
+      "项目文件主目录（绝对路径）。新任务将在此目录下创建 `<taskId>/` 子目录。\n留空则使用系统默认。";
+    const value = window.prompt(hint, current?.workspaceRoot ?? "");
+    if (value === null) return;
+    try {
+      await api.updateProject(selectedProjectId, {
+        workspaceRoot: value.trim() || null,
+      });
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [projects, refreshProjects, selectedProjectId]);
+
   const sendMessage = useCallback(
     async (payload: {
       text: string;
@@ -506,6 +523,7 @@ export default function App() {
           onSelectProject={(id) => void selectProject(id)}
           onCreateProject={() => void createProject()}
           onRenameProject={() => void renameProject()}
+          onSetWorkspaceRoot={() => void setProjectWorkspaceRoot()}
           tasks={tasks}
           selectedId={selectedId}
           onSelect={selectTask}

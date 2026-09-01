@@ -63,14 +63,21 @@ export class AgentGateway {
     return this.store.listProjects();
   }
 
-  createProject(name: string): Project {
-    const project = this.store.createProject(name);
+  createProject(name: string, workspaceRoot?: string): Project {
+    const project = this.store.createProject(name, workspaceRoot);
     this.publish({ type: "project_created", project });
     return project;
   }
 
   renameProject(projectId: string, name: string): Project | undefined {
-    const project = this.store.renameProject(projectId, name);
+    return this.updateProject(projectId, { name });
+  }
+
+  updateProject(
+    projectId: string,
+    input: { name?: string; workspaceRoot?: string | null },
+  ): Project | undefined {
+    const project = this.store.updateProject(projectId, input);
     if (project) {
       this.publish({ type: "project_updated", project });
     }
@@ -92,17 +99,20 @@ export class AgentGateway {
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
-    if (!this.store.getProject(projectId)) {
+    const project = this.store.getProject(projectId);
+    if (!project) {
       throw new Error(`project ${projectId} not found`);
     }
 
     const taskId = newId("task");
-    const root =
+    const globalRoot =
       this.config.agentWorkspaceRoot ||
       this.config.agentWorkspace ||
       DEFAULT_AGENT_WORKSPACE_ROOT;
+    const projectRoot = project.workspaceRoot?.trim();
     const workspace =
-      input.workspace?.trim() || path.join(root, taskId);
+      input.workspace?.trim() ||
+      path.join(projectRoot || globalRoot, taskId);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

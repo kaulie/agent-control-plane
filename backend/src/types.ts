@@ -24,6 +24,8 @@ export interface Task {
   provider: string;
   model?: string;
   createdBy?: string;
+  /** Bound SDK agent for this task (1 task = 1 agent). Set on first message. */
+  agentId?: string;
 }
 
 export type RunStatus = "running" | "finished" | "error" | "cancelled";

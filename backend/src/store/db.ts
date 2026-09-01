@@ -47,6 +47,7 @@ interface TaskRow {
   provider: string;
   model: string | null;
   created_by: string | null;
+  agent_id: string | null;
 }
 
 interface RunRow {
@@ -159,10 +160,33 @@ export class Store {
     if (!taskCols.some((c) => c.name === "created_by")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN created_by TEXT`);
     }
+    if (!taskCols.some((c) => c.name === "agent_id")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`);
+    }
 
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
     );
+
+    // Backfill: bind each task to its most recent non-empty run agent_id.
+    this.db.exec(`
+      UPDATE tasks
+      SET agent_id = (
+        SELECT r.agent_id FROM runs r
+        WHERE r.task_id = tasks.task_id
+          AND r.agent_id IS NOT NULL
+          AND r.agent_id != ''
+        ORDER BY r.created_at DESC
+        LIMIT 1
+      )
+      WHERE (agent_id IS NULL OR agent_id = '')
+        AND EXISTS (
+          SELECT 1 FROM runs r
+          WHERE r.task_id = tasks.task_id
+            AND r.agent_id IS NOT NULL
+            AND r.agent_id != ''
+        )
+    `);
 
     const now = new Date().toISOString();
     const defaultRow = this.db
@@ -305,8 +329,8 @@ export class Store {
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -318,6 +342,7 @@ export class Store {
         task.provider,
         task.model ?? null,
         task.createdBy ?? null,
+        null,
       );
     return task;
   }
@@ -350,6 +375,13 @@ export class Store {
       .run(status, taskId);
   }
 
+  setTaskAgentId(taskId: string, agentId: string): void {
+    if (!agentId) return;
+    this.db
+      .prepare(`UPDATE tasks SET agent_id = ? WHERE task_id = ?`)
+      .run(agentId, taskId);
+  }
+
   private toTask(r: TaskRow): Task {
     return {
       taskId: r.task_id,
@@ -361,6 +393,7 @@ export class Store {
       provider: r.provider,
       model: r.model ?? undefined,
       createdBy: r.created_by ?? undefined,
+      agentId: r.agent_id || undefined,
     };
   }
 

@@ -90,6 +90,7 @@ const shutdown = (): void => {
   } catch {
     /* ignore */
   }
+  provider.dispose();
   store.close();
   app.close().then(() => process.exit(0));
 };

@@ -14,6 +14,7 @@ export interface Task {
   workspace: string;
   provider: string;
   model?: string;
+  agentId?: string;
 }
 
 export interface TokenUsage {

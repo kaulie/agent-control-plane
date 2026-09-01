@@ -21,6 +21,8 @@ export class CursorProvider implements AgentProvider {
   readonly name = "cursor";
   private modelsCache: ModelInfo[] | undefined;
   private active = new Map<string, ActiveHandle>();
+  /** Long-lived SDK agents keyed by taskId (1 task = 1 agent). */
+  private agentsByTask = new Map<string, SDKAgent>();
 
   constructor(private config: CursorProviderConfig) {}
 
@@ -64,28 +66,74 @@ export class CursorProvider implements AgentProvider {
     try {
       if (handle.run) {
         await handle.run.cancel();
-      } else if (handle.agent) {
-        handle.agent.close();
       }
+      // Do not close the task-scoped agent — only cancel the in-flight run.
     } catch (err) {
       console.warn("[cursor] cancel failed:", err instanceof Error ? err.message : err);
     }
     return true;
   }
 
-  async run(input: RunInput): Promise<RunResultData> {
-    const modelId = input.model || (await this.resolveModel());
+  dispose(): void {
+    for (const agent of this.agentsByTask.values()) {
+      try {
+        agent.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.agentsByTask.clear();
+  }
 
+  private buildOptions(input: RunInput, modelId: string | undefined): AgentOptions {
     const options: AgentOptions = {
       local: { cwd: input.cwd },
     };
     if (modelId) options.model = { id: modelId };
     if (this.config.apiKey) options.apiKey = this.config.apiKey;
+    return options;
+  }
+
+  private async obtainAgent(input: RunInput, options: AgentOptions): Promise<SDKAgent> {
+    const cached = this.agentsByTask.get(input.taskId);
+    if (cached && (!input.agentId || cached.agentId === input.agentId)) {
+      return cached;
+    }
+
+    let agent: SDKAgent | undefined;
+    if (input.agentId) {
+      try {
+        agent = await Agent.resume(input.agentId, options);
+      } catch (err) {
+        console.warn(
+          "[cursor] resume failed, creating new agent:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    if (!agent) {
+      agent = await Agent.create(options);
+    }
+
+    if (cached && cached.agentId !== agent.agentId) {
+      try {
+        cached.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.agentsByTask.set(input.taskId, agent);
+    return agent;
+  }
+
+  async run(input: RunInput): Promise<RunResultData> {
+    const modelId = input.model || (await this.resolveModel());
+    const options = this.buildOptions(input, modelId);
 
     const handle: ActiveHandle = { cancelled: false };
     this.active.set(input.runId, handle);
 
-    const agent = await Agent.create(options);
+    const agent = await this.obtainAgent(input, options);
     handle.agent = agent;
 
     const startedAt = Date.now();
@@ -121,12 +169,13 @@ export class CursorProvider implements AgentProvider {
       const durationMs = Date.now() - startedAt;
       await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
       this.active.delete(input.runId);
-      try {
-        agent.close();
-      } catch {
-        /* ignore */
-      }
-      return { status: "cancelled", durationMs, modelCalls, toolCalls };
+      return {
+        status: "cancelled",
+        durationMs,
+        modelCalls,
+        toolCalls,
+        agentId: agent.agentId,
+      };
     }
 
     try {
@@ -181,7 +230,14 @@ export class CursorProvider implements AgentProvider {
           modelCalls,
           toolCalls,
         });
-        return { status: "cancelled", durationMs, modelCalls, toolCalls, usage };
+        return {
+          status: "cancelled",
+          durationMs,
+          modelCalls,
+          toolCalls,
+          usage,
+          agentId: agent.agentId,
+        };
       }
 
       let sdkCost: SdkCostLike | undefined;
@@ -218,23 +274,33 @@ export class CursorProvider implements AgentProvider {
         cost,
         modelCalls,
         toolCalls,
+        agentId: agent.agentId,
       };
     } catch (err) {
       const durationMs = Date.now() - startedAt;
       if (handle.cancelled) {
         await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
-        return { status: "cancelled", durationMs, modelCalls, toolCalls };
+        return {
+          status: "cancelled",
+          durationMs,
+          modelCalls,
+          toolCalls,
+          agentId: agent.agentId,
+        };
       }
       const message = err instanceof Error ? err.message : String(err);
       await emit("run_error", { error: message, durationMs, modelCalls, toolCalls });
-      return { status: "error", error: message, durationMs, modelCalls, toolCalls };
+      return {
+        status: "error",
+        error: message,
+        durationMs,
+        modelCalls,
+        toolCalls,
+        agentId: agent.agentId,
+      };
     } finally {
       this.active.delete(input.runId);
-      try {
-        agent.close();
-      } catch {
-        /* ignore */
-      }
+      // Keep the task-scoped agent alive for follow-up messages.
     }
   }
 }

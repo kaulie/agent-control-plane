@@ -160,10 +160,11 @@ export class AgentGateway {
     }
 
     const runId = newId("run");
+    let agentId = task.agentId ?? "";
     this.store.createRun({
       runId,
       taskId,
-      agentId: "",
+      agentId,
       provider: this.provider.name,
       model: task.model,
     });
@@ -173,6 +174,16 @@ export class AgentGateway {
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
       this.publish({ type: "agent_event", event });
+    };
+
+    const bindAgentId = (id: string): void => {
+      if (!id || id === agentId) return;
+      agentId = id;
+      this.store.setRunAgentId(runId, agentId);
+      if (!task.agentId || task.agentId !== agentId) {
+        this.store.setTaskAgentId(taskId, agentId);
+        task.agentId = agentId;
+      }
     };
 
     // Authoritative user message (also ensures the timeline starts immediately).
@@ -191,13 +202,11 @@ export class AgentGateway {
       eventId: newId("evt"),
       taskId,
       runId,
-      agentId: "",
+      agentId,
       timestamp: new Date().toISOString(),
       eventType: "user_message",
       payload,
     });
-
-    let agentId = "";
 
     void (async () => {
       try {
@@ -213,13 +222,12 @@ export class AgentGateway {
           cwd: task.workspace,
           model: task.model,
           onEvent: (event) => {
-            if (event.agentId && event.agentId !== agentId) {
-              agentId = event.agentId;
-              this.store.setRunAgentId(runId, agentId);
-            }
+            if (event.agentId) bindAgentId(event.agentId);
             persistAndPublish(event);
           },
         });
+
+        if (result.agentId) bindAgentId(result.agentId);
 
         this.store.updateRun(runId, {
           status: result.status,

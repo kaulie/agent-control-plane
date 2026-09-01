@@ -14,6 +14,7 @@ export interface RunPrompt {
 export interface RunInput {
   taskId: string;
   runId: string;
+  /** Empty = create a new agent; non-empty = resume/reuse that agent. */
   agentId: string;
   prompt: RunPrompt;
   cwd: string;
@@ -30,6 +31,8 @@ export interface RunResultData {
   cost?: CostInfo;
   modelCalls: number;
   toolCalls: number;
+  /** SDK agent used for this run (for task binding). */
+  agentId?: string;
 }
 
 /**
@@ -45,4 +48,6 @@ export interface AgentProvider {
   run(input: RunInput): Promise<RunResultData>;
   /** Request cancellation of an in-flight run. Returns false if unknown. */
   cancel(runId: string): Promise<boolean>;
+  /** Optional: release long-lived resources (e.g. cached agents) on shutdown. */
+  dispose?(): void;
 }

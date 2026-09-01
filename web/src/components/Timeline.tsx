@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
 import { formatTime, truncate } from "../format";
 
@@ -16,6 +16,7 @@ const ICONS: Record<string, string> = {
   search: "🔍",
   usage: "📊",
   run_completed: "✅",
+  run_cancelled: "⏹",
   run_error: "❌",
 };
 
@@ -33,6 +34,7 @@ const LABELS: Record<string, string> = {
   search: "Search",
   usage: "Usage",
   run_completed: "Completed",
+  run_cancelled: "Stopped",
   run_error: "Error",
 };
 
@@ -127,6 +129,10 @@ function buildRows(events: AgentEvent[]): Row[] {
         body = String(p.result ?? "");
         detail = `duration ${p.durationMs ?? "?"}ms`;
         break;
+      case "run_cancelled":
+        body = "Stopped by user";
+        detail = p.durationMs != null ? `duration ${p.durationMs}ms` : "";
+        break;
       case "run_error":
         body = String(p.error ?? "error");
         break;
@@ -157,6 +163,8 @@ function buildRows(events: AgentEvent[]): Row[] {
   return rows;
 }
 
+const NEAR_BOTTOM_PX = 80;
+
 export default function Timeline({
   events,
   running,
@@ -165,27 +173,81 @@ export default function Timeline({
   running: boolean;
 }) {
   const rows = useMemo(() => buildRows(events), [events]);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [showJump, setShowJump] = useState(false);
+  const stickToBottomRef = useRef(true);
+
+  const updateJumpVisibility = (): void => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distance <= NEAR_BOTTOM_PX;
+    stickToBottomRef.current = nearBottom;
+    setShowJump(!nearBottom && el.scrollHeight > el.clientHeight + 4);
+  };
+
+  const scrollToBottom = (smooth = true): void => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: smooth ? "smooth" : "auto",
+    });
+    stickToBottomRef.current = true;
+    setShowJump(false);
+  };
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = (): void => updateJumpVisibility();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    updateJumpVisibility();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Keep following the latest events while the user is already near the bottom.
+  useEffect(() => {
+    if (stickToBottomRef.current) {
+      scrollToBottom(false);
+    } else {
+      updateJumpVisibility();
+    }
+  }, [rows, running]);
 
   return (
-    <div className="timeline">
-      {rows.map((r) => (
-        <div key={r.key} className={`event event-${r.type}`}>
-          <div className="event-head">
-            <span className="event-icon">{r.icon}</span>
-            <span className="event-label">{r.label}</span>
-            <span className="event-time">{r.time}</span>
+    <div className="timeline-wrap">
+      <div className="timeline" ref={scrollerRef}>
+        {rows.map((r) => (
+          <div key={r.key} className={`event event-${r.type}`}>
+            <div className="event-head">
+              <span className="event-icon">{r.icon}</span>
+              <span className="event-label">{r.label}</span>
+              <span className="event-time">{r.time}</span>
+            </div>
+            {r.body && <div className="event-body">{r.body}</div>}
+            {r.detail && <pre className="event-detail">{r.detail}</pre>}
           </div>
-          {r.body && <div className="event-body">{r.body}</div>}
-          {r.detail && <pre className="event-detail">{r.detail}</pre>}
-        </div>
-      ))}
-      {running && (
-        <div className="event event-running">
-          <span className="spinner" /> Agent is working…
-        </div>
-      )}
-      {!running && rows.length === 0 && (
-        <div className="timeline-empty">No activity yet — send a message below.</div>
+        ))}
+        {running && (
+          <div className="event event-running">
+            <span className="spinner" /> Agent is working…
+          </div>
+        )}
+        {!running && rows.length === 0 && (
+          <div className="timeline-empty">No activity yet — send a message below.</div>
+        )}
+      </div>
+      {showJump && (
+        <button
+          type="button"
+          className="scroll-bottom-btn"
+          aria-label="Scroll to bottom"
+          title="Scroll to bottom"
+          onClick={() => scrollToBottom(true)}
+        >
+          ↓
+        </button>
       )}
     </div>
   );

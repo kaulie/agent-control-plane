@@ -129,8 +129,32 @@ export async function registerRoutes(
       if (!detail) {
         return reply.code(404).send({ error: "task not found" });
       }
-      const { runId } = await gateway.sendMessage(req.params.taskId, message);
-      return { runId };
+      try {
+        const { runId } = await gateway.sendMessage(req.params.taskId, message);
+        return { runId };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const code = msg.includes("already in progress") ? 409 : 400;
+        return reply.code(code).send({ error: msg });
+      }
+    },
+  );
+
+  app.post<{ Params: { taskId: string } }>(
+    "/api/tasks/:taskId/stop",
+    async (req, reply) => {
+      const detail = gateway.getTaskDetail(req.params.taskId);
+      if (!detail) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      try {
+        const { runId } = await gateway.stopTask(req.params.taskId);
+        return { runId, stopped: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const code = msg.includes("No active run") ? 409 : 400;
+        return reply.code(code).send({ error: msg });
+      }
     },
   );
 }

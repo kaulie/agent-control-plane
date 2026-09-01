@@ -65,6 +65,11 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message }),
     }).then((r) => j<{ runId: string }>(r)),
+
+  stopTask: (id: string) =>
+    fetch(`${BASE}/tasks/${id}/stop`, {
+      method: "POST",
+    }).then((r) => j<{ runId: string; stopped: boolean }>(r)),
 };
 
 export type { TokenUsage };

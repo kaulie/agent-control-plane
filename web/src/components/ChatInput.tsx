@@ -2,15 +2,24 @@ import { useState } from "react";
 
 interface Props {
   onSend: (message: string) => void;
+  onStop?: () => void;
   disabled: boolean;
+  running: boolean;
+  stopping?: boolean;
 }
 
-export default function ChatInput({ onSend, disabled }: Props) {
+export default function ChatInput({
+  onSend,
+  onStop,
+  disabled,
+  running,
+  stopping = false,
+}: Props) {
   const [text, setText] = useState("");
 
   const submit = (): void => {
     const m = text.trim();
-    if (!m || disabled) return;
+    if (!m || disabled || running) return;
     onSend(m);
     setText("");
   };
@@ -20,9 +29,11 @@ export default function ChatInput({ onSend, disabled }: Props) {
       <textarea
         value={text}
         placeholder={
-          disabled ? "Agent is working…" : "Send an instruction to the agent…"
+          running
+            ? "Agent is working… click Stop to cancel"
+            : "Send an instruction to the agent…"
         }
-        disabled={disabled}
+        disabled={running}
         rows={2}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -32,9 +43,19 @@ export default function ChatInput({ onSend, disabled }: Props) {
           }
         }}
       />
-      <button onClick={submit} disabled={disabled || !text.trim()}>
-        Send
-      </button>
+      {running ? (
+        <button
+          className="btn-stop"
+          onClick={() => onStop?.()}
+          disabled={stopping || !onStop}
+        >
+          {stopping ? "Stopping…" : "Stop"}
+        </button>
+      ) : (
+        <button onClick={submit} disabled={disabled || !text.trim()}>
+          Send
+        </button>
+      )}
     </div>
   );
 }

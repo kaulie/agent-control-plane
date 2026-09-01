@@ -1,5 +1,5 @@
 import { Agent, Cursor } from "@cursor/sdk";
-import type { AgentOptions, SDKMessage } from "@cursor/sdk";
+import type { AgentOptions, Run, SDKAgent, SDKMessage } from "@cursor/sdk";
 import type { CostInfo, EventType, TokenUsage } from "../types.js";
 import { mapSdkMessage } from "../events/mapper.js";
 import { buildCost, type SdkCostLike } from "../usage/cost.js";
@@ -11,9 +11,16 @@ export interface CursorProviderConfig {
   model?: string;
 }
 
+interface ActiveHandle {
+  cancelled: boolean;
+  agent?: SDKAgent;
+  run?: Run;
+}
+
 export class CursorProvider implements AgentProvider {
   readonly name = "cursor";
   private modelsCache: ModelInfo[] | undefined;
+  private active = new Map<string, ActiveHandle>();
 
   constructor(private config: CursorProviderConfig) {}
 
@@ -50,6 +57,22 @@ export class CursorProvider implements AgentProvider {
     return models[0]?.id;
   }
 
+  async cancel(runId: string): Promise<boolean> {
+    const handle = this.active.get(runId);
+    if (!handle) return false;
+    handle.cancelled = true;
+    try {
+      if (handle.run) {
+        await handle.run.cancel();
+      } else if (handle.agent) {
+        handle.agent.close();
+      }
+    } catch (err) {
+      console.warn("[cursor] cancel failed:", err instanceof Error ? err.message : err);
+    }
+    return true;
+  }
+
   async run(input: RunInput): Promise<RunResultData> {
     const modelId = input.model || (await this.resolveModel());
 
@@ -59,7 +82,11 @@ export class CursorProvider implements AgentProvider {
     if (modelId) options.model = { id: modelId };
     if (this.config.apiKey) options.apiKey = this.config.apiKey;
 
+    const handle: ActiveHandle = { cancelled: false };
+    this.active.set(input.runId, handle);
+
     const agent = await Agent.create(options);
+    handle.agent = agent;
 
     const startedAt = Date.now();
     let modelCalls = 0;
@@ -90,10 +117,33 @@ export class CursorProvider implements AgentProvider {
       sdkAgentId: agent.agentId,
     });
 
+    if (handle.cancelled) {
+      const durationMs = Date.now() - startedAt;
+      await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
+      this.active.delete(input.runId);
+      try {
+        agent.close();
+      } catch {
+        /* ignore */
+      }
+      return { status: "cancelled", durationMs, modelCalls, toolCalls };
+    }
+
     try {
       const run = await agent.send(input.prompt);
+      handle.run = run;
+
+      if (handle.cancelled) {
+        try {
+          await run.cancel();
+        } catch {
+          /* ignore */
+        }
+      }
+
       const seenStarted = new Set<string>();
       for await (const msg of run.stream()) {
+        if (handle.cancelled) break;
         if (msg.type === "usage") modelCalls += 1;
         if (msg.type === "tool_call" && msg.status === "running") {
           const callId = msg.call_id;
@@ -111,6 +161,15 @@ export class CursorProvider implements AgentProvider {
       const result = await run.wait();
       const durationMs = Date.now() - startedAt;
       const usage = result.usage;
+
+      if (handle.cancelled || result.status === "cancelled") {
+        await emit("run_cancelled", {
+          durationMs,
+          modelCalls,
+          toolCalls,
+        });
+        return { status: "cancelled", durationMs, modelCalls, toolCalls, usage };
+      }
 
       let sdkCost: SdkCostLike | undefined;
       try {
@@ -149,10 +208,15 @@ export class CursorProvider implements AgentProvider {
       };
     } catch (err) {
       const durationMs = Date.now() - startedAt;
+      if (handle.cancelled) {
+        await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
+        return { status: "cancelled", durationMs, modelCalls, toolCalls };
+      }
       const message = err instanceof Error ? err.message : String(err);
       await emit("run_error", { error: message, durationMs, modelCalls, toolCalls });
       return { status: "error", error: message, durationMs, modelCalls, toolCalls };
     } finally {
+      this.active.delete(input.runId);
       try {
         agent.close();
       } catch {

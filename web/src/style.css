@@ -259,6 +259,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.timeline-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 .timeline {
   flex: 1;
   overflow-y: auto;
@@ -266,6 +274,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.scroll-bottom-btn {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+.scroll-bottom-btn:hover {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
 }
 
 .timeline-empty {
@@ -351,6 +382,10 @@ body {
   border-left-color: var(--green);
 }
 
+.event-run_cancelled {
+  border-left-color: var(--amber);
+}
+
 .event-run_error {
   border-left-color: var(--red);
 }
@@ -410,6 +445,10 @@ body {
   padding: 0 20px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.chat-input button.btn-stop {
+  background: var(--red);
 }
 
 .chat-input button:disabled {

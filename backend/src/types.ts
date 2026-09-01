@@ -52,6 +52,7 @@ export type EventType =
   | "search"
   | "usage"
   | "run_completed"
+  | "run_cancelled"
   | "run_error";
 
 export interface TokenUsage {

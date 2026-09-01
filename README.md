@@ -110,6 +110,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message }` → starts an Agent Run |
+| POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
 | WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
 
 Each Task belongs to a Project (`projectId`). On first boot a default project

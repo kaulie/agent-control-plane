@@ -20,6 +20,9 @@ export interface TaskDetail {
  * It depends only on the AgentProvider interface (never a concrete SDK).
  */
 export class AgentGateway {
+  /** In-flight runId keyed by taskId (at most one active run per task). */
+  private activeRuns = new Map<string, string>();
+
   constructor(
     private store: Store,
     private provider: AgentProvider,
@@ -97,6 +100,9 @@ export class AgentGateway {
   async sendMessage(taskId: string, message: string): Promise<{ runId: string }> {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
+    if (this.activeRuns.has(taskId)) {
+      throw new Error("A run is already in progress for this task");
+    }
 
     const runId = newId("run");
     this.store.createRun({
@@ -106,6 +112,8 @@ export class AgentGateway {
       provider: this.provider.name,
       model: task.model,
     });
+    this.activeRuns.set(taskId, runId);
+    this.store.updateTaskStatus(taskId, "active");
 
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
@@ -156,7 +164,11 @@ export class AgentGateway {
         });
         this.store.updateTaskStatus(
           taskId,
-          result.status === "error" ? "error" : "completed",
+          result.status === "error"
+            ? "error"
+            : result.status === "cancelled"
+              ? "active"
+              : "completed",
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -167,6 +179,9 @@ export class AgentGateway {
         });
         this.store.updateTaskStatus(taskId, "error");
       } finally {
+        if (this.activeRuns.get(taskId) === runId) {
+          this.activeRuns.delete(taskId);
+        }
         this.publish({
           type: "task_updated",
           task: this.store.getTask(taskId),
@@ -176,6 +191,22 @@ export class AgentGateway {
       }
     })();
 
+    return { runId };
+  }
+
+  async stopTask(taskId: string): Promise<{ runId: string }> {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
+    const runId = this.activeRuns.get(taskId);
+    if (!runId) {
+      throw new Error("No active run to stop");
+    }
+
+    const cancelled = await this.provider.cancel(runId);
+    if (!cancelled) {
+      throw new Error("Failed to cancel the active run");
+    }
     return { runId };
   }
 }

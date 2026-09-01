@@ -37,4 +37,6 @@ export interface AgentProvider {
   listModels(): Promise<ModelInfo[]>;
   resolveModel(): Promise<string | undefined>;
   run(input: RunInput): Promise<RunResultData>;
+  /** Request cancellation of an in-flight run. Returns false if unknown. */
+  cancel(runId: string): Promise<boolean>;
 }

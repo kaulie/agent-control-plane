@@ -38,6 +38,7 @@ export default function App() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [wsStatus, setWsStatus] = useState("connecting");
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedRef = useRef(selectedId);
@@ -79,6 +80,7 @@ export default function App() {
     setDetail(null);
     setEvents([]);
     setRunning(false);
+    setStopping(false);
   }, []);
 
   const selectProject = useCallback(
@@ -130,9 +132,11 @@ export default function App() {
             );
             if (
               ev.eventType === "run_completed" ||
-              ev.eventType === "run_error"
+              ev.eventType === "run_error" ||
+              ev.eventType === "run_cancelled"
             ) {
               setRunning(false);
+              setStopping(false);
               void refreshDetail(ev.taskId);
             }
           }
@@ -172,7 +176,9 @@ export default function App() {
           return fresh.length ? [...prev, ...fresh] : prev;
         });
         setDetail(detailRes);
-        setRunning(detailRes.runs.some((r) => r.status === "running"));
+        const stillRunning = detailRes.runs.some((r) => r.status === "running");
+        setRunning(stillRunning);
+        if (!stillRunning) setStopping(false);
       } catch {
         /* transient — ignore */
       }
@@ -184,6 +190,7 @@ export default function App() {
     setSelectedId(id);
     setEvents([]);
     setDetail(null);
+    setStopping(false);
     try {
       const d = await api.getTask(id);
       setDetail(d);
@@ -244,6 +251,7 @@ export default function App() {
       if (!selectedId || !message.trim()) return;
       setError(null);
       setRunning(true);
+      setStopping(false);
       try {
         await api.sendMessage(selectedId, message);
       } catch (e) {
@@ -253,6 +261,18 @@ export default function App() {
     },
     [selectedId],
   );
+
+  const stopAgent = useCallback(async () => {
+    if (!selectedId || !running || stopping) return;
+    setStopping(true);
+    setError(null);
+    try {
+      await api.stopTask(selectedId);
+    } catch (e) {
+      setError(String(e));
+      setStopping(false);
+    }
+  }, [selectedId, running, stopping]);
 
   return (
     <div className="app">
@@ -283,7 +303,13 @@ export default function App() {
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
               <Timeline events={events} running={running} />
-              <ChatInput onSend={sendMessage} disabled={running} />
+              <ChatInput
+                onSend={sendMessage}
+                onStop={() => void stopAgent()}
+                disabled={running}
+                running={running}
+                stopping={stopping}
+              />
             </>
           ) : (
             <div className="empty">

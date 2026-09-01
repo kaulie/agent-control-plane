@@ -712,3 +712,13 @@ body {
   font-size: 13px;
   text-align: center;
 }
+
+.interrupt-banner {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--blue, #5b9fd4) 18%, var(--bg-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--blue, #5b9fd4) 40%, var(--border));
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}

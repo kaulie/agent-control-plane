@@ -43,6 +43,7 @@ export default function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backendDown, setBackendDown] = useState(false);
+  const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -50,6 +51,8 @@ export default function App() {
   selectedProjectRef.current = selectedProjectId;
   const lastSeqRef = useRef(0);
   const pollFailRef = useRef(0);
+  const wasUnreachableRef = useRef(false);
+  const [gracePolls, setGracePolls] = useState(0);
 
   const refreshProjects = useCallback(async (): Promise<Project[]> => {
     const list = await api.listProjects();
@@ -88,6 +91,9 @@ export default function App() {
     setStopping(false);
     setHasMore(false);
     setLoadingMore(false);
+    setInterruptNotice(null);
+    setGracePolls(0);
+    wasUnreachableRef.current = false;
     lastSeqRef.current = 0;
   }, []);
 
@@ -146,6 +152,17 @@ export default function App() {
               setRunning(false);
               setStopping(false);
               void refreshDetail(ev.taskId);
+              if (
+                ev.eventType === "run_cancelled" &&
+                ev.payload?.reason === "server_restart"
+              ) {
+                setInterruptNotice(
+                  String(
+                    ev.payload.message ??
+                      "任务因服务重启中断。状态已同步为结束，可继续发消息接着做。",
+                  ),
+                );
+              }
             }
           }
         } else if (msg.type === "task_updated") {
@@ -168,36 +185,83 @@ export default function App() {
     return close;
   }, [refreshDetail, refreshTasks, refreshProjects]);
 
-  // Poll while a run is active, or while the backend/WS looks unreachable
-  // (e.g. mid-deploy restart). Failures must not silently freeze the UI.
+  // Poll while a run is active, while backend/WS looks unreachable, and for a
+  // few grace ticks after recovery so interrupt/cancel events are not missed.
   useEffect(() => {
     if (!selectedId) return;
     const wsUnstable = wsStatus !== "connected";
-    const shouldPoll = running || backendDown || wsUnstable;
+    const unreachable = backendDown || wsUnstable;
+    if (unreachable) wasUnreachableRef.current = true;
+
+    const shouldPoll = running || unreachable || gracePolls > 0;
     if (!shouldPoll) return;
 
-    const intervalMs = backendDown || wsUnstable ? 2000 : 5000;
+    const intervalMs = unreachable ? 2000 : 3000;
+
+    const noteInterrupt = (list: AgentEvent[]): void => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const ev = list[i];
+        if (
+          ev.eventType === "run_cancelled" &&
+          ev.payload?.reason === "server_restart"
+        ) {
+          setInterruptNotice(
+            String(
+              ev.payload.message ??
+                "任务因服务重启中断。状态已同步为结束，可继续发消息接着做。",
+            ),
+          );
+          return;
+        }
+      }
+    };
 
     const tick = async (): Promise<void> => {
       try {
+        const recovering = wasUnreachableRef.current;
         const [evRes, detailRes] = await Promise.all([
           api.getEvents(selectedId, { after: lastSeqRef.current }),
           api.getTask(selectedId),
         ]);
+
         pollFailRef.current = 0;
         setBackendDown(false);
-        setEvents((prev) => {
-          const ids = new Set(prev.map((p) => p.eventId));
-          const fresh = evRes.events.filter((e) => !ids.has(e.eventId));
-          return fresh.length ? [...prev, ...fresh] : prev;
-        });
-        lastSeqRef.current = evRes.nextSeq;
+
+        if (recovering) {
+          const latest = await api.getEvents(selectedId, { limit: 100 });
+          lastSeqRef.current = latest.nextSeq;
+          setHasMore(latest.hasMore);
+          setEvents((prev) => {
+            const byId = new Map(prev.map((e) => [e.eventId, e]));
+            for (const e of latest.events) byId.set(e.eventId, e);
+            return [...byId.values()].sort((a, b) => {
+              const sa = a.seq ?? 0;
+              const sb = b.seq ?? 0;
+              if (sa !== sb) return sa - sb;
+              return a.timestamp.localeCompare(b.timestamp);
+            });
+          });
+          noteInterrupt(latest.events);
+          wasUnreachableRef.current = false;
+          setGracePolls(3);
+        } else {
+          setEvents((prev) => {
+            const ids = new Set(prev.map((p) => p.eventId));
+            const fresh = evRes.events.filter((e) => !ids.has(e.eventId));
+            if (fresh.length) noteInterrupt(fresh);
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
+          lastSeqRef.current = evRes.nextSeq;
+          setGracePolls((n) => (n > 0 ? n - 1 : 0));
+        }
+
         setDetail(detailRes);
         const stillRunning = detailRes.runs.some((r) => r.status === "running");
         setRunning(stillRunning);
         if (!stillRunning) setStopping(false);
       } catch {
         pollFailRef.current += 1;
+        wasUnreachableRef.current = true;
         if (pollFailRef.current >= 1) setBackendDown(true);
       }
     };
@@ -205,13 +269,16 @@ export default function App() {
     void tick();
     const id = window.setInterval(() => void tick(), intervalMs);
     return () => window.clearInterval(id);
-  }, [selectedId, running, backendDown, wsStatus]);
+  }, [selectedId, running, backendDown, wsStatus, gracePolls]);
 
   const selectTask = useCallback(async (id: string) => {
     setSelectedId(id);
     setEvents([]);
     setDetail(null);
     setStopping(false);
+    setInterruptNotice(null);
+    setGracePolls(0);
+    wasUnreachableRef.current = false;
     try {
       const d = await api.getTask(id);
       setDetail(d);
@@ -224,6 +291,28 @@ export default function App() {
       setEvents(r.events);
       lastSeqRef.current = r.nextSeq;
       setHasMore(r.hasMore);
+      for (let i = r.events.length - 1; i >= 0; i--) {
+        const ev = r.events[i];
+        if (
+          ev.eventType === "run_cancelled" &&
+          ev.payload?.reason === "server_restart"
+        ) {
+          setInterruptNotice(
+            String(
+              ev.payload.message ??
+                "任务因服务重启中断。状态已同步为结束，可继续发消息接着做。",
+            ),
+          );
+          break;
+        }
+        if (
+          ev.eventType === "run_completed" ||
+          ev.eventType === "run_error" ||
+          ev.eventType === "user_message"
+        ) {
+          break;
+        }
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -278,6 +367,7 @@ export default function App() {
       if (!selectedId) return;
       if (!payload.text.trim() && payload.images.length === 0) return;
       setError(null);
+      setInterruptNotice(null);
       setRunning(true);
       setStopping(false);
       try {
@@ -347,6 +437,11 @@ export default function App() {
       {(backendDown || wsStatus === "reconnecting") && (
         <div className="reconnect-banner" role="status">
           后端暂时不可达（可能正在部署重启）… 前端仍在自动重试轮询，不是卡死
+        </div>
+      )}
+      {interruptNotice && !backendDown && wsStatus === "connected" && (
+        <div className="interrupt-banner" role="status">
+          {interruptNotice}
         </div>
       )}
       <div className="body">

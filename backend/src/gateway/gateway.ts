@@ -6,6 +6,7 @@ import {
   type PromptImage,
   type StoredImageRef,
 } from "../attachments.js";
+import { buildTaskBootstrapText } from "../task-context.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -212,6 +213,19 @@ export class AgentGateway {
 
     void (async () => {
       try {
+        // Exclude the user_message we just appended so history is prior turns only.
+        const { events: priorEvents } = this.store.listEvents(taskId, {
+          limit: 200,
+        });
+        const historyEvents = priorEvents.filter((e) => e.runId !== runId);
+        const project = this.store.getProject(task.projectId);
+        const bootstrapText = buildTaskBootstrapText({
+          task,
+          project,
+          events: historyEvents,
+          runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
+        });
+
         const result = await this.provider.run({
           taskId,
           runId,
@@ -224,6 +238,8 @@ export class AgentGateway {
           cwd: task.workspace,
           model: task.model,
           mode,
+          bootstrapText,
+          agentName: task.title,
           onEvent: (event) => {
             if (event.agentId) bindAgentId(event.agentId);
             persistAndPublish(event);

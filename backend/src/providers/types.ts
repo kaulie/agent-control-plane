@@ -21,6 +21,14 @@ export interface RunInput {
   model?: string;
   /** Conversation mode for this run (Cursor SDK: agent | plan). */
   mode?: "agent" | "plan";
+  /**
+   * Task briefing prepended only when this run actually Agent.create's
+   * (first bind, resume-fail recreate, or busy-fallback fresh agent).
+   * Not shown in the Web Cursor timeline.
+   */
+  bootstrapText?: string;
+  /** Display name for Agent.create / resume (typically task.title). */
+  agentName?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;
 }
 

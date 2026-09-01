@@ -1,9 +1,10 @@
 import { Agent, AgentBusyError, Cursor } from "@cursor/sdk";
-import type { AgentOptions, Run, SDKAgent, SDKMessage } from "@cursor/sdk";
+import type { AgentOptions, Run, SDKAgent, SDKMessage, SDKUserMessage } from "@cursor/sdk";
 import type { CostInfo, EventType, TokenUsage } from "../types.js";
 import { mapSdkMessage } from "../events/mapper.js";
 import { buildCost, type SdkCostLike } from "../usage/cost.js";
 import { newId } from "../store/db.js";
+import { composePromptWithBootstrap } from "../task-context.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "./types.js";
 
 export interface CursorProviderConfig {
@@ -162,16 +163,23 @@ export class CursorProvider implements AgentProvider {
     if (input.mode === "plan" || input.mode === "agent") {
       options.mode = input.mode;
     }
+    if (input.agentName?.trim()) {
+      options.name = input.agentName.trim();
+    }
     return options;
   }
 
-  private async obtainAgent(input: RunInput, options: AgentOptions): Promise<SDKAgent> {
+  private async obtainAgent(
+    input: RunInput,
+    options: AgentOptions,
+  ): Promise<{ agent: SDKAgent; created: boolean }> {
     const cached = this.agentsByTask.get(input.taskId);
     if (cached && (!input.agentId || cached.agentId === input.agentId)) {
-      return cached;
+      return { agent: cached, created: false };
     }
 
     let agent: SDKAgent | undefined;
+    let created = false;
     if (input.agentId) {
       try {
         agent = await Agent.resume(input.agentId, options);
@@ -184,6 +192,7 @@ export class CursorProvider implements AgentProvider {
     }
     if (!agent) {
       agent = await Agent.create(options);
+      created = true;
     }
 
     if (cached && cached.agentId !== agent.agentId) {
@@ -194,7 +203,27 @@ export class CursorProvider implements AgentProvider {
       }
     }
     this.agentsByTask.set(input.taskId, agent);
-    return agent;
+    return { agent, created };
+  }
+
+  private buildSendPayload(
+    input: RunInput,
+    prependBootstrap: boolean,
+  ): string | SDKUserMessage {
+    const text = prependBootstrap
+      ? composePromptWithBootstrap(input.bootstrapText, input.prompt.text)
+      : input.prompt.text;
+    if (!input.prompt.images?.length) return text;
+    return {
+      text,
+      images: input.prompt.images.map((img) => ({
+        data: img.data,
+        mimeType: img.mimeType,
+        ...(img.width != null && img.height != null
+          ? { dimension: { width: img.width, height: img.height } }
+          : {}),
+      })),
+    };
   }
 
   /**
@@ -205,26 +234,16 @@ export class CursorProvider implements AgentProvider {
     agent: SDKAgent,
     input: RunInput,
     options: AgentOptions,
+    prependBootstrap: boolean,
   ): Promise<{ agent: SDKAgent; run: Run }> {
-    const images = input.prompt.images?.length
-      ? input.prompt.images.map((img) => ({
-          data: img.data,
-          mimeType: img.mimeType,
-          ...(img.width != null && img.height != null
-            ? { dimension: { width: img.width, height: img.height } }
-            : {}),
-        }))
-      : undefined;
-    const payload =
-      images?.length
-        ? { text: input.prompt.text, images }
-        : input.prompt.text;
-
-    const trySend = (a: SDKAgent) =>
-      a.send(payload, input.mode ? { mode: input.mode } : undefined);
+    const trySend = (a: SDKAgent, withBootstrap: boolean) =>
+      a.send(
+        this.buildSendPayload(input, withBootstrap),
+        input.mode ? { mode: input.mode } : undefined,
+      );
 
     try {
-      return { agent, run: await trySend(agent) };
+      return { agent, run: await trySend(agent, prependBootstrap) };
     } catch (err) {
       if (!isAgentBusy(err)) throw err;
     }
@@ -235,7 +254,7 @@ export class CursorProvider implements AgentProvider {
     await this.cancelRunningSdkRuns(agent.agentId, input.cwd);
 
     try {
-      return { agent, run: await trySend(agent) };
+      return { agent, run: await trySend(agent, prependBootstrap) };
     } catch (err) {
       if (!isAgentBusy(err)) throw err;
     }
@@ -253,7 +272,8 @@ export class CursorProvider implements AgentProvider {
     this.agentsByTask.delete(input.taskId);
     const fresh = await Agent.create(options);
     this.agentsByTask.set(input.taskId, fresh);
-    return { agent: fresh, run: await trySend(fresh) };
+    // Fresh agent has no memory — inject bootstrap again.
+    return { agent: fresh, run: await trySend(fresh, true) };
   }
 
   async run(input: RunInput): Promise<RunResultData> {
@@ -263,7 +283,8 @@ export class CursorProvider implements AgentProvider {
     const handle: ActiveHandle = { cancelled: false, cwd: input.cwd };
     this.active.set(input.runId, handle);
 
-    let agent = await this.obtainAgent(input, options);
+    const obtained = await this.obtainAgent(input, options);
+    let agent = obtained.agent;
     handle.agent = agent;
 
     const startedAt = Date.now();
@@ -294,6 +315,7 @@ export class CursorProvider implements AgentProvider {
       model: modelId,
       sdkAgentId: agent.agentId,
       mode: input.mode ?? "agent",
+      ...(obtained.created ? { agentCreated: true } : {}),
     });
 
     if (handle.cancelled) {
@@ -310,7 +332,12 @@ export class CursorProvider implements AgentProvider {
     }
 
     try {
-      const sent = await this.sendPrompt(agent, input, options);
+      const sent = await this.sendPrompt(
+        agent,
+        input,
+        options,
+        obtained.created,
+      );
       agent = sent.agent;
       handle.agent = agent;
       const run = sent.run;

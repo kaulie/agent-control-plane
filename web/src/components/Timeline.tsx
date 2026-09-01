@@ -162,14 +162,17 @@ function buildRows(events: AgentEvent[]): Row[] {
         body = ev.usage ? `${ev.usage.totalTokens} tokens` : "";
         break;
       case "run_completed":
-        body = String(p.result ?? "");
-        detail =
-          p.durationMs != null ? `耗时 ${formatDuration(Number(p.durationMs))}` : "";
+        // SDK `result` usually duplicates the last assistant message — show only timing.
+        body =
+          p.durationMs != null
+            ? `耗时 ${formatDuration(Number(p.durationMs))}`
+            : "已完成";
         break;
       case "run_cancelled":
-        body = "Stopped by user";
-        detail =
-          p.durationMs != null ? `耗时 ${formatDuration(Number(p.durationMs))}` : "";
+        body =
+          p.durationMs != null
+            ? `已停止 · 耗时 ${formatDuration(Number(p.durationMs))}`
+            : "Stopped by user";
         break;
       case "run_error":
         body = String(p.error ?? "error");

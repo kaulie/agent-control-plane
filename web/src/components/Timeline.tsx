@@ -217,6 +217,25 @@ function buildRows(events: AgentEvent[]): Row[] {
 }
 
 const NEAR_BOTTOM_PX = 80;
+const AUTO_FOLD_KEY = "web-cursor:autoFoldActivity";
+
+function loadAutoFold(): boolean {
+  try {
+    const v = localStorage.getItem(AUTO_FOLD_KEY);
+    if (v === null) return true;
+    return v !== "0" && v !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function storeAutoFold(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_FOLD_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
 
 function RunningBanner({ running }: { running: boolean }) {
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -246,6 +265,100 @@ function RunningBanner({ running }: { running: boolean }) {
   );
 }
 
+function activitySummary(r: Row): string {
+  const bits = [r.body, r.detail].filter(Boolean).join(" · ");
+  return bits ? truncate(bits.replace(/\s+/g, " "), 120) : "";
+}
+
+function EventCard({
+  row,
+  collapsed,
+  onToggle,
+}: {
+  row: Row;
+  collapsed: boolean;
+  onToggle?: () => void;
+}) {
+  const foldable = row.role === "activity";
+  const showToggle = foldable && onToggle != null;
+  const summary = activitySummary(row);
+
+  return (
+    <div
+      className={`event event-${row.type} event-${row.role}${
+        collapsed ? " event-collapsed" : ""
+      }`}
+    >
+      <div
+        className={`event-head${showToggle ? " event-head-toggle" : ""}`}
+        onClick={showToggle ? onToggle : undefined}
+        onKeyDown={
+          showToggle
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onToggle();
+                }
+              }
+            : undefined
+        }
+        role={showToggle ? "button" : undefined}
+        tabIndex={showToggle ? 0 : undefined}
+        aria-expanded={showToggle ? !collapsed : undefined}
+      >
+        {showToggle && (
+          <span className="event-chevron" aria-hidden>
+            {collapsed ? "▸" : "▾"}
+          </span>
+        )}
+        <span className="event-icon">{row.icon}</span>
+        <span className="event-label">{row.label}</span>
+        {row.mode && (
+          <span className={`event-mode event-mode-${row.mode}`}>
+            {row.mode === "plan" ? "Plan" : "Agent"}
+          </span>
+        )}
+        {collapsed && summary && (
+          <span className="event-summary" title={summary}>
+            {summary}
+          </span>
+        )}
+        <span className="event-time">{row.time}</span>
+      </div>
+      {!collapsed && (
+        <>
+          {row.images.length > 0 && (
+            <div className="event-images">
+              {row.images.map((img) => (
+                <a
+                  key={img.id}
+                  href={`/api/tasks/${row.taskId}/attachments/${img.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="event-image-link"
+                >
+                  <img
+                    src={`/api/tasks/${row.taskId}/attachments/${img.id}`}
+                    alt="User attachment"
+                    className="event-image"
+                  />
+                </a>
+              ))}
+            </div>
+          )}
+          {row.body && <div className="event-body">{row.body}</div>}
+          {row.detail && <pre className="event-detail">{row.detail}</pre>}
+          {row.type === "agent_response" && row.agentId && (
+            <div className="event-agent-id" title={row.agentId}>
+              {shortAgentId(row.agentId)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Timeline({
   events,
   running,
@@ -263,6 +376,18 @@ export default function Timeline({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const stickToBottomRef = useRef(true);
+  const [autoFold, setAutoFold] = useState(() => loadAutoFold());
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const setAutoFoldPersist = (on: boolean): void => {
+    setAutoFold(on);
+    storeAutoFold(on);
+    if (!on) setExpanded({});
+  };
+
+  const toggleExpanded = (key: string): void => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const updateJumpVisibility = (): void => {
     const el = scrollerRef.current;
@@ -300,10 +425,18 @@ export default function Timeline({
     } else {
       updateJumpVisibility();
     }
-  }, [rows, running]);
+  }, [rows, running, autoFold, expanded]);
 
   return (
     <div className="timeline-wrap">
+      <label className="timeline-toolbar">
+        <input
+          type="checkbox"
+          checked={autoFold}
+          onChange={(e) => setAutoFoldPersist(e.target.checked)}
+        />
+        <span>自动折叠执行细节</span>
+      </label>
       <div className="timeline" ref={scrollerRef}>
         {hasMore && (
           <button
@@ -315,49 +448,20 @@ export default function Timeline({
             {loadingMore ? "Loading…" : "Load earlier events"}
           </button>
         )}
-        {rows.map((r) => (
-          <div
-            key={r.key}
-            className={`event event-${r.type} event-${r.role}`}
-          >
-            <div className="event-head">
-              <span className="event-icon">{r.icon}</span>
-              <span className="event-label">{r.label}</span>
-              {r.mode && (
-                <span className={`event-mode event-mode-${r.mode}`}>
-                  {r.mode === "plan" ? "Plan" : "Agent"}
-                </span>
-              )}
-              <span className="event-time">{r.time}</span>
-            </div>
-            {r.images.length > 0 && (
-              <div className="event-images">
-                {r.images.map((img) => (
-                  <a
-                    key={img.id}
-                    href={`/api/tasks/${r.taskId}/attachments/${img.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="event-image-link"
-                  >
-                    <img
-                      src={`/api/tasks/${r.taskId}/attachments/${img.id}`}
-                      alt="User attachment"
-                      className="event-image"
-                    />
-                  </a>
-                ))}
-              </div>
-            )}
-            {r.body && <div className="event-body">{r.body}</div>}
-            {r.detail && <pre className="event-detail">{r.detail}</pre>}
-            {r.type === "agent_response" && r.agentId && (
-              <div className="event-agent-id" title={r.agentId}>
-                {shortAgentId(r.agentId)}
-              </div>
-            )}
-          </div>
-        ))}
+        {rows.map((r) => {
+          const foldable = r.role === "activity";
+          const collapsed = Boolean(autoFold && foldable && !expanded[r.key]);
+          return (
+            <EventCard
+              key={r.key}
+              row={r}
+              collapsed={collapsed}
+              onToggle={
+                foldable && autoFold ? () => toggleExpanded(r.key) : undefined
+              }
+            />
+          );
+        })}
         <RunningBanner running={running} />
         {!running && rows.length === 0 && (
           <div className="timeline-empty">No activity yet — send a message below.</div>

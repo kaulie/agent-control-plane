@@ -56,10 +56,17 @@ export const api = {
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 
-  getEvents: (id: string, after?: number) => {
-    const q = after ? `?after=${after}` : "";
-    return fetch(`${BASE}/tasks/${id}/events${q}`).then(
-      (r) => j<{ events: AgentEvent[]; nextSeq: number }>(r),
+  getEvents: (
+    id: string,
+    opts?: { after?: number; before?: number; limit?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.after != null) params.set("after", String(opts.after));
+    if (opts?.before != null) params.set("before", String(opts.before));
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    const q = params.toString();
+    return fetch(`${BASE}/tasks/${id}/events${q ? `?${q}` : ""}`).then(
+      (r) => j<{ events: AgentEvent[]; nextSeq: number; hasMore: boolean }>(r),
     );
   },
 

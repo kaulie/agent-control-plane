@@ -39,6 +39,8 @@ export default function App() {
   const [wsStatus, setWsStatus] = useState("connecting");
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedRef = useRef(selectedId);
@@ -82,6 +84,8 @@ export default function App() {
     setEvents([]);
     setRunning(false);
     setStopping(false);
+    setHasMore(false);
+    setLoadingMore(false);
     lastSeqRef.current = 0;
   }, []);
 
@@ -169,7 +173,7 @@ export default function App() {
     const id = window.setInterval(async () => {
       try {
         const [evRes, detailRes] = await Promise.all([
-          api.getEvents(selectedId, lastSeqRef.current),
+          api.getEvents(selectedId, { after: lastSeqRef.current }),
           api.getTask(selectedId),
         ]);
         setEvents((prev) => {
@@ -185,7 +189,7 @@ export default function App() {
       } catch {
         /* transient — ignore */
       }
-    }, 3500);
+    }, 5000);
     return () => window.clearInterval(id);
   }, [selectedId, running]);
 
@@ -205,6 +209,7 @@ export default function App() {
       const r = await api.getEvents(id);
       setEvents(r.events);
       lastSeqRef.current = r.nextSeq;
+      setHasMore(r.hasMore);
     } catch (e) {
       setError(String(e));
     }
@@ -278,6 +283,26 @@ export default function App() {
     }
   }, [selectedId, running, stopping]);
 
+  const loadMore = useCallback(async () => {
+    if (!selectedId || loadingMore || !hasMore) return;
+    const oldest = events[0]?.seq;
+    if (oldest == null) return;
+    setLoadingMore(true);
+    try {
+      const r = await api.getEvents(selectedId, { before: oldest, limit: 100 });
+      setEvents((prev) => {
+        const ids = new Set(prev.map((p) => p.eventId));
+        const fresh = r.events.filter((e) => !ids.has(e.eventId));
+        return [...fresh, ...prev];
+      });
+      setHasMore(r.hasMore);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [selectedId, loadingMore, hasMore, events]);
+
   return (
     <div className="app">
       <header className="header">
@@ -306,7 +331,13 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              <Timeline events={events} running={running} />
+              <Timeline
+                events={events}
+                running={running}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMore()}
+              />
               <ChatInput
                 onSend={sendMessage}
                 onStop={() => void stopAgent()}

@@ -18,11 +18,23 @@ import type {
 export const DEFAULT_PROJECT_ID = "project-default";
 export const DEFAULT_PROJECT_NAME = "Default";
 
+export const SYSTEM_OPS_PROJECT_ID = "project-system-ops";
+export const SYSTEM_OPS_PROJECT_NAME = "系统运维";
+export const WATCHDOG_USER_ID = "watchdog";
+export const WATCHDOG_USER_NAME = "Watchdog";
+
 interface ProjectRow {
   project_id: string;
   name: string;
   created_at: string;
   updated_at: string;
+}
+
+interface UserRow {
+  user_id: string;
+  name: string;
+  is_system: number;
+  created_at: string;
 }
 
 interface TaskRow {
@@ -34,6 +46,7 @@ interface TaskRow {
   workspace: string;
   provider: string;
   model: string | null;
+  created_by: string | null;
 }
 
 interface RunRow {
@@ -129,6 +142,12 @@ export class Store {
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS users (
+        user_id   TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
     `);
 
     const taskCols = this.db
@@ -136,6 +155,9 @@ export class Store {
       .all() as unknown as Array<{ name: string }>;
     if (!taskCols.some((c) => c.name === "project_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "created_by")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN created_by TEXT`);
     }
 
     this.db.exec(
@@ -160,6 +182,32 @@ export class Store {
         `UPDATE tasks SET project_id = ? WHERE project_id IS NULL OR project_id = ''`,
       )
       .run(DEFAULT_PROJECT_ID);
+
+    // 内置「系统运维」项目 + watchdog 特殊用户（提前注册）
+    if (
+      !this.db
+        .prepare(`SELECT project_id FROM projects WHERE project_id = ?`)
+        .get(SYSTEM_OPS_PROJECT_ID)
+    ) {
+      this.db
+        .prepare(
+          `INSERT INTO projects (project_id, name, created_at, updated_at)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(SYSTEM_OPS_PROJECT_ID, SYSTEM_OPS_PROJECT_NAME, now, now);
+    }
+    if (
+      !this.db
+        .prepare(`SELECT user_id FROM users WHERE user_id = ?`)
+        .get(WATCHDOG_USER_ID)
+    ) {
+      this.db
+        .prepare(
+          `INSERT INTO users (user_id, name, is_system, created_at)
+           VALUES (?, ?, 1, ?)`,
+        )
+        .run(WATCHDOG_USER_ID, WATCHDOG_USER_NAME, now);
+    }
   }
 
   close(): void {
@@ -239,6 +287,7 @@ export class Store {
     provider: string;
     model?: string;
     projectId: string;
+    createdBy?: string;
   }): Task {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
@@ -252,11 +301,12 @@ export class Store {
       workspace: input.workspace,
       provider: input.provider,
       model: input.model,
+      createdBy: input.createdBy,
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -267,6 +317,7 @@ export class Store {
         task.workspace,
         task.provider,
         task.model ?? null,
+        task.createdBy ?? null,
       );
     return task;
   }
@@ -309,6 +360,7 @@ export class Store {
       workspace: r.workspace,
       provider: r.provider,
       model: r.model ?? undefined,
+      createdBy: r.created_by ?? undefined,
     };
   }
 
@@ -450,17 +502,53 @@ export class Store {
       );
   }
 
-  listEvents(taskId: string, afterSeq?: number): AgentEvent[] {
-    const rows = afterSeq
-      ? (this.db
-          .prepare(
-            `SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq ASC`,
-          )
-          .all(taskId, afterSeq) as unknown as EventRow[])
-      : (this.db
-          .prepare(`SELECT * FROM events WHERE task_id = ? ORDER BY seq ASC`)
-          .all(taskId) as unknown as EventRow[]);
-    return rows.map((r) => this.toEvent(r));
+  listEvents(
+    taskId: string,
+    opts: { after?: number; before?: number; limit?: number } = {},
+  ): { events: AgentEvent[]; hasMore: boolean } {
+    const limit = opts.limit ?? 100;
+
+    if (opts.after != null) {
+      // 增量：只拉 seq > after 的新事件（时间正序）
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq ASC`,
+        )
+        .all(taskId, opts.after) as unknown as EventRow[];
+      return { events: rows.map((r) => this.toEvent(r)), hasMore: false };
+    }
+
+    let rows: EventRow[];
+    if (opts.before != null) {
+      // 更早的历史：seq < before，最近的 limit 条
+      rows = this.db
+        .prepare(
+          `SELECT * FROM events WHERE task_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`,
+        )
+        .all(taskId, opts.before, limit) as unknown as EventRow[];
+    } else {
+      // 默认：只拉最近的 limit 条
+      rows = this.db
+        .prepare(
+          `SELECT * FROM events WHERE task_id = ? ORDER BY seq DESC LIMIT ?`,
+        )
+        .all(taskId, limit) as unknown as EventRow[];
+    }
+    rows = rows.reverse(); // 转回时间正序
+
+    const events = rows.map((r) => this.toEvent(r));
+    const minSeq = this.minEventSeq(taskId);
+    const oldestSeq = events.length ? (events[0].seq ?? minSeq) : minSeq;
+    const hasMore = events.length > 0 && oldestSeq > minSeq;
+
+    return { events, hasMore };
+  }
+
+  minEventSeq(taskId: string): number {
+    const row = this.db
+      .prepare(`SELECT MIN(seq) AS m FROM events WHERE task_id = ?`)
+      .get(taskId) as { m: number | null } | undefined;
+    return row?.m ?? 0;
   }
 
   maxEventSeq(taskId: string): number {

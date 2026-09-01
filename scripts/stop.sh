@@ -6,6 +6,7 @@ RUNTIME_DIR="${RUNTIME_DIR:-/Users/gaolei/runtime/web-cursor}"
 BACKEND_DIR="${RUNTIME_DIR}/backend"
 PID_FILE="${BACKEND_DIR}/runtime.pid"
 PORT="${PORT:-4211}"
+PAUSED_FLAG="${BACKEND_DIR}/.watchdog-paused"
 
 stopped=0
 
@@ -33,3 +34,7 @@ if [ "${stopped}" = "1" ]; then
 else
   echo "[stop] 没有正在运行的进程"
 fi
+
+# 用户显式停止 → 设置看门狗暂停标记，避免被自动拉起（运行 start.sh 会清除）
+touch "${PAUSED_FLAG}"
+echo "[stop] 已设置看门狗暂停标记"

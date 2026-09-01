@@ -179,9 +179,15 @@ const NEAR_BOTTOM_PX = 80;
 export default function Timeline({
   events,
   running,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: {
   events: AgentEvent[];
   running: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
 }) {
   const rows = useMemo(() => buildRows(events), [events]);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -229,6 +235,16 @@ export default function Timeline({
   return (
     <div className="timeline-wrap">
       <div className="timeline" ref={scrollerRef}>
+        {hasMore && (
+          <button
+            type="button"
+            className="load-more-btn"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Load earlier events"}
+          </button>
+        )}
         {rows.map((r) => (
           <div key={r.key} className={`event event-${r.type}`}>
             <div className="event-head">

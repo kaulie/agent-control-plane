@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
+import path from "node:path";
 import { loadConfig } from "./config.js";
 import { Store } from "./store/db.js";
 import { CursorProvider } from "./providers/cursor.js";
@@ -11,6 +12,9 @@ import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
 
 const config = loadConfig();
+
+const runningFlag = path.join(config.dataDir, "running.flag");
+const crashed = fs.existsSync(runningFlag);
 
 if (!config.apiKey) {
   console.warn(
@@ -51,6 +55,9 @@ const gateway = new AgentGateway(
 
 await registerRoutes(app, gateway, provider);
 
+// 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
+fs.writeFileSync(runningFlag, String(process.pid));
+
 const auth = await provider.verifyAuth();
 app.log.info(`auth: ${auth.ok ? "OK" : "FAILED"} — ${auth.detail}`);
 app.log.info(`agent workspace: ${config.agentWorkspace}`);
@@ -58,13 +65,30 @@ app.log.info(`agent workspace: ${config.agentWorkspace}`);
 try {
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`Agent Gateway listening on http://${config.host}:${config.port}`);
+
+  if (crashed) {
+    app.log.warn("检测到上次异常退出（崩溃），自动发起崩溃分析任务...");
+    void gateway.createCrashAnalysisTask().catch((err) => {
+      app.log.error({ err }, "崩溃分析任务创建失败");
+    });
+  }
 } catch (err) {
   app.log.error(err);
+  try {
+    fs.rmSync(runningFlag, { force: true });
+  } catch {
+    /* ignore */
+  }
   store.close();
   process.exit(1);
 }
 
 const shutdown = (): void => {
+  try {
+    fs.rmSync(runningFlag, { force: true });
+  } catch {
+    /* ignore */
+  }
   store.close();
   app.close().then(() => process.exit(0));
 };

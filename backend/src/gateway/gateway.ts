@@ -1,5 +1,5 @@
 import type { AgentEvent, Project, RunRecord, Task, TaskStats } from "../types.js";
-import { Store, newId, DEFAULT_PROJECT_ID } from "../store/db.js";
+import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
@@ -61,6 +61,7 @@ export class AgentGateway {
     workspace?: string;
     model?: string;
     projectId?: string;
+    createdBy?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const workspace = input.workspace || this.config.agentWorkspace;
@@ -74,6 +75,7 @@ export class AgentGateway {
       provider: this.provider.name,
       model: input.model,
       projectId,
+      createdBy: input.createdBy,
     });
     this.publish({ type: "task_created", task });
     return task;
@@ -93,8 +95,32 @@ export class AgentGateway {
     };
   }
 
-  listEvents(taskId: string, afterSeq?: number): AgentEvent[] {
-    return this.store.listEvents(taskId, afterSeq);
+  /**
+   * 看门狗触发的崩溃分析：在「系统运维」项目下自动建一个任务，
+   * 以 watchdog 用户身份向 agent 下发崩溃原因探查指令。
+   */
+  async createCrashAnalysisTask(): Promise<void> {
+    const task = this.createTask({
+      title: "系统崩溃分析 - system crash auto analyze",
+      projectId: SYSTEM_OPS_PROJECT_ID,
+      createdBy: WATCHDOG_USER_ID,
+    });
+    const prompt = [
+      "系统检测到上一次运行发生异常退出（疑似崩溃）。请协助排查崩溃原因：",
+      "1. 查看 backend/server.log 日志，定位最后的错误或异常；",
+      "2. 检查数据库中最近未正常结束的 run 和相关事件；",
+      "3. 推断可能的根因（如内存溢出、未捕获异常、SDK 崩溃等）；",
+      "4. 给出简要结论和修复建议。",
+      "请用中文回复。",
+    ].join("\n");
+    await this.sendMessage(task.taskId, prompt);
+  }
+
+  listEvents(
+    taskId: string,
+    opts?: { after?: number; before?: number; limit?: number },
+  ): { events: AgentEvent[]; hasMore: boolean } {
+    return this.store.listEvents(taskId, opts);
   }
 
   maxEventSeq(taskId: string): number {

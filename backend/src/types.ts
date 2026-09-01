@@ -7,6 +7,13 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface User {
+  userId: string;
+  name: string;
+  isSystem: boolean;
+  createdAt: string;
+}
+
 export interface Task {
   taskId: string;
   projectId: string;
@@ -16,6 +23,7 @@ export interface Task {
   workspace: string;
   provider: string;
   model?: string;
+  createdBy?: string;
 }
 
 export type RunStatus = "running" | "finished" | "error" | "cancelled";

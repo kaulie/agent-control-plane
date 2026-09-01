@@ -8,6 +8,10 @@ PID_FILE="${BACKEND_DIR}/runtime.pid"
 LOG_FILE="${BACKEND_DIR}/server.log"
 PORT="${PORT:-4211}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
+PAUSED_FLAG="${BACKEND_DIR}/.watchdog-paused"
+
+# 用户显式启动 → 清除看门狗暂停标记
+rm -f "${PAUSED_FLAG}"
 
 # 已在运行则跳过
 if [ -n "$(lsof -ti:${PORT} 2>/dev/null || true)" ]; then

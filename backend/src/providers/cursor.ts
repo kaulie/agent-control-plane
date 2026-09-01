@@ -1,4 +1,4 @@
-import { Agent, Cursor } from "@cursor/sdk";
+import { Agent, AgentBusyError, Cursor } from "@cursor/sdk";
 import type { AgentOptions, Run, SDKAgent, SDKMessage } from "@cursor/sdk";
 import type { CostInfo, EventType, TokenUsage } from "../types.js";
 import { mapSdkMessage } from "../events/mapper.js";
@@ -15,6 +15,13 @@ interface ActiveHandle {
   cancelled: boolean;
   agent?: SDKAgent;
   run?: Run;
+  cwd: string;
+}
+
+function isAgentBusy(err: unknown): boolean {
+  if (err instanceof AgentBusyError) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /already has active run/i.test(msg);
 }
 
 export class CursorProvider implements AgentProvider {
@@ -59,6 +66,60 @@ export class CursorProvider implements AgentProvider {
     return models[0]?.id;
   }
 
+  /**
+   * Cancel any SDK runs still marked running for this agent.
+   * Needed after our process dies while a local agent run is in flight —
+   * the SDK keeps that run active and rejects the next send with AgentBusyError.
+   */
+  private async cancelRunningSdkRuns(agentId: string, cwd: string): Promise<number> {
+    if (!agentId) return 0;
+    let cancelled = 0;
+    try {
+      const listed = await Agent.listRuns(agentId, { runtime: "local", cwd });
+      for (const run of listed.items) {
+        if (run.status !== "running") continue;
+        try {
+          await Agent.cancelRun(run.id, { runtime: "local", cwd });
+          cancelled += 1;
+        } catch (err) {
+          try {
+            await run.cancel();
+            cancelled += 1;
+          } catch (err2) {
+            console.warn(
+              "[cursor] failed to cancel orphaned run",
+              run.id,
+              err2 instanceof Error ? err2.message : err2,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[cursor] listRuns for orphan cancel failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    if (cancelled > 0) {
+      console.warn(
+        `[cursor] cancelled ${cancelled} orphaned SDK run(s) on ${agentId}`,
+      );
+    }
+    return cancelled;
+  }
+
+  async reconcileAfterRestart(
+    orphans: Array<{ agentId: string; cwd: string }>,
+  ): Promise<void> {
+    const seen = new Set<string>();
+    for (const { agentId, cwd } of orphans) {
+      const key = `${agentId}::${cwd}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      await this.cancelRunningSdkRuns(agentId, cwd);
+    }
+  }
+
   async cancel(runId: string): Promise<boolean> {
     const handle = this.active.get(runId);
     if (!handle) return false;
@@ -66,8 +127,11 @@ export class CursorProvider implements AgentProvider {
     try {
       if (handle.run) {
         await handle.run.cancel();
+      } else if (handle.agent) {
+        // send() may not have returned yet, or the handle was lost after a
+        // partial failure — cancel via the SDK run store instead.
+        await this.cancelRunningSdkRuns(handle.agent.agentId, handle.cwd);
       }
-      // Do not close the task-scoped agent — only cancel the in-flight run.
     } catch (err) {
       console.warn("[cursor] cancel failed:", err instanceof Error ? err.message : err);
     }
@@ -126,14 +190,72 @@ export class CursorProvider implements AgentProvider {
     return agent;
   }
 
+  /**
+   * agent.send, with recovery when the SDK still holds an active run from a
+   * previous (crashed / interrupted) gateway process.
+   */
+  private async sendPrompt(
+    agent: SDKAgent,
+    input: RunInput,
+    options: AgentOptions,
+  ): Promise<{ agent: SDKAgent; run: Run }> {
+    const images = input.prompt.images?.length
+      ? input.prompt.images.map((img) => ({
+          data: img.data,
+          mimeType: img.mimeType,
+          ...(img.width != null && img.height != null
+            ? { dimension: { width: img.width, height: img.height } }
+            : {}),
+        }))
+      : undefined;
+    const payload =
+      images?.length
+        ? { text: input.prompt.text, images }
+        : input.prompt.text;
+
+    const trySend = (a: SDKAgent) => a.send(payload);
+
+    try {
+      return { agent, run: await trySend(agent) };
+    } catch (err) {
+      if (!isAgentBusy(err)) throw err;
+    }
+
+    console.warn(
+      `[cursor] agent ${agent.agentId} busy; cancelling orphaned runs and retrying`,
+    );
+    await this.cancelRunningSdkRuns(agent.agentId, input.cwd);
+
+    try {
+      return { agent, run: await trySend(agent) };
+    } catch (err) {
+      if (!isAgentBusy(err)) throw err;
+    }
+
+    // Last resort: abandon the stuck agent and start a fresh conversation.
+    // Prefer unblocking the user over preserving a dead session.
+    console.warn(
+      `[cursor] agent ${agent.agentId} still busy after cancel; creating a fresh agent`,
+    );
+    try {
+      agent.close();
+    } catch {
+      /* ignore */
+    }
+    this.agentsByTask.delete(input.taskId);
+    const fresh = await Agent.create(options);
+    this.agentsByTask.set(input.taskId, fresh);
+    return { agent: fresh, run: await trySend(fresh) };
+  }
+
   async run(input: RunInput): Promise<RunResultData> {
     const modelId = input.model || (await this.resolveModel());
     const options = this.buildOptions(input, modelId);
 
-    const handle: ActiveHandle = { cancelled: false };
+    const handle: ActiveHandle = { cancelled: false, cwd: input.cwd };
     this.active.set(input.runId, handle);
 
-    const agent = await this.obtainAgent(input, options);
+    let agent = await this.obtainAgent(input, options);
     handle.agent = agent;
 
     const startedAt = Date.now();
@@ -179,20 +301,10 @@ export class CursorProvider implements AgentProvider {
     }
 
     try {
-      const images = input.prompt.images?.length
-        ? input.prompt.images.map((img) => ({
-            data: img.data,
-            mimeType: img.mimeType,
-            ...(img.width != null && img.height != null
-              ? { dimension: { width: img.width, height: img.height } }
-              : {}),
-          }))
-        : undefined;
-      const run = await agent.send(
-        images?.length
-          ? { text: input.prompt.text, images }
-          : input.prompt.text,
-      );
+      const sent = await this.sendPrompt(agent, input, options);
+      agent = sent.agent;
+      handle.agent = agent;
+      const run = sent.run;
       handle.run = run;
 
       if (handle.cancelled) {

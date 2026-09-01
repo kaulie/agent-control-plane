@@ -238,13 +238,30 @@ export class Store {
     this.db.close();
   }
 
-  /** On startup, mark any run left "running" by a previous process as errored. */
-  markInterruptedRuns(): void {
+  /**
+   * On startup, mark any run left "running" by a previous process as errored.
+   * Returns distinct (agentId, workspace) pairs so the provider can cancel
+   * orphaned SDK-side runs that survive our process restart.
+   */
+  markInterruptedRuns(): Array<{ agentId: string; cwd: string }> {
+    const orphans = this.db
+      .prepare(
+        `SELECT DISTINCT r.agent_id AS agent_id, t.workspace AS workspace
+         FROM runs r
+         JOIN tasks t ON t.task_id = r.task_id
+         WHERE r.status = 'running'
+           AND r.agent_id IS NOT NULL
+           AND r.agent_id != ''`,
+      )
+      .all() as Array<{ agent_id: string; workspace: string }>;
+
     this.db
       .prepare(
         `UPDATE runs SET status = 'error', completed_at = ?, error = ? WHERE status = 'running'`,
       )
       .run(new Date().toISOString(), "interrupted (server restart)");
+
+    return orphans.map((r) => ({ agentId: r.agent_id, cwd: r.workspace }));
   }
 
   // ---- projects ----

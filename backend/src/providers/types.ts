@@ -48,6 +48,13 @@ export interface AgentProvider {
   run(input: RunInput): Promise<RunResultData>;
   /** Request cancellation of an in-flight run. Returns false if unknown. */
   cancel(runId: string): Promise<boolean>;
+  /**
+   * Optional: after a process restart, cancel SDK-side runs that were still
+   * active for the given agents (our DB already marked them interrupted).
+   */
+  reconcileAfterRestart?(
+    orphans: Array<{ agentId: string; cwd: string }>,
+  ): Promise<void>;
   /** Optional: release long-lived resources (e.g. cached agents) on shutdown. */
   dispose?(): void;
 }

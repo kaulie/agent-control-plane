@@ -24,11 +24,17 @@ if (!config.apiKey) {
 }
 
 const store = new Store(config.dataDir);
-store.markInterruptedRuns();
+const interruptedOrphans = store.markInterruptedRuns();
 const provider = new CursorProvider({
   apiKey: config.apiKey,
   model: config.model,
 });
+if (interruptedOrphans.length) {
+  console.warn(
+    `[startup] clearing ${interruptedOrphans.length} orphaned SDK agent run(s) from prior process`,
+  );
+  await provider.reconcileAfterRestart(interruptedOrphans);
+}
 
 // Allow text + several base64 images in one JSON POST (decoded images are capped separately).
 const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });

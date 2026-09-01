@@ -7,7 +7,7 @@
 | 目录 | 含义 | 谁改 |
 |---|---|---|
 | `/Users/gaolei/Projects/deepseek_web_cursor` | 开发目录（git 仓库） | agent 在这里改代码 |
-| `/Users/gaolei/deployment/web-cursor/deployment-XXX` | 待上线版本（版本化，XXX 递增） | 每次上线前生成，一般不改 |
+| `/Users/gaolei/deployment/web-cursor/deployment-<hash>` | 待上线版本（用 git 短 hash 命名） | 每次上线前生成，一般不改 |
 | `/Users/gaolei/runtime/web-cursor` | 线上当前运行目录 | 只保留运行相关内容，**不要直接改** |
 
 ## 端口规范（重要）
@@ -21,9 +21,9 @@
 ## 版本管理
 
 - 改动后提交 git：`git add -A && git commit -m "描述"`。
-- 每次「待上线」对应一个递增的 deployment 版本：
-  - 在 dev 打 tag：`git tag deployment-XXX`
-  - 生成目录快照：`deployment/web-cursor/deployment-XXX/`
+- 每次「待上线」对应一个 deployment 版本，用 git 短 hash 命名（如 `deployment-d7198f15`）：
+  - 在 dev 打 tag：`git tag deployment-$(git rev-parse --short=8 HEAD)`
+  - 生成目录快照：`deployment/web-cursor/deployment-<hash>/`
 - 上线 = 把某个 deployment-XXX 部署到 `runtime/web-cursor` 并重启。
 
 ## 安全
@@ -41,6 +41,6 @@
 
 1. 在**开发目录**改代码、本地自测（避开 4211）。
 2. `git add -A && git commit -m "..."` 提交。
-3. 生成 deployment-XXX（tag + 目录快照）。
+3. 生成 deployment-<hash>（tag + 目录快照）。
 4. 将 deployment-XXX 部署到 `runtime/web-cursor` 并重启，完成上线。
 

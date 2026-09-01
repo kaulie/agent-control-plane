@@ -7,6 +7,23 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface AgentRulesConfig {
+  rules?: string;
+}
+
+export interface AppSettings {
+  agent?: AgentRulesConfig;
+}
+
+export interface ProjectSettingsView {
+  global: AppSettings;
+  project: AppSettings;
+  effective: AppSettings;
+  cwdRules?: string;
+}
+
+export type AppView = "chat" | "global-settings" | "project-settings";
+
 export interface Task {
   taskId: string;
   projectId: string;

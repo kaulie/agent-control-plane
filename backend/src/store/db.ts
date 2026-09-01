@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import type {
   AgentEvent,
+  AppSettings,
   CostInfo,
   EventType,
   Project,
@@ -14,6 +15,7 @@ import type {
   TaskStatus,
   TokenUsage,
 } from "../types.js";
+import { parseSettings, patchSettings, serializeSettings } from "../settings.js";
 
 export const DEFAULT_PROJECT_ID = "project-default";
 export const DEFAULT_PROJECT_NAME = "Default";
@@ -27,6 +29,7 @@ interface ProjectRow {
   project_id: string;
   name: string;
   workspace_root: string | null;
+  settings_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -151,6 +154,11 @@ export class Store {
         is_system INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        settings_json TEXT NOT NULL DEFAULT '{}',
+        updated_at    TEXT NOT NULL
+      );
     `);
 
     const taskCols = this.db
@@ -175,6 +183,35 @@ export class Store {
       .all() as unknown as Array<{ name: string }>;
     if (!projectCols.some((c) => c.name === "workspace_root")) {
       this.db.exec(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
+    }
+    if (!projectCols.some((c) => c.name === "settings_json")) {
+      this.db.exec(`ALTER TABLE projects ADD COLUMN settings_json TEXT`);
+    }
+
+    const appSettingsExists = this.db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'`,
+      )
+      .get() as { name: string } | undefined;
+    if (!appSettingsExists) {
+      this.db.exec(`
+        CREATE TABLE app_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          settings_json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL
+        );
+      `);
+    }
+    const globalRow = this.db
+      .prepare(`SELECT id FROM app_settings WHERE id = 1`)
+      .get() as { id: number } | undefined;
+    if (!globalRow) {
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO app_settings (id, settings_json, updated_at) VALUES (1, '{}', ?)`,
+        )
+        .run(now);
     }
 
     // Backfill: bind each task to its most recent non-empty run agent_id.
@@ -433,6 +470,47 @@ export class Store {
       .run(...values);
 
     return { ...next, updatedAt };
+  }
+
+  getProjectSettings(projectId: string): AppSettings | undefined {
+    const row = this.db
+      .prepare(`SELECT settings_json FROM projects WHERE project_id = ?`)
+      .get(projectId) as { settings_json: string | null } | undefined;
+    if (!row) return undefined;
+    return parseSettings(row.settings_json);
+  }
+
+  updateProjectSettings(
+    projectId: string,
+    patch: AppSettings,
+  ): AppSettings | undefined {
+    if (!this.getProject(projectId)) return undefined;
+    const current = this.getProjectSettings(projectId) ?? {};
+    const next = patchSettings(current, patch);
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE projects SET settings_json = ?, updated_at = ? WHERE project_id = ?`,
+      )
+      .run(serializeSettings(next), updatedAt, projectId);
+    return next;
+  }
+
+  getGlobalSettings(): AppSettings {
+    const row = this.db
+      .prepare(`SELECT settings_json FROM app_settings WHERE id = 1`)
+      .get() as { settings_json: string } | undefined;
+    return parseSettings(row?.settings_json);
+  }
+
+  updateGlobalSettings(patch: AppSettings): AppSettings {
+    const current = this.getGlobalSettings();
+    const next = patchSettings(current, patch);
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(`UPDATE app_settings SET settings_json = ?, updated_at = ? WHERE id = 1`)
+      .run(serializeSettings(next), updatedAt);
+    return next;
   }
 
   private toProject(r: ProjectRow): Project {

@@ -8,6 +8,7 @@ interface Props {
   onCreateProject: () => void;
   onRenameProject: () => void;
   onSetWorkspaceRoot: () => void;
+  onOpenProjectSettings: () => void;
   tasks: Task[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -21,6 +22,7 @@ export default function TaskList({
   onCreateProject,
   onRenameProject,
   onSetWorkspaceRoot,
+  onOpenProjectSettings,
   tasks,
   selectedId,
   onSelect,
@@ -45,6 +47,14 @@ export default function TaskList({
               </option>
             ))}
           </select>
+          <button
+            className="icon-btn"
+            title="项目设置"
+            onClick={onOpenProjectSettings}
+            disabled={!selectedProjectId}
+          >
+            ⚙
+          </button>
           <button
             className="icon-btn"
             title="Rename project"

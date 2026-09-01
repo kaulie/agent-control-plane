@@ -1,5 +1,20 @@
 export type TaskStatus = "active" | "completed" | "error";
 
+export interface AgentRulesConfig {
+  rules?: string;
+}
+
+export interface AppSettings {
+  agent?: AgentRulesConfig;
+}
+
+export interface ProjectSettingsView {
+  global: AppSettings;
+  project: AppSettings;
+  effective: AppSettings;
+  cwdRules?: string;
+}
+
 export interface Project {
   projectId: string;
   name: string;

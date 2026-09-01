@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { AgentProvider } from "../providers/types.js";
+import type { AppSettings } from "../types.js";
 import {
   resolveAttachmentPath,
   validateIncomingImages,
@@ -27,6 +28,51 @@ export async function registerRoutes(
     const models = await provider.listModels();
     const resolved = await provider.resolveModel();
     return { models, resolved };
+  });
+
+  // ---- settings ----
+
+  app.get("/api/settings/global", async () => gateway.getGlobalSettings());
+
+  app.patch<{ Body: AppSettings }>("/api/settings/global", async (req, reply) => {
+    try {
+      return gateway.updateGlobalSettings(req.body ?? {});
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/settings",
+    async (req, reply) => {
+      const view = gateway.getProjectSettingsView(req.params.projectId);
+      if (!view) {
+        return reply.code(404).send({ error: "project not found" });
+      }
+      return view;
+    },
+  );
+
+  app.patch<{
+    Params: { projectId: string };
+    Body: AppSettings;
+  }>("/api/projects/:projectId/settings", async (req, reply) => {
+    try {
+      const view = gateway.updateProjectSettings(
+        req.params.projectId,
+        req.body ?? {},
+      );
+      if (!view) {
+        return reply.code(404).send({ error: "project not found" });
+      }
+      return view;
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---- projects ----

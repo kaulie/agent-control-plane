@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentEvent, Project, RunRecord, Task, TaskStats } from "../types.js";
+import type { AgentEvent, AppSettings, Project, ProjectSettingsView, RunRecord, Task, TaskStats } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 import {
@@ -15,6 +15,8 @@ import {
   findTasksNeedingSelfCheck,
 } from "../feedback.js";
 import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
+import { readCwdRules } from "../cwd-rules.js";
+import { mergeSettings } from "../settings.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -104,6 +106,47 @@ export class AgentGateway {
 
   getProject(projectId: string): Project | undefined {
     return this.store.getProject(projectId);
+  }
+
+  // ---- settings ----
+
+  getGlobalSettings(): AppSettings {
+    return this.store.getGlobalSettings();
+  }
+
+  updateGlobalSettings(patch: AppSettings): AppSettings {
+    const settings = this.store.updateGlobalSettings(patch);
+    this.publish({ type: "global_settings_updated", settings });
+    return settings;
+  }
+
+  getProjectSettingsView(projectId: string): ProjectSettingsView | undefined {
+    const project = this.store.getProject(projectId);
+    if (!project) return undefined;
+    const global = this.store.getGlobalSettings();
+    const projectSettings = this.store.getProjectSettings(projectId) ?? {};
+    const cwd =
+      project.workspaceRoot?.trim() ||
+      this.config.canonicalDevRepo?.trim() ||
+      "";
+    return {
+      global,
+      project: projectSettings,
+      effective: mergeSettings(global, projectSettings),
+      cwdRules: cwd ? readCwdRules(cwd) : undefined,
+    };
+  }
+
+  updateProjectSettings(
+    projectId: string,
+    patch: AppSettings,
+  ): ProjectSettingsView | undefined {
+    if (!this.store.updateProjectSettings(projectId, patch)) return undefined;
+    const view = this.getProjectSettingsView(projectId);
+    if (view) {
+      this.publish({ type: "project_settings_updated", projectId, settings: view });
+    }
+    return view;
   }
 
   // ---- tasks ----
@@ -449,11 +492,18 @@ export class AgentGateway {
       });
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
+      const globalSettings = this.store.getGlobalSettings();
+      const projectSettings = project
+        ? (this.store.getProjectSettings(project.projectId) ?? {})
+        : {};
+      const effectiveRules = mergeSettings(globalSettings, projectSettings).agent
+        ?.rules;
       const bootstrapText = buildTaskBootstrapText({
         task,
         project,
         events: historyEvents,
         runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
+        effectiveRules,
       });
 
       const result = await this.provider.run({

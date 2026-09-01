@@ -1,7 +1,9 @@
 import type {
   AgentEvent,
+  AppSettings,
   AuthStatus,
   Project,
+  ProjectSettingsView,
   Task,
   TaskDetail,
   TokenUsage,
@@ -105,6 +107,28 @@ export const api = {
     fetch(`${BASE}/tasks/${id}/stop`, {
       method: "POST",
     }).then((r) => j<{ runId: string; stopped: boolean }>(r)),
+
+  getGlobalSettings: () =>
+    fetch(`${BASE}/settings/global`).then((r) => j<AppSettings>(r)),
+
+  updateGlobalSettings: (body: AppSettings) =>
+    fetch(`${BASE}/settings/global`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<AppSettings>(r)),
+
+  getProjectSettings: (projectId: string) =>
+    fetch(`${BASE}/projects/${projectId}/settings`).then((r) =>
+      j<ProjectSettingsView>(r),
+    ),
+
+  updateProjectSettings: (projectId: string, body: AppSettings) =>
+    fetch(`${BASE}/projects/${projectId}/settings`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<ProjectSettingsView>(r)),
 };
 
 export type { TokenUsage };

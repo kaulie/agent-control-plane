@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
-import type { AgentEvent, AuthStatus, Project, Task, TaskDetail } from "./types";
+import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import Timeline from "./components/Timeline";
 import ChatInput from "./components/ChatInput";
+import GlobalSettingsPage from "./components/GlobalSettingsPage";
+import ProjectSettingsPage from "./components/ProjectSettingsPage";
 
 const PROJECT_STORAGE_KEY = "web-cursor:selectedProjectId";
 const DEFAULT_PROJECT_ID = "project-default";
@@ -45,6 +47,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
+  const [view, setView] = useState<AppView>("chat");
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -533,6 +536,16 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="brand">Web Cursor</div>
+        <div className="header-actions">
+          <button
+            type="button"
+            className="icon-btn header-settings"
+            title="全局设置"
+            onClick={() => setView("global-settings")}
+          >
+            ⚙
+          </button>
+        </div>
         <div className="status">
           <span className={`dot ${auth?.ok ? "ok" : "bad"}`} />
           {auth?.ok ? auth.detail : "auth: not configured"}
@@ -552,6 +565,19 @@ export default function App() {
         </div>
       )}
       <div className="body">
+        {view === "global-settings" ? (
+          <GlobalSettingsPage onBack={() => setView("chat")} />
+        ) : view === "project-settings" && selectedProjectId ? (
+          <ProjectSettingsPage
+            projectId={selectedProjectId}
+            projectName={
+              projects.find((p) => p.projectId === selectedProjectId)?.name ??
+              selectedProjectId
+            }
+            onBack={() => setView("chat")}
+          />
+        ) : (
+          <>
         <TaskList
           projects={projects}
           selectedProjectId={selectedProjectId}
@@ -559,6 +585,7 @@ export default function App() {
           onCreateProject={() => void createProject()}
           onRenameProject={() => void renameProject()}
           onSetWorkspaceRoot={() => void setProjectWorkspaceRoot()}
+          onOpenProjectSettings={() => setView("project-settings")}
           tasks={tasks}
           selectedId={selectedId}
           onSelect={selectTask}
@@ -596,6 +623,8 @@ export default function App() {
             </div>
           )}
         </main>
+          </>
+        )}
       </div>
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>

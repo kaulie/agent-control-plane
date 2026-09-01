@@ -10,6 +10,8 @@ export interface TaskBootstrapInput {
   project?: Project;
   events: AgentEvent[];
   runs: RunRecord[];
+  /** Merged global + project agent rules (injected when configured). */
+  effectiveRules?: string;
 }
 
 function clip(text: string, max: number): string {
@@ -65,7 +67,7 @@ function collectRunResults(runs: RunRecord[]): string[] {
  * Web Cursor timeline). Keeps the agent aware of task identity + history.
  */
 export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
-  const { task, project, events, runs } = input;
+  const { task, project, events, runs, effectiveRules } = input;
   const userMsgs = collectUserMessages(events);
   const attachments = collectAttachments(events);
   const runResults = collectRunResults(runs);
@@ -94,8 +96,13 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     "- Stay focused on this task's context; do not treat yourself as a generic unbound agent.",
     "- Prefer answering from this briefing + conversation; look up the DB only if needed.",
     "",
-    "## History summary",
   ];
+
+  if (effectiveRules?.trim()) {
+    sections.push("## Configured agent rules", effectiveRules.trim(), "");
+  }
+
+  sections.push("## History summary");
 
   if (userMsgs.length === 0 && runResults.length === 0 && attachments.length === 0) {
     sections.push("- (no prior history on this task yet)");

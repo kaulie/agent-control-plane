@@ -24,16 +24,21 @@ if (!config.apiKey) {
 }
 
 const store = new Store(config.dataDir);
-const interruptedOrphans = store.markInterruptedRuns();
+const interrupted = store.markInterruptedRuns();
 const provider = new CursorProvider({
   apiKey: config.apiKey,
   model: config.model,
 });
-if (interruptedOrphans.length) {
+if (interrupted.orphans.length) {
   console.warn(
-    `[startup] clearing ${interruptedOrphans.length} orphaned SDK agent run(s) from prior process`,
+    `[startup] clearing ${interrupted.orphans.length} orphaned SDK agent run(s) from prior process`,
   );
-  await provider.reconcileAfterRestart(interruptedOrphans);
+  await provider.reconcileAfterRestart(interrupted.orphans);
+}
+if (interrupted.finalized.length) {
+  console.warn(
+    `[startup] finalized ${interrupted.finalized.length} interrupted run(s) as cancelled`,
+  );
 }
 
 // Allow text + several base64 images in one JSON POST (decoded images are capped separately).
@@ -72,6 +77,18 @@ app.log.info(`agent workspace: ${config.agentWorkspace}`);
 try {
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`Agent Gateway listening on http://${config.host}:${config.port}`);
+
+  // Push terminal events for runs that died with the previous process so
+  // reconnecting UIs leave "running" and show a clear stop reason.
+  for (const item of interrupted.finalized) {
+    publish({ type: "agent_event", event: item.event });
+    publish({
+      type: "task_updated",
+      task: store.getTask(item.taskId),
+      stats: store.getTaskStats(item.taskId),
+      runId: item.runId,
+    });
+  }
 
   if (crashed) {
     app.log.warn("检测到上次异常退出（崩溃），自动发起崩溃分析任务...");

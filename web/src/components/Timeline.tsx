@@ -169,10 +169,21 @@ function buildRows(events: AgentEvent[]): Row[] {
             : "已完成";
         break;
       case "run_cancelled":
-        body =
-          p.durationMs != null
-            ? `已停止 · 耗时 ${formatDuration(Number(p.durationMs))}`
-            : "Stopped by user";
+        if (p.reason === "server_restart") {
+          body = String(
+            p.message ??
+              "任务因服务重启中断。状态已同步为结束，可继续发消息接着做。",
+          );
+          detail =
+            p.durationMs != null
+              ? `耗时 ${formatDuration(Number(p.durationMs))}`
+              : "";
+        } else {
+          body =
+            p.durationMs != null
+              ? `已停止 · 耗时 ${formatDuration(Number(p.durationMs))}`
+              : "Stopped by user";
+        }
         break;
       case "run_error":
         body = String(p.error ?? "error");

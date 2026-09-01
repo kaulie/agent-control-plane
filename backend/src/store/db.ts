@@ -239,29 +239,99 @@ export class Store {
   }
 
   /**
-   * On startup, mark any run left "running" by a previous process as errored.
-   * Returns distinct (agentId, workspace) pairs so the provider can cancel
-   * orphaned SDK-side runs that survive our process restart.
+   * On startup, mark any run left "running" by a previous process as cancelled,
+   * append a terminal timeline event, and return orphans for SDK cleanup plus
+   * finalized rows so the gateway can push them to reconnecting browsers.
    */
-  markInterruptedRuns(): Array<{ agentId: string; cwd: string }> {
-    const orphans = this.db
+  markInterruptedRuns(): {
+    orphans: Array<{ agentId: string; cwd: string }>;
+    finalized: Array<{
+      taskId: string;
+      runId: string;
+      event: AgentEvent;
+    }>;
+  } {
+    const rows = this.db
       .prepare(
-        `SELECT DISTINCT r.agent_id AS agent_id, t.workspace AS workspace
+        `SELECT r.run_id AS run_id,
+                r.task_id AS task_id,
+                r.agent_id AS agent_id,
+                r.created_at AS created_at,
+                t.workspace AS workspace
          FROM runs r
          JOIN tasks t ON t.task_id = r.task_id
-         WHERE r.status = 'running'
-           AND r.agent_id IS NOT NULL
-           AND r.agent_id != ''`,
+         WHERE r.status = 'running'`,
       )
-      .all() as Array<{ agent_id: string; workspace: string }>;
+      .all() as Array<{
+      run_id: string;
+      task_id: string;
+      agent_id: string | null;
+      created_at: string;
+      workspace: string;
+    }>;
 
-    this.db
-      .prepare(
-        `UPDATE runs SET status = 'error', completed_at = ?, error = ? WHERE status = 'running'`,
-      )
-      .run(new Date().toISOString(), "interrupted (server restart)");
+    const now = new Date().toISOString();
+    const finalized: Array<{
+      taskId: string;
+      runId: string;
+      event: AgentEvent;
+    }> = [];
+    const orphanKeys = new Set<string>();
+    const orphans: Array<{ agentId: string; cwd: string }> = [];
 
-    return orphans.map((r) => ({ agentId: r.agent_id, cwd: r.workspace }));
+    for (const row of rows) {
+      const createdMs = Date.parse(row.created_at);
+      const durationMs = Number.isFinite(createdMs)
+        ? Math.max(0, Date.now() - createdMs)
+        : undefined;
+      this.db
+        .prepare(
+          `UPDATE runs
+           SET status = 'cancelled',
+               completed_at = ?,
+               error = ?,
+               duration_ms = COALESCE(?, duration_ms)
+           WHERE run_id = ?`,
+        )
+        .run(
+          now,
+          "interrupted (server restart)",
+          durationMs ?? null,
+          row.run_id,
+        );
+      this.updateTaskStatus(row.task_id, "active");
+
+      const event: AgentEvent = {
+        eventId: newId("evt"),
+        taskId: row.task_id,
+        runId: row.run_id,
+        agentId: row.agent_id ?? "",
+        timestamp: now,
+        eventType: "run_cancelled",
+        payload: {
+          reason: "server_restart",
+          message:
+            "任务因服务重启中断（例如部署）。状态已同步为结束，可继续发消息接着做。",
+          ...(durationMs != null ? { durationMs } : {}),
+        },
+      };
+      this.appendEvent(event);
+      finalized.push({
+        taskId: row.task_id,
+        runId: row.run_id,
+        event,
+      });
+
+      if (row.agent_id) {
+        const key = `${row.agent_id}::${row.workspace}`;
+        if (!orphanKeys.has(key)) {
+          orphanKeys.add(key);
+          orphans.push({ agentId: row.agent_id, cwd: row.workspace });
+        }
+      }
+    }
+
+    return { orphans, finalized };
   }
 
   // ---- projects ----

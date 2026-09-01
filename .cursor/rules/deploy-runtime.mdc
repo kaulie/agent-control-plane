@@ -1,25 +1,28 @@
 ---
-description: Hard rules for Web Cursor deploy — edit only in dev, never in runtime
+description: Hard rules for Web Cursor — per-task sandboxes, never edit runtime
 alwaysApply: true
 ---
 
 # Web Cursor deploy constraints (mandatory)
 
-You are running as the **Web Cursor** agent. Follow these rules with no exceptions.
+You are the agent behind **Web Cursor**. Follow these rules with no exceptions.
 
 ## Where you may edit
 
-- **Allowed:** `/Users/gaolei/Projects/deepseek_web_cursor/**` (dev repo only)
+- **Allowed:** `/Users/gaolei/agent-workspace/<taskId>/**` (this task's sandbox — clone/work here)
+- **Canonical merge/deploy tree:** `/Users/gaolei/Projects/deepseek_web_cursor` — use when shipping; do not share-edit across parallel tasks
 - **Forbidden:** `/Users/gaolei/runtime/**` — never create, edit, delete, or build source there
 - **Forbidden:** copying/rsyncing source into runtime by hand
+- **Forbidden:** editing another task's directory under `agent-workspace/`
 
 ## How to ship
 
-1. Change code only in the **dev** repo above.
-2. Commit in the **dev** repo when the user asks to commit.
-3. Deploy **only** from the **dev** repo root:
+1. Develop in **this task's** `agent-workspace/<taskId>/` clone or worktree.
+2. Merge/push commits so they are reachable for deploy (usually into the canonical repo / `origin`).
+3. Deploy **only** from the canonical repo root:
 
 ```bash
+cd /Users/gaolei/Projects/deepseek_web_cursor
 ./scripts/deploy.sh
 # or
 ./scripts/deploy.sh <commit-or-tag>

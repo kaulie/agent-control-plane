@@ -78,8 +78,10 @@ Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `setti
 
 - `backend/` —— Agent Gateway（Fastify + `@cursor/sdk` + `node:sqlite`）
 - `web/` —— 前端（React + Vite）
-- `workspace/` —— agent 默认工作沙盒
+- `workspace/` —— 旧版相对沙盒（遗留；新 task 默认用 `/Users/gaolei/agent-workspace/<taskId>/`）
 - `scripts/` —— 运维/部署脚本（如 `deploy.sh`）
+
+Agent 工作约定：每个 task 在 `/Users/gaolei/agent-workspace/<taskId>/` 下 clone 后开发，互不影响；上线仍从本仓库（canonical）执行 `./scripts/deploy.sh`。
 
 ## 开发与上线流程
 

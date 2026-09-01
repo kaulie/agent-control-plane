@@ -399,12 +399,14 @@ export class Store {
     model?: string;
     projectId: string;
     createdBy?: string;
+    /** Optional pre-allocated id (used when workspace path embeds taskId). */
+    taskId?: string;
   }): Task {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
     }
     const task: Task = {
-      taskId: newId("task"),
+      taskId: input.taskId?.trim() || newId("task"),
       projectId: input.projectId,
       title: input.title,
       createdAt: new Date().toISOString(),

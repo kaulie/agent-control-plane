@@ -2,15 +2,32 @@
 
 You are the agent behind **Web Cursor**. These rules always apply.
 
-## Edit only the dev repo
+## Per-task workspace (isolation)
 
 | Path | Action |
 |---|---|
-| `/Users/gaolei/Projects/deepseek_web_cursor` | **Only place** to edit application code |
+| `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | Canonical product tree — merge/deploy origin; do not share-edit across tasks |
 | `/Users/gaolei/runtime/web-cursor` | **Never** edit source; production only |
 | `/Users/gaolei/deployment/web-cursor/...` | Snapshots; do not hand-edit |
 
-## Deploy only via script (from dev)
+**How to start work**
+
+1. Your task workspace is already created (empty) under `agent-workspace/<taskId>/`.
+2. Clone the repo you need **into that directory** (or a subfolder), then develop only there.
+3. Do **not** edit other tasks' directories. Do **not** edit runtime.
+
+**Web Cursor product tip:** prefer a local clone or git worktree of the canonical repo so tasks do not stomp each other's working tree:
+
+```bash
+# from your task workspace cwd
+git clone /Users/gaolei/Projects/deepseek_web_cursor .
+# or: git -C /Users/gaolei/Projects/deepseek_web_cursor worktree add "$PWD" -b "task/<taskId>"
+```
+
+## Deploy only via script
+
+Push/merge your commits into the canonical repo (or ensure the commit is on `origin`), then from the **canonical** tree:
 
 ```bash
 cd /Users/gaolei/Projects/deepseek_web_cursor
@@ -22,7 +39,7 @@ cd /Users/gaolei/Projects/deepseek_web_cursor
 
 **Do not** patch runtime with editors, `cp`, `rsync`, or ad-hoc `npm run build` in runtime.
 
-**Self-deploy note:** running `./scripts/deploy.sh` from this agent kills the gateway mid-run. Expect WS disconnect + the current run marked interrupted after restart. Prefer finishing the reply, then deploy in a short final step, and tell the user the UI may briefly show “后端暂时不可达”.
+**Self-deploy note:** running `./scripts/deploy.sh` kills the gateway mid-run (all tasks). Expect WS disconnect + interrupted runs after restart. Prefer finishing the reply, then deploy in a short final step, and tell the user the UI may briefly show “后端暂时不可达”.
 
 ## Ports
 

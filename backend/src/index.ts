@@ -61,7 +61,12 @@ if (fs.existsSync(config.webDistDir)) {
 const gateway = new AgentGateway(
   store,
   provider,
-  { agentWorkspace: config.agentWorkspace, dataDir: config.dataDir },
+  {
+    agentWorkspaceRoot: config.agentWorkspaceRoot,
+    agentWorkspace: config.agentWorkspaceRoot,
+    canonicalDevRepo: config.canonicalDevRepo,
+    dataDir: config.dataDir,
+  },
   publish,
 );
 
@@ -72,7 +77,7 @@ fs.writeFileSync(runningFlag, String(process.pid));
 
 const auth = await provider.verifyAuth();
 app.log.info(`auth: ${auth.ok ? "OK" : "FAILED"} — ${auth.detail}`);
-app.log.info(`agent workspace: ${config.agentWorkspace}`);
+app.log.info(`agent workspace root: ${config.agentWorkspaceRoot}`);
 
 try {
   await app.listen({ port: config.port, host: config.host });

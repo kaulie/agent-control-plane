@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { AgentEvent, Project, RunRecord, Task, TaskStats } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
@@ -7,11 +9,17 @@ import {
   type StoredImageRef,
 } from "../attachments.js";
 import { buildTaskBootstrapText } from "../task-context.js";
+import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
 export interface GatewayConfig {
-  agentWorkspace: string;
+  /** Root for per-task sandboxes (`<root>/<taskId>/`). */
+  agentWorkspaceRoot: string;
+  /** @deprecated alias of agentWorkspaceRoot */
+  agentWorkspace?: string;
+  /** Product source for system/ops tasks that must see the real tree. */
+  canonicalDevRepo?: string;
   dataDir: string;
 }
 
@@ -77,12 +85,22 @@ export class AgentGateway {
     createdBy?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
-    const workspace = input.workspace || this.config.agentWorkspace;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
     if (!this.store.getProject(projectId)) {
       throw new Error(`project ${projectId} not found`);
     }
+
+    const taskId = newId("task");
+    const root =
+      this.config.agentWorkspaceRoot ||
+      this.config.agentWorkspace ||
+      DEFAULT_AGENT_WORKSPACE_ROOT;
+    const workspace =
+      input.workspace?.trim() || path.join(root, taskId);
+    fs.mkdirSync(workspace, { recursive: true });
+
     const task = this.store.createTask({
+      taskId,
       title,
       workspace,
       provider: this.provider.name,
@@ -117,6 +135,9 @@ export class AgentGateway {
       title: "系统崩溃分析 - system crash auto analyze",
       projectId: SYSTEM_OPS_PROJECT_ID,
       createdBy: WATCHDOG_USER_ID,
+      // Ops task must see the product tree / logs, not an empty sandbox.
+      workspace:
+        this.config.canonicalDevRepo?.trim() || CANONICAL_DEV_REPO,
     });
     const prompt = [
       "系统检测到上一次运行发生异常退出（疑似崩溃）。请协助排查崩溃原因：",

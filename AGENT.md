@@ -51,6 +51,21 @@
 
 5. **部署完成后必须自查**：`curl /health` 返回 200、打开首页能正常加载，才算上线完成。
 
+## 运维脚本（`scripts/`）
+
+所有脚本都在 **dev 仓库根目录**执行（`./scripts/xxx.sh`），操作对象是 runtime：
+
+| 脚本 | 用法 | 作用 |
+|---|---|---|
+| `deploy.sh` | `./scripts/deploy.sh [<hash\|tag>]` | 上线：git 同步 + 构建 + 重启。不传参数部署 main 最新 |
+| `start.sh` | `./scripts/start.sh` | 启动（已在运行则跳过；带健康检查） |
+| `stop.sh` | `./scripts/stop.sh` | 停止（PID 文件 + 端口兜底） |
+| `restart.sh` | `./scripts/restart.sh` | 重启（stop → start，不构建） |
+
+- `start.sh` / `stop.sh` / `restart.sh` 只做进程启停，**不构建**；要更新代码请用 `deploy.sh`。
+- 脚本支持环境变量覆盖：`RUNTIME_DIR`（默认 `/Users/gaolei/runtime/web-cursor`）、`PORT`（默认 `4211`）。
+- 运维时**优先用这些脚本**，不要手工 kill / 启动 / 复制文件。
+
 ## 安全
 
 - **不要提交** `backend/.env`（含 API key）与 `backend/data/`（本地数据库），两者已在 `.gitignore` 中。
@@ -68,5 +83,5 @@
 1. 在**开发目录**改代码、本地自测（避开 4211）。
 2. `git add -A && git commit -m "..."` 提交。
 3. 生成 deployment-<hash>（tag + 目录快照）。
-4. 将 `deployment-<hash>` 部署到 `runtime/web-cursor` 并重启，完成上线。
+4. 运行 `./scripts/deploy.sh <hash>` 完成上线（git 同步 + 构建 + 重启 + 健康检查）。
 

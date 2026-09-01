@@ -22,26 +22,78 @@ export async function registerRoutes(
     return { models, resolved };
   });
 
-  app.get("/api/tasks", async () => {
-    return gateway.listTasks().map((task) => {
-      const detail = gateway.getTaskDetail(task.taskId);
-      return { ...task, stats: detail?.stats };
-    });
+  // ---- projects ----
+
+  app.get("/api/projects", async () => gateway.listProjects());
+
+  app.post<{ Body: { name?: string } }>("/api/projects", async (req, reply) => {
+    const name = req.body?.name?.trim();
+    if (!name) {
+      return reply.code(400).send({ error: "name is required" });
+    }
+    try {
+      const project = gateway.createProject(name);
+      reply.code(201);
+      return project;
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
-  app.post<{ Body: { title?: string; workspace?: string; model?: string } }>(
-    "/api/tasks",
+  app.patch<{ Params: { projectId: string }; Body: { name?: string } }>(
+    "/api/projects/:projectId",
     async (req, reply) => {
-      const body = req.body ?? {};
+      const name = req.body?.name?.trim();
+      if (!name) {
+        return reply.code(400).send({ error: "name is required" });
+      }
+      try {
+        const project = gateway.renameProject(req.params.projectId, name);
+        if (!project) {
+          return reply.code(404).send({ error: "project not found" });
+        }
+        return project;
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // ---- tasks ----
+
+  app.get<{ Querystring: { projectId?: string } }>(
+    "/api/tasks",
+    async (req) => {
+      const projectId = req.query.projectId?.trim() || undefined;
+      return gateway.listTasks({ projectId }).map((task) => {
+        const detail = gateway.getTaskDetail(task.taskId);
+        return { ...task, stats: detail?.stats };
+      });
+    },
+  );
+
+  app.post<{
+    Body: { title?: string; workspace?: string; model?: string; projectId?: string };
+  }>("/api/tasks", async (req, reply) => {
+    const body = req.body ?? {};
+    try {
       const task = gateway.createTask({
         title: body.title,
         workspace: body.workspace,
         model: body.model,
+        projectId: body.projectId,
       });
       reply.code(201);
       return task;
-    },
-  );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
+    }
+  });
 
   app.get<{ Params: { taskId: string } }>(
     "/api/tasks/:taskId",

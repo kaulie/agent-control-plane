@@ -1,5 +1,5 @@
-import type { AgentEvent, RunRecord, Task, TaskStats } from "../types.js";
-import { Store, newId } from "../store/db.js";
+import type { AgentEvent, Project, RunRecord, Task, TaskStats } from "../types.js";
+import { Store, newId, DEFAULT_PROJECT_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
@@ -27,25 +27,57 @@ export class AgentGateway {
     private publish: Publish,
   ) {}
 
+  // ---- projects ----
+
+  listProjects(): Project[] {
+    return this.store.listProjects();
+  }
+
+  createProject(name: string): Project {
+    const project = this.store.createProject(name);
+    this.publish({ type: "project_created", project });
+    return project;
+  }
+
+  renameProject(projectId: string, name: string): Project | undefined {
+    const project = this.store.renameProject(projectId, name);
+    if (project) {
+      this.publish({ type: "project_updated", project });
+    }
+    return project;
+  }
+
+  getProject(projectId: string): Project | undefined {
+    return this.store.getProject(projectId);
+  }
+
+  // ---- tasks ----
+
   createTask(input: {
     title?: string;
     workspace?: string;
     model?: string;
+    projectId?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const workspace = input.workspace || this.config.agentWorkspace;
+    const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
+    if (!this.store.getProject(projectId)) {
+      throw new Error(`project ${projectId} not found`);
+    }
     const task = this.store.createTask({
       title,
       workspace,
       provider: this.provider.name,
       model: input.model,
+      projectId,
     });
     this.publish({ type: "task_created", task });
     return task;
   }
 
-  listTasks(): Task[] {
-    return this.store.listTasks();
+  listTasks(filter?: { projectId?: string }): Task[] {
+    return this.store.listTasks(filter);
   }
 
   getTaskDetail(taskId: string): TaskDetail | undefined {

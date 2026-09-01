@@ -1,13 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
-import type { AgentEvent, AuthStatus, Task, TaskDetail } from "./types";
+import type { AgentEvent, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import Timeline from "./components/Timeline";
 import ChatInput from "./components/ChatInput";
 
+const PROJECT_STORAGE_KEY = "web-cursor:selectedProjectId";
+const DEFAULT_PROJECT_ID = "project-default";
+
+function loadStoredProjectId(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeProjectId(id: string): void {
+  try {
+    localStorage.setItem(PROJECT_STORAGE_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    () => loadStoredProjectId(),
+  );
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -19,10 +42,23 @@ export default function App() {
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
+  const selectedProjectRef = useRef(selectedProjectId);
+  selectedProjectRef.current = selectedProjectId;
 
-  const refreshTasks = useCallback(async () => {
+  const refreshProjects = useCallback(async (): Promise<Project[]> => {
+    const list = await api.listProjects();
+    setProjects(list);
+    return list;
+  }, []);
+
+  const refreshTasks = useCallback(async (projectId?: string | null) => {
+    const pid = projectId ?? selectedProjectRef.current;
+    if (!pid) {
+      setTasks([]);
+      return;
+    }
     try {
-      setTasks(await api.listTasks());
+      setTasks(await api.listTasks(pid));
     } catch (e) {
       setError(String(e));
     }
@@ -38,13 +74,48 @@ export default function App() {
     }
   }, []);
 
+  const clearSelection = useCallback(() => {
+    setSelectedId(null);
+    setDetail(null);
+    setEvents([]);
+    setRunning(false);
+  }, []);
+
+  const selectProject = useCallback(
+    async (id: string) => {
+      setSelectedProjectId(id);
+      storeProjectId(id);
+      clearSelection();
+      await refreshTasks(id);
+    },
+    [clearSelection, refreshTasks],
+  );
+
   useEffect(() => {
     api
       .getAuth()
       .then(setAuth)
       .catch(() => setAuth({ ok: false, detail: "unreachable" }));
-    void refreshTasks();
-  }, [refreshTasks]);
+
+    void (async () => {
+      try {
+        const list = await refreshProjects();
+        const stored = loadStoredProjectId();
+        const resolved =
+          (stored && list.some((p) => p.projectId === stored) && stored) ||
+          list.find((p) => p.projectId === DEFAULT_PROJECT_ID)?.projectId ||
+          list[0]?.projectId ||
+          null;
+        if (resolved) {
+          setSelectedProjectId(resolved);
+          storeProjectId(resolved);
+          await refreshTasks(resolved);
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    })();
+  }, [refreshProjects, refreshTasks]);
 
   useEffect(() => {
     const close = connectWs(
@@ -73,12 +144,17 @@ export default function App() {
           void refreshTasks();
         } else if (msg.type === "task_created") {
           void refreshTasks();
+        } else if (
+          msg.type === "project_created" ||
+          msg.type === "project_updated"
+        ) {
+          void refreshProjects();
         }
       },
       setWsStatus,
     );
     return close;
-  }, [refreshDetail, refreshTasks]);
+  }, [refreshDetail, refreshTasks, refreshProjects]);
 
   // Poll while a run is active so the timeline and stats stay fresh even if
   // the WebSocket drops (belt-and-suspenders alongside the live push).
@@ -124,15 +200,44 @@ export default function App() {
   }, []);
 
   const createTask = useCallback(async () => {
+    if (!selectedProjectId) return;
     const title = window.prompt("Task title (optional):") || undefined;
     try {
-      const task = await api.createTask({ title });
-      await refreshTasks();
+      const task = await api.createTask({
+        title,
+        projectId: selectedProjectId,
+      });
+      await refreshTasks(selectedProjectId);
       await selectTask(task.taskId);
     } catch (e) {
       setError(String(e));
     }
-  }, [refreshTasks, selectTask]);
+  }, [refreshTasks, selectTask, selectedProjectId]);
+
+  const createProject = useCallback(async () => {
+    const name = window.prompt("Project name:");
+    if (!name?.trim()) return;
+    try {
+      const project = await api.createProject(name.trim());
+      await refreshProjects();
+      await selectProject(project.projectId);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [refreshProjects, selectProject]);
+
+  const renameProject = useCallback(async () => {
+    if (!selectedProjectId) return;
+    const current = projects.find((p) => p.projectId === selectedProjectId);
+    const name = window.prompt("Rename project:", current?.name ?? "");
+    if (!name?.trim()) return;
+    try {
+      await api.renameProject(selectedProjectId, name.trim());
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [projects, refreshProjects, selectedProjectId]);
 
   const sendMessage = useCallback(
     async (message: string) => {
@@ -163,6 +268,11 @@ export default function App() {
       </header>
       <div className="body">
         <TaskList
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          onSelectProject={(id) => void selectProject(id)}
+          onCreateProject={() => void createProject()}
+          onRenameProject={() => void renameProject()}
           tasks={tasks}
           selectedId={selectedId}
           onSelect={selectTask}
@@ -176,7 +286,11 @@ export default function App() {
               <ChatInput onSend={sendMessage} disabled={running} />
             </>
           ) : (
-            <div className="empty">Select or create a task to begin</div>
+            <div className="empty">
+              {selectedProjectId
+                ? "Select or create a task to begin"
+                : "Select or create a project to begin"}
+            </div>
           )}
         </main>
       </div>

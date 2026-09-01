@@ -74,11 +74,12 @@ npm run dev:web       # frontend :5174
 
 ## Usage
 
-1. Click **+ New Task** (or create one via `POST /api/tasks`).
-2. Type an instruction and press **Send**.
-3. Watch the timeline stream real-time events (thinking → tool calls → file
+1. Pick or create a **Project** in the sidebar (default: `Default`).
+2. Click **+ New Task** (or create one via `POST /api/tasks` with `projectId`).
+3. Type an instruction and press **Send**.
+4. Watch the timeline stream real-time events (thinking → tool calls → file
    reads/edits → terminal → final answer).
-4. The usage bar at the top shows tokens, cost, duration, model calls and tool
+5. The usage bar at the top shows tokens, cost, duration, model calls and tool
    calls. Refresh the page to see completed Tasks again.
 
 > The agent runs in the `workspace/` directory by default (set `AGENT_WORKSPACE`
@@ -101,12 +102,18 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/health` | liveness |
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
-| GET | `/api/tasks` | list Tasks (+ stats) |
-| POST | `/api/tasks` | create Task `{ title?, workspace?, model? }` |
+| GET | `/api/projects` | list Projects |
+| POST | `/api/projects` | create Project `{ name }` |
+| PATCH | `/api/projects/:id` | rename Project `{ name }` |
+| GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
+| POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message }` → starts an Agent Run |
-| WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created` |
+| WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
+
+Each Task belongs to a Project (`projectId`). On first boot a default project
+`Default` (`project-default`) is created and existing tasks are attached to it.
 
 ## Project layout
 
@@ -114,12 +121,12 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 backend/src/
   index.ts        server bootstrap
   config.ts       env config (.env)
-  store/db.ts     SQLite persistence (tasks / runs / events / stats)
+  store/db.ts     SQLite persistence (projects / tasks / runs / events / stats)
   gateway/        Task → Run → Event → Usage orchestration
   providers/      AgentProvider interface + CursorAdapter
   events/         SDK message → unified AgentEvent mapper
   usage/          pricing + CostCalculator
   http/ ws/       REST + WebSocket
-web/src/          React UI (Chat / Timeline / UsageBar / TaskList)
+web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
 workspace/        default sandbox for the local agent
 ```

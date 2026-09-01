@@ -1,7 +1,15 @@
 export type TaskStatus = "active" | "completed" | "error";
 
+export interface Project {
+  projectId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Task {
   taskId: string;
+  projectId: string;
   title: string;
   createdAt: string;
   status: TaskStatus;

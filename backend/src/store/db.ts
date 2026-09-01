@@ -6,6 +6,7 @@ import type {
   AgentEvent,
   CostInfo,
   EventType,
+  Project,
   RunRecord,
   RunStatus,
   Task,
@@ -14,8 +15,19 @@ import type {
   TokenUsage,
 } from "../types.js";
 
+export const DEFAULT_PROJECT_ID = "project-default";
+export const DEFAULT_PROJECT_NAME = "Default";
+
+interface ProjectRow {
+  project_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface TaskRow {
   task_id: string;
+  project_id: string | null;
   title: string;
   created_at: string;
   status: string;
@@ -111,7 +123,43 @@ export class Store {
         cost      TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, seq);
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id  TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
     `);
+
+    const taskCols = this.db
+      .prepare(`PRAGMA table_info(tasks)`)
+      .all() as unknown as Array<{ name: string }>;
+    if (!taskCols.some((c) => c.name === "project_id")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT`);
+    }
+
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
+    );
+
+    const now = new Date().toISOString();
+    const defaultRow = this.db
+      .prepare(`SELECT project_id FROM projects WHERE project_id = ?`)
+      .get(DEFAULT_PROJECT_ID) as { project_id: string } | undefined;
+    if (!defaultRow) {
+      this.db
+        .prepare(
+          `INSERT INTO projects (project_id, name, created_at, updated_at)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, now, now);
+    }
+
+    this.db
+      .prepare(
+        `UPDATE tasks SET project_id = ? WHERE project_id IS NULL OR project_id = ''`,
+      )
+      .run(DEFAULT_PROJECT_ID);
   }
 
   close(): void {
@@ -127,6 +175,62 @@ export class Store {
       .run(new Date().toISOString(), "interrupted (server restart)");
   }
 
+  // ---- projects ----
+
+  listProjects(): Project[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM projects ORDER BY name ASC`)
+      .all() as unknown as ProjectRow[];
+    return rows.map((r) => this.toProject(r));
+  }
+
+  getProject(projectId: string): Project | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM projects WHERE project_id = ?`)
+      .get(projectId) as ProjectRow | undefined;
+    return row ? this.toProject(row) : undefined;
+  }
+
+  createProject(name: string): Project {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("project name is required");
+    const now = new Date().toISOString();
+    const project: Project = {
+      projectId: newId("project"),
+      name: trimmed,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO projects (project_id, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(project.projectId, project.name, project.createdAt, project.updatedAt);
+    return project;
+  }
+
+  renameProject(projectId: string, name: string): Project | undefined {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("project name is required");
+    const existing = this.getProject(projectId);
+    if (!existing) return undefined;
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(`UPDATE projects SET name = ?, updated_at = ? WHERE project_id = ?`)
+      .run(trimmed, updatedAt, projectId);
+    return { ...existing, name: trimmed, updatedAt };
+  }
+
+  private toProject(r: ProjectRow): Project {
+    return {
+      projectId: r.project_id,
+      name: r.name,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
   // ---- tasks ----
 
   createTask(input: {
@@ -134,9 +238,14 @@ export class Store {
     workspace: string;
     provider: string;
     model?: string;
+    projectId: string;
   }): Task {
+    if (!this.getProject(input.projectId)) {
+      throw new Error(`project ${input.projectId} not found`);
+    }
     const task: Task = {
       taskId: newId("task"),
+      projectId: input.projectId,
       title: input.title,
       createdAt: new Date().toISOString(),
       status: "active",
@@ -146,11 +255,12 @@ export class Store {
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, title, created_at, status, workspace, provider, model)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
+        task.projectId,
         task.title,
         task.createdAt,
         task.status,
@@ -168,7 +278,15 @@ export class Store {
     return row ? this.toTask(row) : undefined;
   }
 
-  listTasks(): Task[] {
+  listTasks(filter?: { projectId?: string }): Task[] {
+    if (filter?.projectId) {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC`,
+        )
+        .all(filter.projectId) as unknown as TaskRow[];
+      return rows.map((r) => this.toTask(r));
+    }
     const rows = this.db
       .prepare(`SELECT * FROM tasks ORDER BY created_at DESC`)
       .all() as unknown as TaskRow[];
@@ -184,6 +302,7 @@ export class Store {
   private toTask(r: TaskRow): Task {
     return {
       taskId: r.task_id,
+      projectId: r.project_id || DEFAULT_PROJECT_ID,
       title: r.title,
       createdAt: r.created_at,
       status: r.status as TaskStatus,
@@ -417,5 +536,3 @@ export class Store {
     };
   }
 }
-
-

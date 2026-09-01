@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   AuthStatus,
+  Project,
   Task,
   TaskDetail,
   TokenUsage,
@@ -25,9 +26,28 @@ async function j<T>(res: Response): Promise<T> {
 export const api = {
   getAuth: () => fetch(`${BASE}/auth`).then((r) => j<AuthStatus>(r)),
 
-  listTasks: () => fetch(`${BASE}/tasks`).then((r) => j<Task[]>(r)),
+  listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
-  createTask: (body: { title?: string; workspace?: string }) =>
+  createProject: (name: string) =>
+    fetch(`${BASE}/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => j<Project>(r)),
+
+  renameProject: (projectId: string, name: string) =>
+    fetch(`${BASE}/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => j<Project>(r)),
+
+  listTasks: (projectId?: string) => {
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return fetch(`${BASE}/tasks${q}`).then((r) => j<Task[]>(r));
+  },
+
+  createTask: (body: { title?: string; workspace?: string; projectId?: string }) =>
     fetch(`${BASE}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },

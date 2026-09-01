@@ -45,6 +45,23 @@ export function isRunFeedbackComplete(
   return false;
 }
 
+/** A completed self-check run satisfies feedback for the run it resumes. */
+function hasCompletedSelfCheckFor(
+  runId: string,
+  events: AgentEvent[],
+  runById: Map<string, RunRecord>,
+): boolean {
+  for (const e of events) {
+    if (e.eventType !== "user_message") continue;
+    if (e.payload.selfCheck !== true) continue;
+    if (e.payload.resumesRunId !== runId) continue;
+    if (isRunFeedbackComplete(e.runId, events, runById.get(e.runId))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface UnclosedUserMessage {
   runId: string;
   text: string;
@@ -66,9 +83,11 @@ export function findLatestUnclosedUserMessage(
     const text =
       typeof um.payload.text === "string" ? um.payload.text.trim() : "";
     if (!text) continue;
-    if (
-      !isRunFeedbackComplete(um.runId, events, runById.get(um.runId))
-    ) {
+    const runRecord = runById.get(um.runId);
+    const complete =
+      isRunFeedbackComplete(um.runId, events, runRecord) ||
+      hasCompletedSelfCheckFor(um.runId, events, runById);
+    if (!complete) {
       return {
         runId: um.runId,
         text,

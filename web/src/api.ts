@@ -70,11 +70,23 @@ export const api = {
     );
   },
 
-  sendMessage: (id: string, message: string) =>
+  sendMessage: (
+    id: string,
+    message: string,
+    images?: Array<{
+      data: string;
+      mimeType: string;
+      width?: number;
+      height?: number;
+    }>,
+  ) =>
     fetch(`${BASE}/tasks/${id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        ...(images?.length ? { images } : {}),
+      }),
     }).then((r) => j<{ runId: string }>(r)),
 
   stopTask: (id: string) =>

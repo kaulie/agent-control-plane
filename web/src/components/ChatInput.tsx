@@ -1,11 +1,70 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+export interface ChatImage {
+  /** Local preview object URL / data URL for UI. */
+  previewUrl: string;
+  /** Raw base64 without data: prefix. */
+  data: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ChatPayload {
+  text: string;
+  images: ChatImage[];
+}
 
 interface Props {
-  onSend: (message: string) => void;
+  onSend: (payload: ChatPayload) => void;
   onStop?: () => void;
   disabled: boolean;
   running: boolean;
   stopping?: boolean;
+}
+
+const ALLOWED = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const MAX_IMAGES = 5;
+const MAX_BYTES = 4 * 1024 * 1024;
+
+function readFileAsImage(file: File): Promise<ChatImage> {
+  return new Promise((resolve, reject) => {
+    if (!ALLOWED.has(file.type)) {
+      reject(new Error(`Unsupported type: ${file.type || file.name}`));
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      reject(new Error(`Each image must be ≤ ${MAX_BYTES / (1024 * 1024)}MB`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Failed to read image"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const m = /^data:([^;]+);base64,(.+)$/s.exec(result);
+      if (!m) {
+        reject(new Error("Invalid image data"));
+        return;
+      }
+      const mimeType = m[1];
+      const data = m[2];
+      const img = new Image();
+      img.onload = () => {
+        resolve({
+          previewUrl: result,
+          data,
+          mimeType,
+          width: img.naturalWidth || undefined,
+          height: img.naturalHeight || undefined,
+        });
+      };
+      img.onerror = () => {
+        resolve({ previewUrl: result, data, mimeType });
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function ChatInput({
@@ -16,46 +75,145 @@ export default function ChatInput({
   stopping = false,
 }: Props) {
   const [text, setText] = useState("");
+  const [images, setImages] = useState<ChatImage[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const canSend = (!!text.trim() || images.length > 0) && !disabled && !running;
+
+  const addFiles = async (files: FileList | File[]): Promise<void> => {
+    setAttachError(null);
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!list.length) {
+      setAttachError("Only PNG, JPEG, GIF, or WebP images are supported");
+      return;
+    }
+    const room = MAX_IMAGES - images.length;
+    if (room <= 0) {
+      setAttachError(`At most ${MAX_IMAGES} images per message`);
+      return;
+    }
+    const toAdd = list.slice(0, room);
+    try {
+      const loaded = await Promise.all(toAdd.map(readFileAsImage));
+      setImages((prev) => [...prev, ...loaded]);
+      if (list.length > room) {
+        setAttachError(`Only ${MAX_IMAGES} images allowed; extras ignored`);
+      }
+    } catch (e) {
+      setAttachError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const removeImage = (idx: number): void => {
+    setImages((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   const submit = (): void => {
-    const m = text.trim();
-    if (!m || disabled || running) return;
-    onSend(m);
+    if (!canSend) return;
+    onSend({ text: text.trim(), images });
     setText("");
+    setImages([]);
+    setAttachError(null);
   };
 
   return (
     <div className="chat-input">
-      <textarea
-        value={text}
-        placeholder={
-          running
-            ? "Agent is working… click Stop to cancel"
-            : "Send an instruction to the agent…"
-        }
-        disabled={running}
-        rows={2}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
-      {running ? (
-        <button
-          className="btn-stop"
-          onClick={() => onStop?.()}
-          disabled={stopping || !onStop}
-        >
-          {stopping ? "Stopping…" : "Stop"}
-        </button>
-      ) : (
-        <button onClick={submit} disabled={disabled || !text.trim()}>
-          Send
-        </button>
+      {images.length > 0 && (
+        <div className="chat-image-previews">
+          {images.map((img, i) => (
+            <div key={`${img.mimeType}-${i}`} className="chat-image-thumb">
+              <img src={img.previewUrl} alt={`Attachment ${i + 1}`} />
+              <button
+                type="button"
+                className="chat-image-remove"
+                aria-label="Remove image"
+                disabled={running}
+                onClick={() => removeImage(i)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
       )}
+      {attachError && <div className="chat-attach-error">{attachError}</div>}
+      <div className="chat-input-row">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          className="btn-attach"
+          title="Attach images"
+          aria-label="Attach images"
+          disabled={running || images.length >= MAX_IMAGES}
+          onClick={() => fileRef.current?.click()}
+        >
+          📎
+        </button>
+        <textarea
+          value={text}
+          placeholder={
+            running
+              ? "Agent is working… click Stop to cancel"
+              : "Send an instruction… (paste or attach images)"
+          }
+          disabled={running}
+          rows={2}
+          onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            const files: File[] = [];
+            for (const item of items) {
+              if (item.kind === "file" && item.type.startsWith("image/")) {
+                const f = item.getAsFile();
+                if (f) files.push(f);
+              }
+            }
+            if (files.length) {
+              e.preventDefault();
+              void addFiles(files);
+            }
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer?.files?.length) return;
+            e.preventDefault();
+            if (!running) void addFiles(e.dataTransfer.files);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        {running ? (
+          <button
+            className="btn-stop"
+            onClick={() => onStop?.()}
+            disabled={stopping || !onStop}
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        ) : (
+          <button onClick={submit} disabled={!canSend}>
+            Send
+          </button>
+        )}
+      </div>
     </div>
   );
 }

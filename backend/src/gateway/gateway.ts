@@ -1,11 +1,22 @@
 import type { AgentEvent, Project, RunRecord, Task, TaskStats } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
+import {
+  saveTaskImages,
+  type PromptImage,
+  type StoredImageRef,
+} from "../attachments.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
 export interface GatewayConfig {
   agentWorkspace: string;
+  dataDir: string;
+}
+
+export interface SendMessageInput {
+  text?: string;
+  images?: PromptImage[];
 }
 
 export interface TaskDetail {
@@ -113,7 +124,7 @@ export class AgentGateway {
       "4. 给出简要结论和修复建议。",
       "请用中文回复。",
     ].join("\n");
-    await this.sendMessage(task.taskId, prompt);
+    await this.sendMessage(task.taskId, { text: prompt });
   }
 
   listEvents(
@@ -127,11 +138,25 @@ export class AgentGateway {
     return this.store.maxEventSeq(taskId);
   }
 
-  async sendMessage(taskId: string, message: string): Promise<{ runId: string }> {
+  async sendMessage(
+    taskId: string,
+    input: SendMessageInput,
+  ): Promise<{ runId: string }> {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
     if (this.activeRuns.has(taskId)) {
       throw new Error("A run is already in progress for this task");
+    }
+
+    const text = (input.text ?? "").trim();
+    const images = input.images ?? [];
+    if (!text && images.length === 0) {
+      throw new Error("message text or at least one image is required");
+    }
+
+    let imageRefs: StoredImageRef[] = [];
+    if (images.length) {
+      imageRefs = saveTaskImages(this.config.dataDir, taskId, images);
     }
 
     const runId = newId("run");
@@ -151,6 +176,17 @@ export class AgentGateway {
     };
 
     // Authoritative user message (also ensures the timeline starts immediately).
+    // Store image refs (not base64) so WS/SQLite stay small.
+    const payload: Record<string, unknown> = { text };
+    if (imageRefs.length) {
+      payload.images = imageRefs.map((ref) => ({
+        id: ref.id,
+        mimeType: ref.mimeType,
+        byteLength: ref.byteLength,
+        ...(ref.width != null ? { width: ref.width } : {}),
+        ...(ref.height != null ? { height: ref.height } : {}),
+      }));
+    }
     persistAndPublish({
       eventId: newId("evt"),
       taskId,
@@ -158,7 +194,7 @@ export class AgentGateway {
       agentId: "",
       timestamp: new Date().toISOString(),
       eventType: "user_message",
-      payload: { text: message },
+      payload,
     });
 
     let agentId = "";
@@ -169,7 +205,11 @@ export class AgentGateway {
           taskId,
           runId,
           agentId,
-          prompt: message,
+          prompt: {
+            // SDK requires text; empty string is fine for image-only sends.
+            text,
+            images: images.length ? images : undefined,
+          },
           cwd: task.workspace,
           model: task.model,
           onEvent: (event) => {

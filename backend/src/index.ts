@@ -30,7 +30,8 @@ const provider = new CursorProvider({
   model: config.model,
 });
 
-const app = Fastify({ logger: true });
+// Allow text + several base64 images in one JSON POST (decoded images are capped separately).
+const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 
 await app.register(cors, { origin: true });
 await app.register(websocket, { options: { maxPayload: 1048576 } });
@@ -49,11 +50,11 @@ if (fs.existsSync(config.webDistDir)) {
 const gateway = new AgentGateway(
   store,
   provider,
-  { agentWorkspace: config.agentWorkspace },
+  { agentWorkspace: config.agentWorkspace, dataDir: config.dataDir },
   publish,
 );
 
-await registerRoutes(app, gateway, provider);
+await registerRoutes(app, gateway, provider, { dataDir: config.dataDir });
 
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
 fs.writeFileSync(runningFlag, String(process.pid));

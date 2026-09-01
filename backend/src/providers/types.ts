@@ -1,15 +1,21 @@
 import type { AgentEvent, CostInfo, TokenUsage } from "../types.js";
+import type { PromptImage } from "../attachments.js";
 
 export interface ModelInfo {
   id: string;
   displayName: string;
 }
 
+export interface RunPrompt {
+  text: string;
+  images?: PromptImage[];
+}
+
 export interface RunInput {
   taskId: string;
   runId: string;
   agentId: string;
-  prompt: string;
+  prompt: RunPrompt;
   cwd: string;
   model?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;

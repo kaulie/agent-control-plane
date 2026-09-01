@@ -86,6 +86,8 @@ interface Row {
   body: string;
   detail: string;
   agentId: string;
+  taskId: string;
+  images: Array<{ id: string; mimeType: string }>;
 }
 
 function buildRows(events: AgentEvent[]): Row[] {
@@ -95,11 +97,27 @@ function buildRows(events: AgentEvent[]): Row[] {
     const p = ev.payload;
     let body = "";
     let detail = "";
+    let images: Array<{ id: string; mimeType: string }> = [];
 
     switch (type) {
-      case "user_message":
+      case "user_message": {
         body = String(p.text ?? "");
+        const raw = p.images;
+        if (Array.isArray(raw)) {
+          images = raw
+            .map((item) => {
+              if (!item || typeof item !== "object") return null;
+              const o = item as Record<string, unknown>;
+              if (typeof o.id !== "string") return null;
+              return {
+                id: o.id,
+                mimeType: typeof o.mimeType === "string" ? o.mimeType : "image/*",
+              };
+            })
+            .filter((x): x is { id: string; mimeType: string } => x != null);
+        }
         break;
+      }
       case "run_started":
         body = String(p.model ?? "agent");
         detail = p.cwd ? String(p.cwd) : "";
@@ -169,6 +187,8 @@ function buildRows(events: AgentEvent[]): Row[] {
       body,
       detail,
       agentId: ev.agentId ?? "",
+      taskId: ev.taskId,
+      images,
     });
   }
   return rows;
@@ -252,6 +272,25 @@ export default function Timeline({
               <span className="event-label">{r.label}</span>
               <span className="event-time">{r.time}</span>
             </div>
+            {r.images.length > 0 && (
+              <div className="event-images">
+                {r.images.map((img) => (
+                  <a
+                    key={img.id}
+                    href={`/api/tasks/${r.taskId}/attachments/${img.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="event-image-link"
+                  >
+                    <img
+                      src={`/api/tasks/${r.taskId}/attachments/${img.id}`}
+                      alt="User attachment"
+                      className="event-image"
+                    />
+                  </a>
+                ))}
+              </div>
+            )}
             {r.body && <div className="event-body">{r.body}</div>}
             {r.detail && <pre className="event-detail">{r.detail}</pre>}
             {r.type === "agent_response" && r.agentId && (

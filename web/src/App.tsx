@@ -256,13 +256,23 @@ export default function App() {
   }, [projects, refreshProjects, selectedProjectId]);
 
   const sendMessage = useCallback(
-    async (message: string) => {
-      if (!selectedId || !message.trim()) return;
+    async (payload: { text: string; images: Array<{ data: string; mimeType: string; width?: number; height?: number }> }) => {
+      if (!selectedId) return;
+      if (!payload.text.trim() && payload.images.length === 0) return;
       setError(null);
       setRunning(true);
       setStopping(false);
       try {
-        await api.sendMessage(selectedId, message);
+        await api.sendMessage(
+          selectedId,
+          payload.text,
+          payload.images.map(({ data, mimeType, width, height }) => ({
+            data,
+            mimeType,
+            width,
+            height,
+          })),
+        );
       } catch (e) {
         setError(String(e));
         setRunning(false);

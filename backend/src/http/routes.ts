@@ -1,11 +1,18 @@
 import type { FastifyInstance } from "fastify";
+import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { AgentProvider } from "../providers/types.js";
+import {
+  resolveAttachmentPath,
+  validateIncomingImages,
+  type IncomingImage,
+} from "../attachments.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
   provider: AgentProvider,
+  opts: { dataDir: string },
 ): Promise<void> {
   app.get("/health", async () => ({
     ok: true,
@@ -129,25 +136,58 @@ export async function registerRoutes(
     };
   });
 
-  app.post<{ Params: { taskId: string }; Body: { message?: string } }>(
-    "/api/tasks/:taskId/messages",
+  app.post<{
+    Params: { taskId: string };
+    Body: { message?: string; images?: IncomingImage[] };
+  }>("/api/tasks/:taskId/messages", async (req, reply) => {
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
+    const validated = validateIncomingImages(rawImages);
+    if (!validated.ok) {
+      return reply.code(400).send({ error: validated.error });
+    }
+    if (!message.trim() && validated.images.length === 0) {
+      return reply
+        .code(400)
+        .send({ error: "message text or at least one image is required" });
+    }
+    const detail = gateway.getTaskDetail(req.params.taskId);
+    if (!detail) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    try {
+      const { runId } = await gateway.sendMessage(req.params.taskId, {
+        text: message,
+        images: validated.images,
+      });
+      return { runId };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = msg.includes("already in progress") ? 409 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  app.get<{ Params: { taskId: string; attachmentId: string } }>(
+    "/api/tasks/:taskId/attachments/:attachmentId",
     async (req, reply) => {
-      const message = req.body?.message;
-      if (!message || !message.trim()) {
-        return reply.code(400).send({ error: "message is required" });
-      }
       const detail = gateway.getTaskDetail(req.params.taskId);
       if (!detail) {
         return reply.code(404).send({ error: "task not found" });
       }
-      try {
-        const { runId } = await gateway.sendMessage(req.params.taskId, message);
-        return { runId };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const code = msg.includes("already in progress") ? 409 : 400;
-        return reply.code(code).send({ error: msg });
+      const resolved = resolveAttachmentPath(
+        opts.dataDir,
+        req.params.taskId,
+        req.params.attachmentId,
+      );
+      if (!resolved) {
+        return reply.code(404).send({ error: "attachment not found" });
       }
+      const buf = fs.readFileSync(resolved.filePath);
+      return reply
+        .header("content-type", resolved.mimeType)
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .send(buf);
     },
   );
 

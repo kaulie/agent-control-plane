@@ -130,7 +130,20 @@ export class CursorProvider implements AgentProvider {
     }
 
     try {
-      const run = await agent.send(input.prompt);
+      const images = input.prompt.images?.length
+        ? input.prompt.images.map((img) => ({
+            data: img.data,
+            mimeType: img.mimeType,
+            ...(img.width != null && img.height != null
+              ? { dimension: { width: img.width, height: img.height } }
+              : {}),
+          }))
+        : undefined;
+      const run = await agent.send(
+        images?.length
+          ? { text: input.prompt.text, images }
+          : input.prompt.text,
+      );
       handle.run = run;
 
       if (handle.cancelled) {

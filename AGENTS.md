@@ -22,6 +22,8 @@ cd /Users/gaolei/Projects/deepseek_web_cursor
 
 **Do not** patch runtime with editors, `cp`, `rsync`, or ad-hoc `npm run build` in runtime.
 
+**Self-deploy note:** running `./scripts/deploy.sh` from this agent kills the gateway mid-run. Expect WS disconnect + the current run marked interrupted after restart. Prefer finishing the reply, then deploy in a short final step, and tell the user the UI may briefly show “后端暂时不可达”.
+
 ## Ports
 
 - Runtime listens on **4211** — do not steal this port for local/dev servers.

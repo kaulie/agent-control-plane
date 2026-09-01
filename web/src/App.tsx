@@ -42,12 +42,14 @@ export default function App() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backendDown, setBackendDown] = useState(false);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
   const selectedProjectRef = useRef(selectedProjectId);
   selectedProjectRef.current = selectedProjectId;
   const lastSeqRef = useRef(0);
+  const pollFailRef = useRef(0);
 
   const refreshProjects = useCallback(async (): Promise<Project[]> => {
     const list = await api.listProjects();
@@ -166,16 +168,24 @@ export default function App() {
     return close;
   }, [refreshDetail, refreshTasks, refreshProjects]);
 
-  // Poll while a run is active so the timeline and stats stay fresh even if
-  // the WebSocket drops (belt-and-suspenders alongside the live push).
+  // Poll while a run is active, or while the backend/WS looks unreachable
+  // (e.g. mid-deploy restart). Failures must not silently freeze the UI.
   useEffect(() => {
-    if (!selectedId || !running) return;
-    const id = window.setInterval(async () => {
+    if (!selectedId) return;
+    const wsUnstable = wsStatus !== "connected";
+    const shouldPoll = running || backendDown || wsUnstable;
+    if (!shouldPoll) return;
+
+    const intervalMs = backendDown || wsUnstable ? 2000 : 5000;
+
+    const tick = async (): Promise<void> => {
       try {
         const [evRes, detailRes] = await Promise.all([
           api.getEvents(selectedId, { after: lastSeqRef.current }),
           api.getTask(selectedId),
         ]);
+        pollFailRef.current = 0;
+        setBackendDown(false);
         setEvents((prev) => {
           const ids = new Set(prev.map((p) => p.eventId));
           const fresh = evRes.events.filter((e) => !ids.has(e.eventId));
@@ -187,11 +197,15 @@ export default function App() {
         setRunning(stillRunning);
         if (!stillRunning) setStopping(false);
       } catch {
-        /* transient — ignore */
+        pollFailRef.current += 1;
+        if (pollFailRef.current >= 1) setBackendDown(true);
       }
-    }, 5000);
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), intervalMs);
     return () => window.clearInterval(id);
-  }, [selectedId, running]);
+  }, [selectedId, running, backendDown, wsStatus]);
 
   const selectTask = useCallback(async (id: string) => {
     setSelectedId(id);
@@ -330,6 +344,11 @@ export default function App() {
           ws: {wsStatus}
         </div>
       </header>
+      {(backendDown || wsStatus === "reconnecting") && (
+        <div className="reconnect-banner" role="status">
+          后端暂时不可达（可能正在部署重启）… 前端仍在自动重试轮询，不是卡死
+        </div>
+      )}
       <div className="body">
         <TaskList
           projects={projects}

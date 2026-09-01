@@ -702,3 +702,13 @@ body {
   max-width: 80vw;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
+
+.reconnect-banner {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--amber) 22%, var(--bg-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}

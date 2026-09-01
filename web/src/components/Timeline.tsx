@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
-import { formatTime, truncate } from "../format";
+import { formatTime, truncate, formatDuration } from "../format";
 
 const ICONS: Record<string, string> = {
   user_message: "👤",
@@ -163,11 +163,13 @@ function buildRows(events: AgentEvent[]): Row[] {
         break;
       case "run_completed":
         body = String(p.result ?? "");
-        detail = `duration ${p.durationMs ?? "?"}ms`;
+        detail =
+          p.durationMs != null ? `耗时 ${formatDuration(Number(p.durationMs))}` : "";
         break;
       case "run_cancelled":
         body = "Stopped by user";
-        detail = p.durationMs != null ? `duration ${p.durationMs}ms` : "";
+        detail =
+          p.durationMs != null ? `耗时 ${formatDuration(Number(p.durationMs))}` : "";
         break;
       case "run_error":
         body = String(p.error ?? "error");

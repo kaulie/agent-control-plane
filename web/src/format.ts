@@ -11,12 +11,17 @@ export function formatCost(cents: number | undefined | null): string {
 }
 
 export function formatDuration(ms: number | undefined | null): string {
-  if (ms == null || ms <= 0) return "0s";
+  if (ms == null || Number.isNaN(ms) || ms < 0) return "0秒";
   const totalSec = Math.round(ms / 1000);
-  const m = Math.floor(totalSec / 60);
+  if (totalSec <= 0) return "0秒";
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  if (m === 0) return `${s}s`;
-  return `${m}m ${s}s`;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}小时`);
+  if (m > 0) parts.push(`${m}分钟`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}秒`);
+  return parts.join("");
 }
 
 export function formatTime(iso: string): string {

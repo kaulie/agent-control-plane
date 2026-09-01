@@ -76,7 +76,10 @@ npm run dev:web       # frontend :5174
 
 1. Pick or create a **Project** in the sidebar (default: `Default`).
 2. Click **+ New Task** (or create one via `POST /api/tasks` with `projectId`).
-3. Type an instruction and press **Send**.
+3. Type an instruction and press **Send**. Use the **Agent / Plan** dropdown
+   next to the input to switch conversation mode (Plan focuses on planning;
+   Agent can edit files and run tools). The last choice is remembered in the
+   browser.
 4. Watch the timeline stream real-time events (thinking → tool calls → file
    reads/edits → terminal → final answer).
 5. The usage bar at the top shows tokens, cost, duration, model calls and tool
@@ -109,7 +112,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
-| POST | `/api/tasks/:id/messages` | send `{ message }` → starts an Agent Run |
+| POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
 | WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
 

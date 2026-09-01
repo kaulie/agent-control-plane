@@ -138,7 +138,7 @@ export async function registerRoutes(
 
   app.post<{
     Params: { taskId: string };
-    Body: { message?: string; images?: IncomingImage[] };
+    Body: { message?: string; images?: IncomingImage[]; mode?: string };
   }>("/api/tasks/:taskId/messages", async (req, reply) => {
     const message = typeof req.body?.message === "string" ? req.body.message : "";
     const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
@@ -151,6 +151,14 @@ export async function registerRoutes(
         .code(400)
         .send({ error: "message text or at least one image is required" });
     }
+    const rawMode = req.body?.mode;
+    let mode: "agent" | "plan" = "agent";
+    if (rawMode != null) {
+      if (rawMode !== "agent" && rawMode !== "plan") {
+        return reply.code(400).send({ error: "mode must be \"agent\" or \"plan\"" });
+      }
+      mode = rawMode;
+    }
     const detail = gateway.getTaskDetail(req.params.taskId);
     if (!detail) {
       return reply.code(404).send({ error: "task not found" });
@@ -159,6 +167,7 @@ export async function registerRoutes(
       const { runId } = await gateway.sendMessage(req.params.taskId, {
         text: message,
         images: validated.images,
+        mode,
       });
       return { runId };
     } catch (err) {

@@ -17,6 +17,7 @@ export interface GatewayConfig {
 export interface SendMessageInput {
   text?: string;
   images?: PromptImage[];
+  mode?: "agent" | "plan";
 }
 
 export interface TaskDetail {
@@ -188,7 +189,8 @@ export class AgentGateway {
 
     // Authoritative user message (also ensures the timeline starts immediately).
     // Store image refs (not base64) so WS/SQLite stay small.
-    const payload: Record<string, unknown> = { text };
+    const mode = input.mode === "plan" ? "plan" : "agent";
+    const payload: Record<string, unknown> = { text, mode };
     if (imageRefs.length) {
       payload.images = imageRefs.map((ref) => ({
         id: ref.id,
@@ -221,6 +223,7 @@ export class AgentGateway {
           },
           cwd: task.workspace,
           model: task.model,
+          mode,
           onEvent: (event) => {
             if (event.agentId) bindAgentId(event.agentId);
             persistAndPublish(event);

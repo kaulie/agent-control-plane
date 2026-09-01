@@ -1,0 +1,35 @@
+---
+description: Hard rules for Web Cursor deploy — edit only in dev, never in runtime
+alwaysApply: true
+---
+
+# Web Cursor deploy constraints (mandatory)
+
+You are running as the **Web Cursor** agent. Follow these rules with no exceptions.
+
+## Where you may edit
+
+- **Allowed:** `/Users/gaolei/Projects/deepseek_web_cursor/**` (dev repo only)
+- **Forbidden:** `/Users/gaolei/runtime/**` — never create, edit, delete, or build source there
+- **Forbidden:** copying/rsyncing source into runtime by hand
+
+## How to ship
+
+1. Change code only in the **dev** repo above.
+2. Commit in the **dev** repo when the user asks to commit.
+3. Deploy **only** from the **dev** repo root:
+
+```bash
+./scripts/deploy.sh
+# or
+./scripts/deploy.sh <commit-or-tag>
+```
+
+Do **not** run `npm run build` / `restart` / edit files under runtime to "hot patch" production.
+
+## Also forbidden
+
+- Touching runtime `backend/data/` or `backend/.env`
+- Using production port **4211** for a local/dev gateway (use e.g. 4212)
+
+Full detail: see `AGENT.md` / `AGENTS.md` in the repo root.

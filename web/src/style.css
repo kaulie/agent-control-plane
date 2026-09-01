@@ -312,6 +312,59 @@ body {
   border-left: 3px solid var(--border);
   border-radius: 8px;
   padding: 9px 12px;
+  max-width: 100%;
+}
+
+.event-user {
+  width: fit-content;
+  max-width: 82%;
+  margin-left: auto;
+  margin-right: 0;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-2));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-left-width: 4px;
+  border-left-color: var(--accent);
+  border-radius: 12px 12px 4px 12px;
+}
+
+.event-user .event-label {
+  color: var(--accent);
+}
+
+.event-assistant {
+  width: fit-content;
+  max-width: 82%;
+  margin-right: auto;
+  margin-left: 0;
+  background: color-mix(in srgb, var(--green) 12%, var(--bg-2));
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  border-left-width: 4px;
+  border-left-color: var(--green);
+  border-radius: 12px 12px 12px 4px;
+  padding-bottom: 22px;
+}
+
+.event-assistant .event-label {
+  color: var(--green);
+}
+
+.event-activity {
+  max-width: 100%;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bg-2) 70%, var(--bg));
+  border-color: var(--border);
+  opacity: 0.78;
+  font-size: 12.5px;
+}
+
+.event-activity .event-label {
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.event-activity .event-body,
+.event-activity .event-detail {
+  font-size: 12px;
 }
 
 .event-agent-id {
@@ -342,6 +395,23 @@ body {
   font-size: 12px;
 }
 
+.event-mode {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg-3);
+}
+
+.event-mode-plan {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
 .event-time {
   margin-left: auto;
   color: var(--text-dim);
@@ -369,18 +439,8 @@ body {
   overflow-y: auto;
 }
 
-.event-user_message {
-  border-left-color: var(--accent);
-}
-
-.event-agent_response {
-  border-left-color: var(--green);
-  padding-bottom: 22px;
-}
-
 .event-thinking {
   border-left-color: #8b5cf6;
-  opacity: 0.85;
 }
 
 .event-file_read,
@@ -406,6 +466,13 @@ body {
 
 .event-usage {
   border-left-color: #60a5fa;
+}
+
+@media (max-width: 700px) {
+  .event-user,
+  .event-assistant {
+    max-width: 94%;
+  }
 }
 
 .event-running {
@@ -479,6 +546,24 @@ body {
   padding: 0 12px;
   font-size: 16px;
   font-weight: 400;
+}
+
+.chat-input .mode-select {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 88px;
+}
+
+.chat-input .mode-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-input button:disabled {

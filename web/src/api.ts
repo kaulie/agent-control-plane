@@ -79,6 +79,7 @@ export const api = {
       width?: number;
       height?: number;
     }>,
+    mode?: "agent" | "plan",
   ) =>
     fetch(`${BASE}/tasks/${id}/messages`, {
       method: "POST",
@@ -86,6 +87,7 @@ export const api = {
       body: JSON.stringify({
         message,
         ...(images?.length ? { images } : {}),
+        ...(mode ? { mode } : {}),
       }),
     }).then((r) => j<{ runId: string }>(r)),
 

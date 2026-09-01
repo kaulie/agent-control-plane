@@ -29,10 +29,19 @@ export function loadConfig(): Config {
     }
   }
 
-  const rawWorkspace = process.env.AGENT_WORKSPACE || "../workspace";
-  const agentWorkspace = path.isAbsolute(rawWorkspace)
-    ? rawWorkspace
-    : path.resolve(__dirname, "..", rawWorkspace);
+  const DEV_REPO = "/Users/gaolei/Projects/deepseek_web_cursor";
+  const rawWorkspace = process.env.AGENT_WORKSPACE?.trim();
+  // Default (and the legacy relative sandbox path) points at the **dev** repo so
+  // Web Cursor agents edit code there — never under /Users/gaolei/runtime.
+  const useDevRepo =
+    !rawWorkspace ||
+    rawWorkspace === "../workspace" ||
+    rawWorkspace === "workspace";
+  const agentWorkspace = useDevRepo
+    ? DEV_REPO
+    : path.isAbsolute(rawWorkspace)
+      ? rawWorkspace
+      : path.resolve(__dirname, "..", rawWorkspace);
 
   return {
     port: Number(process.env.PORT || 4211),

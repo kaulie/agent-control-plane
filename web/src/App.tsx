@@ -256,7 +256,11 @@ export default function App() {
   }, [projects, refreshProjects, selectedProjectId]);
 
   const sendMessage = useCallback(
-    async (payload: { text: string; images: Array<{ data: string; mimeType: string; width?: number; height?: number }> }) => {
+    async (payload: {
+      text: string;
+      images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
+      mode: "agent" | "plan";
+    }) => {
       if (!selectedId) return;
       if (!payload.text.trim() && payload.images.length === 0) return;
       setError(null);
@@ -272,6 +276,7 @@ export default function App() {
             width,
             height,
           })),
+          payload.mode,
         );
       } catch (e) {
         setError(String(e));

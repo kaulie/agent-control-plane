@@ -19,6 +19,8 @@ export interface RunInput {
   prompt: RunPrompt;
   cwd: string;
   model?: string;
+  /** Conversation mode for this run (Cursor SDK: agent | plan). */
+  mode?: "agent" | "plan";
   onEvent: (event: AgentEvent) => Promise<void> | void;
 }
 

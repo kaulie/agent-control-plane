@@ -1,5 +1,27 @@
 import { useRef, useState } from "react";
 
+export type AgentMode = "agent" | "plan";
+
+const MODE_STORAGE_KEY = "web-cursor:agentMode";
+
+function loadStoredMode(): AgentMode {
+  try {
+    const v = localStorage.getItem(MODE_STORAGE_KEY);
+    if (v === "plan" || v === "agent") return v;
+  } catch {
+    /* ignore */
+  }
+  return "agent";
+}
+
+function storeMode(mode: AgentMode): void {
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface ChatImage {
   /** Local preview object URL / data URL for UI. */
   previewUrl: string;
@@ -13,6 +35,7 @@ export interface ChatImage {
 export interface ChatPayload {
   text: string;
   images: ChatImage[];
+  mode: AgentMode;
 }
 
 interface Props {
@@ -77,9 +100,15 @@ export default function ChatInput({
   const [text, setText] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [mode, setMode] = useState<AgentMode>(() => loadStoredMode());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canSend = (!!text.trim() || images.length > 0) && !disabled && !running;
+
+  const selectMode = (next: AgentMode): void => {
+    setMode(next);
+    storeMode(next);
+  };
 
   const addFiles = async (files: FileList | File[]): Promise<void> => {
     setAttachError(null);
@@ -111,11 +140,17 @@ export default function ChatInput({
 
   const submit = (): void => {
     if (!canSend) return;
-    onSend({ text: text.trim(), images });
+    onSend({ text: text.trim(), images, mode });
     setText("");
     setImages([]);
     setAttachError(null);
   };
+
+  const placeholder = running
+    ? "Agent is working… click Stop to cancel"
+    : mode === "plan"
+      ? "Describe what to plan… (read-only planning mode)"
+      : "Send an instruction… (paste or attach images)";
 
   return (
     <div className="chat-input">
@@ -160,13 +195,20 @@ export default function ChatInput({
         >
           📎
         </button>
+        <select
+          className="mode-select"
+          value={mode}
+          disabled={running}
+          aria-label="Conversation mode"
+          title="Agent can edit; Plan focuses on planning"
+          onChange={(e) => selectMode(e.target.value as AgentMode)}
+        >
+          <option value="agent">Agent</option>
+          <option value="plan">Plan</option>
+        </select>
         <textarea
           value={text}
-          placeholder={
-            running
-              ? "Agent is working… click Stop to cancel"
-              : "Send an instruction… (paste or attach images)"
-          }
+          placeholder={placeholder}
           disabled={running}
           rows={2}
           onChange={(e) => setText(e.target.value)}

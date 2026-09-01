@@ -21,7 +21,7 @@ const ICONS: Record<string, string> = {
 };
 
 const LABELS: Record<string, string> = {
-  user_message: "User",
+  user_message: "You",
   run_started: "Agent started",
   status: "Status",
   thinking: "Thinking",
@@ -37,6 +37,14 @@ const LABELS: Record<string, string> = {
   run_cancelled: "Stopped",
   run_error: "Error",
 };
+
+type EventRole = "user" | "assistant" | "activity";
+
+function eventRole(type: string): EventRole {
+  if (type === "user_message") return "user";
+  if (type === "agent_response") return "assistant";
+  return "activity";
+}
 
 function argSummary(args: unknown): string {
   if (!args || typeof args !== "object") return String(args ?? "");
@@ -81,6 +89,7 @@ interface Row {
   key: string;
   time: string;
   type: string;
+  role: EventRole;
   label: string;
   icon: string;
   body: string;
@@ -88,6 +97,7 @@ interface Row {
   agentId: string;
   taskId: string;
   images: Array<{ id: string; mimeType: string }>;
+  mode?: "agent" | "plan";
 }
 
 function buildRows(events: AgentEvent[]): Row[] {
@@ -178,10 +188,16 @@ function buildRows(events: AgentEvent[]): Row[] {
       continue;
     }
 
+    let mode: "agent" | "plan" | undefined;
+    if (p.mode === "plan" || p.mode === "agent") {
+      mode = p.mode;
+    }
+
     rows.push({
       key: ev.eventId,
       time: formatTime(ev.timestamp),
       type,
+      role: eventRole(type),
       label: LABELS[type] ?? type,
       icon: ICONS[type] ?? "•",
       body,
@@ -189,6 +205,7 @@ function buildRows(events: AgentEvent[]): Row[] {
       agentId: ev.agentId ?? "",
       taskId: ev.taskId,
       images,
+      mode,
     });
   }
   return rows;
@@ -266,10 +283,18 @@ export default function Timeline({
           </button>
         )}
         {rows.map((r) => (
-          <div key={r.key} className={`event event-${r.type}`}>
+          <div
+            key={r.key}
+            className={`event event-${r.type} event-${r.role}`}
+          >
             <div className="event-head">
               <span className="event-icon">{r.icon}</span>
               <span className="event-label">{r.label}</span>
+              {r.mode && (
+                <span className={`event-mode event-mode-${r.mode}`}>
+                  {r.mode === "plan" ? "Plan" : "Agent"}
+                </span>
+              )}
               <span className="event-time">{r.time}</span>
             </div>
             {r.images.length > 0 && (

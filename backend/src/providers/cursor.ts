@@ -151,10 +151,17 @@ export class CursorProvider implements AgentProvider {
 
   private buildOptions(input: RunInput, modelId: string | undefined): AgentOptions {
     const options: AgentOptions = {
-      local: { cwd: input.cwd },
+      local: {
+        cwd: input.cwd,
+        // Load project rules (`.cursor/rules`, AGENTS.md / AGENT.md) from cwd.
+        settingSources: ["project"],
+      },
     };
     if (modelId) options.model = { id: modelId };
     if (this.config.apiKey) options.apiKey = this.config.apiKey;
+    if (input.mode === "plan" || input.mode === "agent") {
+      options.mode = input.mode;
+    }
     return options;
   }
 
@@ -213,7 +220,8 @@ export class CursorProvider implements AgentProvider {
         ? { text: input.prompt.text, images }
         : input.prompt.text;
 
-    const trySend = (a: SDKAgent) => a.send(payload);
+    const trySend = (a: SDKAgent) =>
+      a.send(payload, input.mode ? { mode: input.mode } : undefined);
 
     try {
       return { agent, run: await trySend(agent) };
@@ -285,6 +293,7 @@ export class CursorProvider implements AgentProvider {
       cwd: input.cwd,
       model: modelId,
       sdkAgentId: agent.agentId,
+      mode: input.mode ?? "agent",
     });
 
     if (handle.cancelled) {

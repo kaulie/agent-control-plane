@@ -24,7 +24,7 @@
 - 每次「待上线」对应一个 deployment 版本，用 git 短 hash 命名（如 `deployment-d7198f15`）：
   - 在 dev 打 tag：`git tag deployment-$(git rev-parse --short=8 HEAD)`
   - 生成目录快照：`deployment/web-cursor/deployment-<hash>/`
-- 上线 = 把某个 deployment-XXX 部署到 `runtime/web-cursor` 并重启。
+- 上线 = 把某个 `deployment-<hash>` 部署到 `runtime/web-cursor` 并重启。
 
 ## 安全
 
@@ -42,5 +42,5 @@
 1. 在**开发目录**改代码、本地自测（避开 4211）。
 2. `git add -A && git commit -m "..."` 提交。
 3. 生成 deployment-<hash>（tag + 目录快照）。
-4. 将 deployment-XXX 部署到 `runtime/web-cursor` 并重启，完成上线。
+4. 将 `deployment-<hash>` 部署到 `runtime/web-cursor` 并重启，完成上线。
 

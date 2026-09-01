@@ -177,16 +177,18 @@ export async function registerRoutes(
       return reply.code(404).send({ error: "task not found" });
     }
     try {
-      const { runId } = await gateway.sendMessage(req.params.taskId, {
-        text: message,
-        images: validated.images,
-        mode,
-      });
-      return { runId };
+      const { runId, queued, queueLength } = await gateway.sendMessage(
+        req.params.taskId,
+        {
+          text: message,
+          images: validated.images,
+          mode,
+        },
+      );
+      return { runId, queued, queueLength };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const code = msg.includes("already in progress") ? 409 : 400;
-      return reply.code(code).send({ error: msg });
+      return reply.code(400).send({ error: msg });
     }
   });
 

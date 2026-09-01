@@ -96,8 +96,10 @@ interface Row {
   detail: string;
   agentId: string;
   taskId: string;
+  runId: string;
   images: Array<{ id: string; mimeType: string }>;
   mode?: "agent" | "plan";
+  queued?: boolean;
 }
 
 function buildRows(events: AgentEvent[]): Row[] {
@@ -208,6 +210,7 @@ function buildRows(events: AgentEvent[]): Row[] {
     if (p.mode === "plan" || p.mode === "agent") {
       mode = p.mode;
     }
+    const queued = type === "user_message" && p.queued === true;
 
     rows.push({
       key: ev.eventId,
@@ -220,8 +223,10 @@ function buildRows(events: AgentEvent[]): Row[] {
       detail,
       agentId: ev.agentId ?? "",
       taskId: ev.taskId,
+      runId: ev.runId,
       images,
       mode,
+      queued,
     });
   }
   return rows;
@@ -248,7 +253,7 @@ function storeAutoFold(on: boolean): void {
   }
 }
 
-function RunningBanner({ running }: { running: boolean }) {
+function RunningBanner({ running, queueLength }: { running: boolean; queueLength: number }) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const startedRef = useRef<number | null>(null);
 
@@ -272,6 +277,9 @@ function RunningBanner({ running }: { running: boolean }) {
     <div className="event event-running" aria-live="polite">
       <span className="spinner" />
       Agent 仍在工作中（不是卡死）… 已运行 {formatDuration(elapsedMs)}
+      {queueLength > 0 && (
+        <span className="queue-hint"> · {queueLength} 条消息排队中</span>
+      )}
     </div>
   );
 }
@@ -329,6 +337,7 @@ function EventCard({
             {row.mode === "plan" ? "Plan" : "Agent"}
           </span>
         )}
+        {row.queued && <span className="event-queued">排队中</span>}
         {collapsed && summary && (
           <span className="event-summary" title={summary}>
             {summary}
@@ -373,17 +382,30 @@ function EventCard({
 export default function Timeline({
   events,
   running,
+  queueLength = 0,
+  queuedRunIds = [],
   hasMore,
   loadingMore,
   onLoadMore,
 }: {
   events: AgentEvent[];
   running: boolean;
+  queueLength?: number;
+  queuedRunIds?: string[];
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
 }) {
-  const rows = useMemo(() => buildRows(events), [events]);
+  const queuedSet = useMemo(() => new Set(queuedRunIds), [queuedRunIds]);
+  const rows = useMemo(
+    () =>
+      buildRows(events).map((row) =>
+        row.type === "user_message"
+          ? { ...row, queued: queuedSet.has(row.runId) }
+          : row,
+      ),
+    [events, queuedSet],
+  );
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const stickToBottomRef = useRef(true);
@@ -473,7 +495,7 @@ export default function Timeline({
             />
           );
         })}
-        <RunningBanner running={running} />
+        <RunningBanner running={running} queueLength={queueLength} />
         {!running && rows.length === 0 && (
           <div className="timeline-empty">No activity yet — send a message below.</div>
         )}

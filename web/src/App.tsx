@@ -38,6 +38,7 @@ export default function App() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [wsStatus, setWsStatus] = useState("connecting");
   const [running, setRunning] = useState(false);
+  const [queueLength, setQueueLength] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -54,6 +55,26 @@ export default function App() {
   const wasUnreachableRef = useRef(false);
   const [gracePolls, setGracePolls] = useState(0);
   const [needsResync, setNeedsResync] = useState(false);
+
+  const applyQueueLength = useCallback((detailRes: TaskDetail | null): void => {
+    if (!detailRes) {
+      setQueueLength(0);
+      return;
+    }
+    setQueueLength(
+      detailRes.runs.filter((r) => r.status === "queued").length,
+    );
+  }, []);
+
+  const applyRunState = useCallback((detailRes: TaskDetail | null): void => {
+    if (!detailRes) {
+      setRunning(false);
+      setQueueLength(0);
+      return;
+    }
+    setRunning(detailRes.runs.some((r) => r.status === "running"));
+    applyQueueLength(detailRes);
+  }, [applyQueueLength]);
 
   const applyInterruptNotice = useCallback((list: AgentEvent[]): void => {
     for (let i = list.length - 1; i >= 0; i--) {
@@ -121,29 +142,29 @@ export default function App() {
       });
       applyInterruptNotice(latest.events);
       setDetail(detailRes);
-      const stillRunning = detailRes.runs.some((r) => r.status === "running");
-      setRunning(stillRunning);
-      if (!stillRunning) setStopping(false);
+      applyRunState(detailRes);
+      if (!detailRes.runs.some((r) => r.status === "running")) setStopping(false);
       void refreshTasks();
     },
-    [applyInterruptNotice, refreshTasks],
+    [applyInterruptNotice, applyRunState, refreshTasks],
   );
 
   const refreshDetail = useCallback(async (id: string) => {
     try {
       const d = await api.getTask(id);
       setDetail(d);
-      setRunning(d.runs.some((r) => r.status === "running"));
+      applyRunState(d);
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [applyRunState]);
 
   const clearSelection = useCallback(() => {
     setSelectedId(null);
     setDetail(null);
     setEvents([]);
     setRunning(false);
+    setQueueLength(0);
     setStopping(false);
     setHasMore(false);
     setLoadingMore(false);
@@ -206,7 +227,6 @@ export default function App() {
               ev.eventType === "run_error" ||
               ev.eventType === "run_cancelled"
             ) {
-              setRunning(false);
               setStopping(false);
               void refreshDetail(ev.taskId);
               if (
@@ -221,6 +241,13 @@ export default function App() {
                 );
               }
             }
+          }
+        } else if (msg.type === "task_queue_updated") {
+          const tid = typeof msg.taskId === "string" ? msg.taskId : "";
+          if (tid && tid === selectedRef.current) {
+            setQueueLength(
+              typeof msg.queueLength === "number" ? msg.queueLength : 0,
+            );
           }
         } else if (msg.type === "task_updated") {
           const tid = (msg.task as Task | undefined)?.taskId;
@@ -315,9 +342,8 @@ export default function App() {
         setGracePolls((n) => (n > 0 ? n - 1 : 0));
 
         setDetail(detailRes);
-        const stillRunning = detailRes.runs.some((r) => r.status === "running");
-        setRunning(stillRunning);
-        if (!stillRunning) setStopping(false);
+        applyRunState(detailRes);
+        if (!detailRes.runs.some((r) => r.status === "running")) setStopping(false);
       } catch {
         pollFailRef.current += 1;
         wasUnreachableRef.current = true;
@@ -338,6 +364,7 @@ export default function App() {
     needsResync,
     resyncSelectedTask,
     applyInterruptNotice,
+    applyRunState,
   ]);
 
   const selectTask = useCallback(async (id: string) => {
@@ -356,7 +383,7 @@ export default function App() {
     try {
       const d = await api.getTask(id);
       setDetail(d);
-      setRunning(d.runs.some((r) => r.status === "running"));
+      applyRunState(d);
     } catch (e) {
       setError(String(e));
       setNeedsResync(true);
@@ -371,7 +398,7 @@ export default function App() {
       setError(String(e));
       setNeedsResync(true);
     }
-  }, [applyInterruptNotice]);
+  }, [applyInterruptNotice, applyRunState]);
 
   const createTask = useCallback(async () => {
     if (!selectedProjectId) return;
@@ -440,10 +467,9 @@ export default function App() {
       if (!payload.text.trim() && payload.images.length === 0) return;
       setError(null);
       setInterruptNotice(null);
-      setRunning(true);
       setStopping(false);
       try {
-        await api.sendMessage(
+        const res = await api.sendMessage(
           selectedId,
           payload.text,
           payload.images.map(({ data, mimeType, width, height }) => ({
@@ -454,12 +480,21 @@ export default function App() {
           })),
           payload.mode,
         );
+        if (res.queued) {
+          if (typeof res.queueLength === "number") {
+            setQueueLength(res.queueLength);
+          } else {
+            setQueueLength((n) => n + 1);
+          }
+        } else {
+          setRunning(true);
+        }
       } catch (e) {
         setError(String(e));
-        setRunning(false);
+        void refreshDetail(selectedId);
       }
     },
-    [selectedId],
+    [refreshDetail, selectedId],
   );
 
   const stopAgent = useCallback(async () => {
@@ -536,6 +571,10 @@ export default function App() {
               <Timeline
                 events={events}
                 running={running}
+                queueLength={queueLength}
+                queuedRunIds={detail.runs
+                  .filter((r) => r.status === "queued")
+                  .map((r) => r.runId)}
                 hasMore={hasMore}
                 loadingMore={loadingMore}
                 onLoadMore={() => void loadMore()}
@@ -543,8 +582,9 @@ export default function App() {
               <ChatInput
                 onSend={sendMessage}
                 onStop={() => void stopAgent()}
-                disabled={running}
+                disabled={stopping}
                 running={running}
+                queueLength={queueLength}
                 stopping={stopping}
               />
             </>

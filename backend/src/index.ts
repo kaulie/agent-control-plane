@@ -109,6 +109,11 @@ try {
   }).catch((err) => {
     app.log.error({ err }, "self-check startup failed");
   });
+
+  const recovered = gateway.recoverQueuedRuns();
+  if (recovered > 0) {
+    app.log.info(`[queue] resumed ${recovered} queued message run(s) after restart`);
+  }
 } catch (err) {
   app.log.error(err);
   try {

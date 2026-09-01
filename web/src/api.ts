@@ -99,7 +99,7 @@ export const api = {
         ...(images?.length ? { images } : {}),
         ...(mode ? { mode } : {}),
       }),
-    }).then((r) => j<{ runId: string }>(r)),
+    }).then((r) => j<{ runId: string; queued?: boolean; queueLength?: number }>(r)),
 
   stopTask: (id: string) =>
     fetch(`${BASE}/tasks/${id}/stop`, {

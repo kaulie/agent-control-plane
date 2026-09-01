@@ -30,7 +30,7 @@ export interface Task {
   agentId?: string;
 }
 
-export type RunStatus = "running" | "finished" | "error" | "cancelled";
+export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";
 
 export interface RunRecord {
   runId: string;

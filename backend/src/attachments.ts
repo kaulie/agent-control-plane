@@ -132,6 +132,24 @@ function isSafeId(id: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(id);
 }
 
+export function loadPromptImagesFromRefs(
+  dataDir: string,
+  taskId: string,
+  refs: StoredImageRef[],
+): PromptImage[] {
+  const out: PromptImage[] = [];
+  for (const ref of refs) {
+    const resolved = resolveAttachmentPath(dataDir, taskId, ref.id);
+    if (!resolved) continue;
+    const data = fs.readFileSync(resolved.filePath).toString("base64");
+    const img: PromptImage = { data, mimeType: ref.mimeType };
+    if (ref.width != null) img.width = ref.width;
+    if (ref.height != null) img.height = ref.height;
+    out.push(img);
+  }
+  return out;
+}
+
 export function resolveAttachmentPath(
   dataDir: string,
   taskId: string,

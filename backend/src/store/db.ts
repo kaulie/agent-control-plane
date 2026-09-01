@@ -550,6 +550,7 @@ export class Store {
     agentId: string;
     provider: string;
     model?: string;
+    status?: RunStatus;
   }): RunRecord {
     const run: RunRecord = {
       runId: input.runId,
@@ -557,7 +558,7 @@ export class Store {
       agentId: input.agentId,
       provider: input.provider,
       model: input.model,
-      status: "running",
+      status: input.status ?? "running",
       createdAt: new Date().toISOString(),
       modelCalls: 0,
       toolCalls: 0,
@@ -636,6 +637,16 @@ export class Store {
     const rows = this.db
       .prepare(`SELECT * FROM runs WHERE task_id = ? ORDER BY created_at ASC`)
       .all(taskId) as unknown as RunRow[];
+    return rows.map((r) => this.toRun(r));
+  }
+
+  /** Queued runs across all tasks, oldest first (for startup recovery). */
+  listAllQueuedRuns(): RunRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE status = 'queued' ORDER BY created_at ASC`,
+      )
+      .all() as unknown as RunRow[];
     return rows.map((r) => this.toRun(r));
   }
 

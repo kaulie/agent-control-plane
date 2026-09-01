@@ -43,6 +43,7 @@ interface Props {
   onStop?: () => void;
   disabled: boolean;
   running: boolean;
+  queueLength?: number;
   stopping?: boolean;
 }
 
@@ -95,6 +96,7 @@ export default function ChatInput({
   onStop,
   disabled,
   running,
+  queueLength = 0,
   stopping = false,
 }: Props) {
   const [text, setText] = useState("");
@@ -103,7 +105,8 @@ export default function ChatInput({
   const [mode, setMode] = useState<AgentMode>(() => loadStoredMode());
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const canSend = (!!text.trim() || images.length > 0) && !disabled && !running;
+  const canSend =
+    (!!text.trim() || images.length > 0) && !disabled && !stopping;
 
   const selectMode = (next: AgentMode): void => {
     setMode(next);
@@ -147,7 +150,9 @@ export default function ChatInput({
   };
 
   const placeholder = running
-    ? "Agent 仍在工作中… 可点 Stop 取消"
+    ? queueLength > 0
+      ? `Agent 工作中，另有 ${queueLength} 条消息排队…`
+      : "Agent 工作中，消息将加入队列…"
     : mode === "plan"
       ? "Describe what to plan… (read-only planning mode)"
       : "Send an instruction… (paste or attach images)";
@@ -163,7 +168,7 @@ export default function ChatInput({
                 type="button"
                 className="chat-image-remove"
                 aria-label="Remove image"
-                disabled={running}
+                disabled={disabled || stopping}
                 onClick={() => removeImage(i)}
               >
                 ×
@@ -190,7 +195,7 @@ export default function ChatInput({
           className="btn-attach"
           title="Attach images"
           aria-label="Attach images"
-          disabled={running || images.length >= MAX_IMAGES}
+          disabled={disabled || stopping || images.length >= MAX_IMAGES}
           onClick={() => fileRef.current?.click()}
         >
           📎
@@ -198,7 +203,7 @@ export default function ChatInput({
         <select
           className="mode-select"
           value={mode}
-          disabled={running}
+          disabled={disabled || stopping}
           aria-label="Conversation mode"
           title="Agent can edit; Plan focuses on planning"
           onChange={(e) => selectMode(e.target.value as AgentMode)}
@@ -209,7 +214,7 @@ export default function ChatInput({
         <textarea
           value={text}
           placeholder={placeholder}
-          disabled={running}
+          disabled={disabled || stopping}
           rows={2}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
@@ -233,7 +238,7 @@ export default function ChatInput({
           onDrop={(e) => {
             if (!e.dataTransfer?.files?.length) return;
             e.preventDefault();
-            if (!running) void addFiles(e.dataTransfer.files);
+            if (!disabled && !stopping) void addFiles(e.dataTransfer.files);
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -250,11 +255,10 @@ export default function ChatInput({
           >
             {stopping ? "Stopping…" : "Stop"}
           </button>
-        ) : (
-          <button onClick={submit} disabled={!canSend}>
-            Send
-          </button>
-        )}
+        ) : null}
+        <button onClick={submit} disabled={!canSend}>
+          {running ? "Queue" : "Send"}
+        </button>
       </div>
     </div>
   );

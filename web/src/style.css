@@ -495,6 +495,20 @@ body {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
+.event-queued {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+  background: color-mix(in srgb, var(--amber) 12%, var(--bg-3));
+}
+
+.queue-hint {
+  color: var(--amber);
+}
+
 .event-time {
   margin-left: auto;
   color: var(--text-dim);

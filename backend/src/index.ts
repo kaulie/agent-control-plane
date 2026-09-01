@@ -101,6 +101,14 @@ try {
       app.log.error({ err }, "崩溃分析任务创建失败");
     });
   }
+
+  void gateway.runPendingSelfChecks().then((n) => {
+    if (n > 0) {
+      app.log.info(`[self-check] started ${n} pending feedback run(s)`);
+    }
+  }).catch((err) => {
+    app.log.error({ err }, "self-check startup failed");
+  });
 } catch (err) {
   app.log.error(err);
   try {

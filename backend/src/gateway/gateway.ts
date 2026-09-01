@@ -9,6 +9,10 @@ import {
   type StoredImageRef,
 } from "../attachments.js";
 import { buildTaskBootstrapText } from "../task-context.js";
+import {
+  buildSelfCheckPrompt,
+  findTasksNeedingSelfCheck,
+} from "../feedback.js";
 import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
@@ -27,6 +31,8 @@ export interface SendMessageInput {
   text?: string;
   images?: PromptImage[];
   mode?: "agent" | "plan";
+  /** Startup self-check for a run that never received terminal feedback. */
+  selfCheck?: { resumesRunId: string };
 }
 
 export interface TaskDetail {
@@ -213,6 +219,10 @@ export class AgentGateway {
     // Store image refs (not base64) so WS/SQLite stay small.
     const mode = input.mode === "plan" ? "plan" : "agent";
     const payload: Record<string, unknown> = { text, mode };
+    if (input.selfCheck) {
+      payload.selfCheck = true;
+      payload.resumesRunId = input.selfCheck.resumesRunId;
+    }
     if (imageRefs.length) {
       payload.images = imageRefs.map((ref) => ({
         id: ref.id,
@@ -310,6 +320,36 @@ export class AgentGateway {
     })();
 
     return { runId };
+  }
+
+  /**
+   * After restart: any user message whose run lacks terminal feedback
+   * (e.g. server_restart cancel) gets an automatic self-check run.
+   */
+  async runPendingSelfChecks(): Promise<number> {
+    const pending = findTasksNeedingSelfCheck(this.store);
+    let started = 0;
+    for (const { taskId, unclosed } of pending) {
+      if (this.activeRuns.has(taskId)) continue;
+      const text = buildSelfCheckPrompt(unclosed);
+      try {
+        await this.sendMessage(taskId, {
+          text,
+          mode: "agent",
+          selfCheck: { resumesRunId: unclosed.runId },
+        });
+        started += 1;
+        console.warn(
+          `[self-check] task ${taskId}: resuming feedback for run ${unclosed.runId}`,
+        );
+      } catch (err) {
+        console.warn(
+          `[self-check] task ${taskId} failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    return started;
   }
 
   async stopTask(taskId: string): Promise<{ runId: string }> {

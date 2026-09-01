@@ -475,6 +475,65 @@ body {
   user-select: all;
 }
 
+.event-group-count {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+  background: color-mix(in srgb, var(--amber) 12%, var(--bg-3));
+  flex-shrink: 0;
+}
+
+.event-group-proxy {
+  border-left-color: var(--amber);
+}
+
+.event-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
+  border-radius: 8px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--amber) 6%, var(--bg));
+}
+
+.event-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.event-group-head:hover {
+  background: var(--bg-3);
+}
+
+.event-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--amber) 40%, var(--border));
+  margin-left: 6px;
+}
+
+.event-group-time-end {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .event-head {
   display: flex;
   align-items: center;

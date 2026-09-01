@@ -235,6 +235,43 @@ function buildRows(events: AgentEvent[]): Row[] {
 const NEAR_BOTTOM_PX = 80;
 const AUTO_FOLD_KEY = "web-cursor:autoFoldActivity";
 
+/** Consecutive runs of these activity types collapse into one expandable group. */
+const GROUPABLE_TYPES = new Set([
+  "tool_call_started",
+  "tool_result",
+  "file_read",
+  "file_edit",
+  "terminal",
+  "search",
+]);
+
+type TimelineItem =
+  | { kind: "row"; row: Row }
+  | { kind: "group"; key: string; rows: Row[] };
+
+function groupConsecutiveRows(rows: Row[]): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i];
+    if (!GROUPABLE_TYPES.has(row.type)) {
+      out.push({ kind: "row", row });
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (j < rows.length && rows[j].type === row.type) j += 1;
+    const chunk = rows.slice(i, j);
+    if (chunk.length >= 2) {
+      out.push({ kind: "group", key: `grp-${chunk[0].key}`, rows: chunk });
+    } else {
+      out.push({ kind: "row", row: chunk[0] });
+    }
+    i = j;
+  }
+  return out;
+}
+
 function loadAutoFold(): boolean {
   try {
     const v = localStorage.getItem(AUTO_FOLD_KEY);
@@ -293,45 +330,68 @@ function EventCard({
   row,
   collapsed,
   onToggle,
+  groupCount,
+  groupExpanded,
+  onGroupToggle,
 }: {
   row: Row;
   collapsed: boolean;
   onToggle?: () => void;
+  /** When set, this card represents a collapsed group (show count badge). */
+  groupCount?: number;
+  groupExpanded?: boolean;
+  onGroupToggle?: () => void;
 }) {
   const foldable = row.role === "activity";
-  const showToggle = foldable && onToggle != null;
+  const isGroupProxy = groupCount != null && groupCount > 1 && !groupExpanded;
+  const showToggle = (foldable && onToggle != null) || isGroupProxy;
   const summary = activitySummary(row);
+
+  const handleHeadClick = (): void => {
+    if (isGroupProxy && onGroupToggle) {
+      onGroupToggle();
+      return;
+    }
+    onToggle?.();
+  };
 
   return (
     <div
       className={`event event-${row.type} event-${row.role}${
         collapsed ? " event-collapsed" : ""
-      }`}
+      }${isGroupProxy ? " event-group-proxy" : ""}`}
     >
       <div
         className={`event-head${showToggle ? " event-head-toggle" : ""}`}
-        onClick={showToggle ? onToggle : undefined}
+        onClick={showToggle ? handleHeadClick : undefined}
         onKeyDown={
           showToggle
             ? (e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  onToggle();
+                  handleHeadClick();
                 }
               }
             : undefined
         }
         role={showToggle ? "button" : undefined}
         tabIndex={showToggle ? 0 : undefined}
-        aria-expanded={showToggle ? !collapsed : undefined}
+        aria-expanded={
+          isGroupProxy ? false : showToggle ? !collapsed : undefined
+        }
       >
         {showToggle && (
           <span className="event-chevron" aria-hidden>
-            {collapsed ? "▸" : "▾"}
+            {isGroupProxy || collapsed ? "▸" : "▾"}
           </span>
         )}
         <span className="event-icon">{row.icon}</span>
         <span className="event-label">{row.label}</span>
+        {groupCount != null && groupCount > 1 && (
+          <span className="event-group-count" title={`${groupCount} 项同类操作`}>
+            ×{groupCount}
+          </span>
+        )}
         {row.mode && (
           <span className={`event-mode event-mode-${row.mode}`}>
             {row.mode === "plan" ? "Plan" : "Agent"}
@@ -379,6 +439,78 @@ function EventCard({
   );
 }
 
+function EventGroup({
+  groupKey,
+  rows,
+  expanded,
+  onToggleGroup,
+  autoFold,
+  expandedItems,
+  onToggleItem,
+}: {
+  groupKey: string;
+  rows: Row[];
+  expanded: boolean;
+  onToggleGroup: () => void;
+  autoFold: boolean;
+  expandedItems: Record<string, boolean>;
+  onToggleItem: (key: string) => void;
+}) {
+  const last = rows[rows.length - 1];
+  const count = rows.length;
+
+  if (!expanded) {
+    return (
+      <EventCard
+        row={last}
+        collapsed={Boolean(autoFold && !expandedItems[last.key])}
+        onToggle={autoFold ? () => onToggleItem(last.key) : undefined}
+        groupCount={count}
+        groupExpanded={false}
+        onGroupToggle={onToggleGroup}
+      />
+    );
+  }
+
+  return (
+    <div className="event-group" data-group-key={groupKey}>
+      <button
+        type="button"
+        className="event-group-head"
+        onClick={onToggleGroup}
+        aria-expanded
+      >
+        <span className="event-chevron" aria-hidden>
+          ▾
+        </span>
+        <span className="event-icon">{last.icon}</span>
+        <span className="event-label">{last.label}</span>
+        <span className="event-group-count">{count} 项</span>
+        <span className="event-time">{rows[0].time}</span>
+        {rows.length > 1 && rows[0].time !== last.time && (
+          <span className="event-group-time-end">– {last.time}</span>
+        )}
+      </button>
+      <div className="event-group-items">
+        {rows.map((r) => {
+          const foldable = r.role === "activity";
+          const collapsed = Boolean(autoFold && foldable && !expandedItems[r.key]);
+          return (
+            <EventCard
+              key={r.key}
+              row={r}
+              collapsed={collapsed}
+              onToggle={
+                foldable && autoFold ? () => onToggleItem(r.key) : undefined
+              }
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Timeline({
   events,
   running,
@@ -406,11 +538,15 @@ export default function Timeline({
       ),
     [events, queuedSet],
   );
+  const items = useMemo(() => groupConsecutiveRows(rows), [rows]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const stickToBottomRef = useRef(true);
   const [autoFold, setAutoFold] = useState(() => loadAutoFold());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const setAutoFoldPersist = (on: boolean): void => {
     setAutoFold(on);
@@ -420,6 +556,10 @@ export default function Timeline({
 
   const toggleExpanded = (key: string): void => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleGroup = (key: string): void => {
+    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const updateJumpVisibility = (): void => {
@@ -458,7 +598,7 @@ export default function Timeline({
     } else {
       updateJumpVisibility();
     }
-  }, [rows, running, autoFold, expanded]);
+  }, [items, running, autoFold, expanded, expandedGroups]);
 
   return (
     <div className="timeline-wrap">
@@ -481,7 +621,22 @@ export default function Timeline({
             {loadingMore ? "Loading…" : "Load earlier events"}
           </button>
         )}
-        {rows.map((r) => {
+        {items.map((item) => {
+          if (item.kind === "group") {
+            return (
+              <EventGroup
+                key={item.key}
+                groupKey={item.key}
+                rows={item.rows}
+                expanded={Boolean(expandedGroups[item.key])}
+                onToggleGroup={() => toggleGroup(item.key)}
+                autoFold={autoFold}
+                expandedItems={expanded}
+                onToggleItem={toggleExpanded}
+              />
+            );
+          }
+          const r = item.row;
           const foldable = r.role === "activity";
           const collapsed = Boolean(autoFold && foldable && !expanded[r.key]);
           return (

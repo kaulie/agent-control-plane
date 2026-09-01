@@ -70,6 +70,13 @@ function resultSummary(result: unknown): string {
   return truncate(JSON.stringify(v), 240);
 }
 
+/** Short display form: agent-4e559024-… → agent-4e559024 */
+function shortAgentId(id: string): string {
+  const m = id.match(/^(?:agent-)?([0-9a-f]{8})/i);
+  if (m) return `agent-${m[1].toLowerCase()}`;
+  return id.length > 20 ? `${id.slice(0, 20)}…` : id;
+}
+
 interface Row {
   key: string;
   time: string;
@@ -78,6 +85,7 @@ interface Row {
   icon: string;
   body: string;
   detail: string;
+  agentId: string;
 }
 
 function buildRows(events: AgentEvent[]): Row[] {
@@ -143,10 +151,12 @@ function buildRows(events: AgentEvent[]): Row[] {
     const last = rows[rows.length - 1];
     if (last && type === "thinking" && last.type === "thinking") {
       last.body += body;
+      if (!last.agentId && ev.agentId) last.agentId = ev.agentId;
       continue;
     }
     if (last && type === "agent_response" && last.type === "agent_response") {
       last.body += body;
+      if (!last.agentId && ev.agentId) last.agentId = ev.agentId;
       continue;
     }
 
@@ -158,6 +168,7 @@ function buildRows(events: AgentEvent[]): Row[] {
       icon: ICONS[type] ?? "•",
       body,
       detail,
+      agentId: ev.agentId ?? "",
     });
   }
   return rows;
@@ -227,6 +238,11 @@ export default function Timeline({
             </div>
             {r.body && <div className="event-body">{r.body}</div>}
             {r.detail && <pre className="event-detail">{r.detail}</pre>}
+            {r.type === "agent_response" && r.agentId && (
+              <div className="event-agent-id" title={r.agentId}>
+                {shortAgentId(r.agentId)}
+              </div>
+            )}
           </div>
         ))}
         {running && (

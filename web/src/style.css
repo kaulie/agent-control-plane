@@ -306,11 +306,24 @@ body {
 }
 
 .event {
+  position: relative;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
   border-radius: 8px;
   padding: 9px 12px;
+}
+
+.event-agent-id {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0.75;
+  user-select: all;
 }
 
 .event-head {
@@ -362,6 +375,7 @@ body {
 
 .event-agent_response {
   border-left-color: var(--green);
+  padding-bottom: 22px;
 }
 
 .event-thinking {

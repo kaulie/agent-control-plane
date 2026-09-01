@@ -147,7 +147,7 @@ export default function ChatInput({
   };
 
   const placeholder = running
-    ? "Agent is working… click Stop to cancel"
+    ? "Agent 仍在工作中… 可点 Stop 取消"
     : mode === "plan"
       ? "Describe what to plan… (read-only planning mode)"
       : "Send an instruction… (paste or attach images)";

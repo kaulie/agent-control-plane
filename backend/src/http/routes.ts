@@ -114,7 +114,10 @@ export async function registerRoutes(
         return reply.code(404).send({ error: "task not found" });
       }
       const after = req.query.after ? Number(req.query.after) : undefined;
-      return { events: gateway.listEvents(req.params.taskId, after) };
+      return {
+        events: gateway.listEvents(req.params.taskId, after),
+        nextSeq: gateway.maxEventSeq(req.params.taskId),
+      };
     },
   );
 

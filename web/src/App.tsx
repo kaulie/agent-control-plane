@@ -45,6 +45,7 @@ export default function App() {
   selectedRef.current = selectedId;
   const selectedProjectRef = useRef(selectedProjectId);
   selectedProjectRef.current = selectedProjectId;
+  const lastSeqRef = useRef(0);
 
   const refreshProjects = useCallback(async (): Promise<Project[]> => {
     const list = await api.listProjects();
@@ -81,6 +82,7 @@ export default function App() {
     setEvents([]);
     setRunning(false);
     setStopping(false);
+    lastSeqRef.current = 0;
   }, []);
 
   const selectProject = useCallback(
@@ -167,7 +169,7 @@ export default function App() {
     const id = window.setInterval(async () => {
       try {
         const [evRes, detailRes] = await Promise.all([
-          api.getEvents(selectedId),
+          api.getEvents(selectedId, lastSeqRef.current),
           api.getTask(selectedId),
         ]);
         setEvents((prev) => {
@@ -175,6 +177,7 @@ export default function App() {
           const fresh = evRes.events.filter((e) => !ids.has(e.eventId));
           return fresh.length ? [...prev, ...fresh] : prev;
         });
+        lastSeqRef.current = evRes.nextSeq;
         setDetail(detailRes);
         const stillRunning = detailRes.runs.some((r) => r.status === "running");
         setRunning(stillRunning);
@@ -201,6 +204,7 @@ export default function App() {
     try {
       const r = await api.getEvents(id);
       setEvents(r.events);
+      lastSeqRef.current = r.nextSeq;
     } catch (e) {
       setError(String(e));
     }

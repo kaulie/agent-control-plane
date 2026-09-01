@@ -35,6 +35,7 @@ export interface CostInfo {
 
 export interface AgentEvent {
   eventId: string;
+  seq?: number;
   taskId: string;
   runId: string;
   agentId: string;

@@ -97,6 +97,10 @@ export class AgentGateway {
     return this.store.listEvents(taskId, afterSeq);
   }
 
+  maxEventSeq(taskId: string): number {
+    return this.store.maxEventSeq(taskId);
+  }
+
   async sendMessage(taskId: string, message: string): Promise<{ runId: string }> {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);

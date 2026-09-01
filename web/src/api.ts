@@ -56,8 +56,12 @@ export const api = {
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 
-  getEvents: (id: string) =>
-    fetch(`${BASE}/tasks/${id}/events`).then((r) => j<{ events: AgentEvent[] }>(r)),
+  getEvents: (id: string, after?: number) => {
+    const q = after ? `?after=${after}` : "";
+    return fetch(`${BASE}/tasks/${id}/events${q}`).then(
+      (r) => j<{ events: AgentEvent[]; nextSeq: number }>(r),
+    );
+  },
 
   sendMessage: (id: string, message: string) =>
     fetch(`${BASE}/tasks/${id}/messages`, {

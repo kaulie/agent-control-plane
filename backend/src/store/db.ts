@@ -473,6 +473,7 @@ export class Store {
   private toEvent(r: EventRow): AgentEvent {
     return {
       eventId: r.event_id,
+      seq: r.seq,
       taskId: r.task_id,
       runId: r.run_id,
       agentId: r.agent_id,

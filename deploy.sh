@@ -19,6 +19,11 @@ LOG_FILE="${BACKEND_DIR}/server.log"
 PORT="${PORT:-4211}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 TARGET="${1:-main}"
+# 分支名统一解析到远程引用，避免用到 runtime 里过期的本地分支
+case "${TARGET}" in
+  main) TARGET="origin/main" ;;
+  master) TARGET="origin/master" ;;
+esac
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy][错误] $*" >&2; exit 1; }

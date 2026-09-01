@@ -31,4 +31,13 @@ cd /Users/gaolei/Projects/deepseek_web_cursor
 
 Never commit or overwrite `backend/.env` or `backend/data/`.
 
+## Progress feedback (anti “stuck” UX)
+
+Users often think a silent long tool call means the agent is dead. Prevent that:
+
+1. **Never** chain typecheck + commit + deploy (or other multi-minute steps) in **one** shell command.
+2. Split into short steps; after each step, **reply in chat** with the result (ok / fail / next).
+3. Prefer commands that print progress (`echo` milestones). Avoid long silent waits without output.
+4. While waiting on deploy/build, say explicitly: “正在构建/重启，大约需要几十秒，不是卡死”.
+
 See also: `AGENT.md` (full ops guide) and `.cursor/rules/deploy-runtime.mdc`.

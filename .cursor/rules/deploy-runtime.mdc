@@ -32,4 +32,10 @@ Do **not** run `npm run build` / `restart` / edit files under runtime to "hot pa
 - Touching runtime `backend/data/` or `backend/.env`
 - Using production port **4211** for a local/dev gateway (use e.g. 4212)
 
+## Anti-stuck progress
+
+- Do **not** put typecheck + commit + `./scripts/deploy.sh` in a single shell invocation.
+- Run short steps and **tell the user the outcome after each step**.
+- Before a long deploy/build, say it may take tens of seconds and is not hung.
+
 Full detail: see `AGENT.md` / `AGENTS.md` in the repo root.

@@ -325,20 +325,39 @@ export class CursorProvider implements AgentProvider {
       }
 
       const seenStarted = new Set<string>();
-      for await (const msg of run.stream()) {
-        if (handle.cancelled) break;
-        if (msg.type === "usage") modelCalls += 1;
-        if (msg.type === "tool_call" && msg.status === "running") {
-          const callId = msg.call_id;
-          // The SDK can re-notify the same tool call as its args stream in;
-          // emit a single "tool_call_started" per call and count it once.
-          if (callId && seenStarted.has(callId)) continue;
-          if (callId) seenStarted.add(callId);
-          toolCalls += 1;
+      let lastActivityAt = Date.now();
+      const HEARTBEAT_MS = 15_000;
+      const heartbeat = setInterval(() => {
+        if (handle.cancelled) return;
+        const silentFor = Date.now() - lastActivityAt;
+        if (silentFor < HEARTBEAT_MS) return;
+        const elapsedMs = Date.now() - startedAt;
+        void emit("status", {
+          status: "working",
+          message: `仍在执行中（可能在跑长命令），已运行 ${Math.round(elapsedMs / 1000)} 秒`,
+          elapsedMs,
+        });
+      }, HEARTBEAT_MS);
+
+      try {
+        for await (const msg of run.stream()) {
+          if (handle.cancelled) break;
+          lastActivityAt = Date.now();
+          if (msg.type === "usage") modelCalls += 1;
+          if (msg.type === "tool_call" && msg.status === "running") {
+            const callId = msg.call_id;
+            // The SDK can re-notify the same tool call as its args stream in;
+            // emit a single "tool_call_started" per call and count it once.
+            if (callId && seenStarted.has(callId)) continue;
+            if (callId) seenStarted.add(callId);
+            toolCalls += 1;
+          }
+          for (const mapped of mapSdkMessage(msg as SDKMessage)) {
+            await emit(mapped.eventType, mapped.payload, mapped.usage);
+          }
         }
-        for (const mapped of mapSdkMessage(msg as SDKMessage)) {
-          await emit(mapped.eventType, mapped.payload, mapped.usage);
-        }
+      } finally {
+        clearInterval(heartbeat);
       }
 
       const result = await run.wait();

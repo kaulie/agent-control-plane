@@ -215,6 +215,34 @@ function buildRows(events: AgentEvent[]): Row[] {
 
 const NEAR_BOTTOM_PX = 80;
 
+function RunningBanner({ running }: { running: boolean }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startedRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!running) {
+      startedRef.current = null;
+      setElapsedMs(0);
+      return;
+    }
+    if (startedRef.current == null) startedRef.current = Date.now();
+    const tick = (): void => {
+      setElapsedMs(Date.now() - (startedRef.current ?? Date.now()));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
+
+  if (!running) return null;
+  return (
+    <div className="event event-running" aria-live="polite">
+      <span className="spinner" />
+      Agent 仍在工作中（不是卡死）… 已运行 {formatDuration(elapsedMs)}
+    </div>
+  );
+}
+
 export default function Timeline({
   events,
   running,
@@ -327,11 +355,7 @@ export default function Timeline({
             )}
           </div>
         ))}
-        {running && (
-          <div className="event event-running">
-            <span className="spinner" /> Agent is working…
-          </div>
-        )}
+        <RunningBanner running={running} />
         {!running && rows.length === 0 && (
           <div className="timeline-empty">No activity yet — send a message below.</div>
         )}

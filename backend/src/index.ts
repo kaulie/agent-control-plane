@@ -77,6 +77,7 @@ const gateway = new AgentGateway(
 
 await registerRoutes(app, gateway, provider, {
   dataDir: config.dataDir,
+  appVersion: config.appVersion,
 });
 
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）

@@ -53,6 +53,7 @@ interface TaskRow {
   model: string | null;
   created_by: string | null;
   agent_id: string | null;
+  pr_url: string | null;
   task_type: string | null;
   workflow_state: string | null;
 }
@@ -182,6 +183,9 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "workflow_state")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN workflow_state TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "pr_url")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     }
 
     this.db.exec(
@@ -659,7 +663,17 @@ export class Store {
       .run(workflowState, taskId);
   }
 
+  updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
+    if (!this.getTask(taskId)) return undefined;
+    const url = prUrl?.trim() || null;
+    this.db
+      .prepare(`UPDATE tasks SET pr_url = ? WHERE task_id = ?`)
+      .run(url, taskId);
+    return this.getTask(taskId);
+  }
+
   private toTask(r: TaskRow): Task {
+    const prUrl = r.pr_url?.trim();
     return {
       taskId: r.task_id,
       projectId: r.project_id || DEFAULT_PROJECT_ID,
@@ -671,6 +685,7 @@ export class Store {
       model: r.model ?? undefined,
       createdBy: r.created_by ?? undefined,
       agentId: r.agent_id || undefined,
+      ...(prUrl ? { prUrl } : {}),
       taskType: (r.task_type as Task["taskType"]) || "general",
       workflowState: (r.workflow_state as Task["workflowState"]) || "plan",
     };

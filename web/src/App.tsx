@@ -68,6 +68,7 @@ export default function App() {
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
+  const [creatingPr, setCreatingPr] = useState(false);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -661,6 +662,30 @@ export default function App() {
     [selectedId],
   );
 
+  const createPullRequest = useCallback(async () => {
+    if (!selectedId) return;
+    setCreatingPr(true);
+    setError(null);
+    try {
+      const res = await api.createPullRequest(selectedId);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              task: res.task,
+            }
+          : prev,
+      );
+      setTasks((prev) =>
+        prev.map((t) => (t.taskId === res.task.taskId ? res.task : t)),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCreatingPr(false);
+    }
+  }, [selectedId]);
+
   const submitPlanAnswers = useCallback(
     async (batch: PlanAnswerBatch) => {
       if (!selectedId) return;
@@ -774,6 +799,16 @@ export default function App() {
                 workflow={detail.workflow}
                 transitioning={workflowTransitioning}
                 onTransition={(to) => void transitionWorkflow(to)}
+                prUrl={detail.task.prUrl}
+                canCreatePr={Boolean(
+                  projects.find((p) => p.projectId === detail.task.projectId)
+                    ?.gitRepoUrl &&
+                    (detail.workflow.currentState === "coding" ||
+                      detail.workflow.currentState === "pr") &&
+                    !detail.task.prUrl,
+                )}
+                creatingPr={creatingPr}
+                onCreatePr={() => void createPullRequest()}
               />
               <UsageBar task={detail.task} stats={detail.stats} />
               <div className="main-tabs">

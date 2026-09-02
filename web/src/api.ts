@@ -123,6 +123,20 @@ export const api = {
       j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
     ),
 
+  updateTask: (id: string, body: { prUrl?: string | null }) =>
+    fetch(`${BASE}/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<Task>(r)),
+
+  createPullRequest: (id: string, body?: { title?: string; body?: string }) =>
+    fetch(`${BASE}/tasks/${id}/pull-request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }).then((r) => j<{ task: Task; url: string; created: boolean }>(r)),
+
   stopTask: (id: string) =>
     fetch(`${BASE}/tasks/${id}/stop`, {
       method: "POST",

@@ -6,13 +6,14 @@
 
 | 目录 | 含义 | 谁改 |
 |---|---|---|
-| `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 独立 workspace（clone + task 分支） | agent 在此改代码 |
-| `/Users/gaolei/Projects/deepseek_web_cursor` | Canonical 主干仓库（`main` / merge·deploy 源） | 不要在此直接改；作 clone / push 目标 |
+| `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 独立 workspace（clone GitHub + task 分支） | agent 在此改代码 |
+| 项目 `gitRepoUrl`（GitHub） | 开发远程 origin（clone / push / PR） | 在项目设置中配置；agent 不改配置本身 |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | 部署工作树（PR 合入 `main` 后 pull，再 `deploy.sh`） | 不要在此直接开发 |
 | `/Users/gaolei/deployment/web-cursor/deployment-<hash>` | 待上线版本（用 git 短 hash 命名） | 每次上线前生成，一般不改 |
 | `/Users/gaolei/runtime/web-cursor` | 线上当前运行目录 | 只保留运行相关内容，**不要直接改** |
 
 Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `settingSources: ["project"]`，以加载本仓库的 `AGENTS.md` / `.cursor/rules`。  
-约束摘要见根目录 [`AGENTS.md`](AGENTS.md)、主干分支规范 [`BRANCHING.md`](BRANCHING.md)，以及 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
+约束摘要见根目录 [`AGENTS.md`](AGENTS.md)、主干分支与 GitHub PR 规范 [`BRANCHING.md`](BRANCHING.md)，以及 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
 
 ## 端口规范（重要）
 
@@ -82,12 +83,12 @@ Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `setti
 - `workspace/` —— 旧版相对沙盒（遗留；新 task 默认用 `/Users/gaolei/agent-workspace/<taskId>/`）
 - `scripts/` —— 运维/部署脚本（如 `deploy.sh`）
 
-Agent 工作约定：每个 task 在 `/Users/gaolei/agent-workspace/<taskId>/` 下 clone 后开发，互不影响；上线仍从本仓库（canonical）执行 `./scripts/deploy.sh`。
+Agent 工作约定：每个 task 在 `/Users/gaolei/agent-workspace/<taskId>/` 下 clone **项目 GitHub `gitRepoUrl`** 后开发，互不影响；交付默认 `push` + `gh pr create`。上线：PR 合入 `main` 后，在部署工作树 pull，再执行 `./scripts/deploy.sh`。
 
 ## 开发与上线流程
 
-1. 在**开发目录**改代码、本地自测（避开 4211）。
-2. `git add -A && git commit -m "..."` 提交。
-3. 生成 deployment-<hash>（tag + 目录快照）。
-4. 运行 `./scripts/deploy.sh <hash>` 完成上线（git 同步 + 构建 + 重启 + 健康检查）。
+1. 在 **task workspace** 改代码、本地自测（避开 4211）。
+2. `git commit` → `git push` → `gh pr create`（或网关「创建 PR」），回写 `prUrl`。
+3. PR 在 GitHub 合入 `main` 后：`cd /Users/gaolei/Projects/deepseek_web_cursor && git pull --ff-only origin main`。
+4. 运行 `./scripts/deploy.sh`（或不传参部署 main 最新）完成上线。
 

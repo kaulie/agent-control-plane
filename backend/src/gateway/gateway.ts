@@ -240,6 +240,61 @@ export class AgentGateway {
     return updated;
   }
 
+  updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
+    const updated = this.store.updateTaskPrUrl(taskId, prUrl);
+    if (updated) {
+      this.publish({ type: "task_updated", task: updated });
+    }
+    return updated;
+  }
+
+  async createPullRequest(
+    taskId: string,
+    opts?: { title?: string; body?: string },
+  ): Promise<{ task: Task; url: string; created: boolean }> {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const project = this.store.getProject(task.projectId);
+    const gitRepoUrl = project?.gitRepoUrl?.trim();
+    if (!gitRepoUrl) {
+      throw new Error("project gitRepoUrl is required before opening a pull request");
+    }
+    if (task.prUrl?.trim()) {
+      return { task, url: task.prUrl.trim(), created: false };
+    }
+    if (!fs.existsSync(path.join(task.workspace, ".git"))) {
+      throw new Error(
+        `task workspace is not a git repo: ${task.workspace} (clone ${gitRepoUrl} first)`,
+      );
+    }
+
+    const { ensurePullRequest } = await import("../github-pr.js");
+    const title =
+      opts?.title?.trim() ||
+      task.title?.trim() ||
+      `Task ${task.taskId}`;
+    const body =
+      opts?.body?.trim() ||
+      [
+        "## Summary",
+        `- taskId: ${task.taskId}`,
+        `- project: ${project?.name ?? task.projectId}`,
+        "",
+        "## Test plan",
+        "- [ ] Verify changes in review",
+      ].join("\n");
+
+    const result = await ensurePullRequest({
+      cwd: task.workspace,
+      title,
+      body,
+    });
+    const updated = this.store.updateTaskPrUrl(taskId, result.url);
+    if (!updated) throw new Error(`failed to persist prUrl for ${taskId}`);
+    this.publish({ type: "task_updated", task: updated });
+    return { task: updated, url: result.url, created: result.created };
+  }
+
   /**
    * 看门狗触发的崩溃分析：在「系统运维」项目下自动建一个任务，
    * 以 watchdog 用户身份向 agent 下发崩溃原因探查指令。

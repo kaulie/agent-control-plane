@@ -226,6 +226,37 @@ export async function registerRoutes(
     }
   });
 
+  app.patch<{
+    Params: { taskId: string };
+    Body: { prUrl?: string | null };
+  }>("/api/tasks/:taskId", async (req, reply) => {
+    if (req.body?.prUrl === undefined) {
+      return reply.code(400).send({ error: "prUrl is required" });
+    }
+    const task = gateway.updateTaskPrUrl(req.params.taskId, req.body.prUrl);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    return task;
+  });
+
+  app.post<{
+    Params: { taskId: string };
+    Body: { title?: string; body?: string };
+  }>("/api/tasks/:taskId/pull-request", async (req, reply) => {
+    try {
+      const result = await gateway.createPullRequest(req.params.taskId, {
+        title: req.body?.title,
+        body: req.body?.body,
+      });
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const notFound = /not found/i.test(msg);
+      return reply.code(notFound ? 404 : 400).send({ error: msg });
+    }
+  });
+
   app.get("/api/workflows/coding", async () => {
     const { CODING_WORKFLOW } = await import("../workflows/coding.js");
     return CODING_WORKFLOW;

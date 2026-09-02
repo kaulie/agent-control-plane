@@ -41,6 +41,8 @@ export interface Task {
   provider: string;
   model?: string;
   agentId?: string;
+  /** GitHub pull request URL once opened for this task. */
+  prUrl?: string;
   taskType: "general";
   workflowState: import("./workflows").WorkflowState;
 }

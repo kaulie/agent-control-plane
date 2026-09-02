@@ -62,6 +62,8 @@ export interface Task {
   createdBy?: string;
   /** Bound SDK agent for this task (1 task = 1 agent). Set on first message. */
   agentId?: string;
+  /** GitHub pull request URL once opened for this task. */
+  prUrl?: string;
   /** Task category; phase 1 only supports general. */
   taskType: TaskType;
   /** Current step in the task workflow state machine. */

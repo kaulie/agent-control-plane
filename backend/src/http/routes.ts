@@ -278,48 +278,16 @@ export async function registerRoutes(
 
   app.patch<{
     Params: { taskId: string };
-    Body: {
-      prUrl?: string | null;
-      provider?: string;
-      model?: string | null;
-    };
+    Body: { prUrl?: string | null };
   }>("/api/tasks/:taskId", async (req, reply) => {
-    const body = req.body ?? {};
-    const hasPrUrl = body.prUrl !== undefined;
-    const hasProvider = body.provider !== undefined;
-    const hasModel = body.model !== undefined;
-    if (!hasPrUrl && !hasProvider && !hasModel) {
-      return reply
-        .code(400)
-        .send({ error: "prUrl, provider, or model is required" });
+    if (req.body?.prUrl === undefined) {
+      return reply.code(400).send({ error: "prUrl is required" });
     }
-
-    try {
-      if (hasProvider || hasModel) {
-        const task = gateway.updateTaskRuntime(req.params.taskId, {
-          ...(hasProvider ? { provider: body.provider } : {}),
-          ...(hasModel ? { model: body.model } : {}),
-        });
-        if (hasPrUrl) {
-          const withPr = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl!);
-          return withPr ?? task;
-        }
-        return task;
-      }
-
-      const task = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl!);
-      if (!task) {
-        return reply.code(404).send({ error: "task not found" });
-      }
-      return task;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const notFound = /not found/i.test(msg);
-      const conflict = /active or queued/i.test(msg);
-      return reply
-        .code(notFound ? 404 : conflict ? 409 : 400)
-        .send({ error: msg });
+    const task = gateway.updateTaskPrUrl(req.params.taskId, req.body.prUrl);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
     }
+    return task;
   });
 
   app.post<{

@@ -830,18 +830,7 @@ export default function App() {
                 creatingPr={creatingPr}
                 onCreatePr={() => void createPullRequest()}
               />
-              <UsageBar
-                task={detail.task}
-                stats={detail.stats}
-                busy={running || queueLength > 0}
-                onRuntimeUpdated={(task) => {
-                  setDetail((prev) => (prev ? { ...prev, task } : prev));
-                  setTasks((prev) =>
-                    prev.map((t) => (t.taskId === task.taskId ? { ...t, ...task } : t)),
-                  );
-                }}
-                onError={setError}
-              />
+              <UsageBar task={detail.task} stats={detail.stats} />
               <div className="main-tabs">
                 <button
                   type="button"

@@ -63,7 +63,8 @@ export default function RuntimeDefaultsSection({
       <div className="settings-section-head">
         <h2 className="settings-section-title">默认 Agent Runtime</h2>
         <p className="settings-section-desc">
-          新建 Task 时的默认 provider / model；创建时可覆盖。留空 provider 则回退到环境变量{" "}
+          新建 Task 时的默认 provider / model；创建时可覆盖，创建后锁定（便于按
+          task 统计）。留空 provider 则回退到环境变量{" "}
           <code>AGENT_PROVIDER</code>（当前默认：{envDefaultProvider || "cursor"}）。
         </p>
       </div>

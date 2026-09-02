@@ -143,10 +143,7 @@ export const api = {
       j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
     ),
 
-  updateTask: (
-    id: string,
-    body: { prUrl?: string | null; provider?: string; model?: string | null },
-  ) =>
+  updateTask: (id: string, body: { prUrl?: string | null }) =>
     fetch(`${BASE}/tasks/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },

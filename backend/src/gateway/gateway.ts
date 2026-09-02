@@ -252,55 +252,6 @@ export class AgentGateway {
     return task;
   }
 
-  /**
-   * Change provider and/or model when the task has no active or queued run.
-   * Switching provider clears the bound session (`agentId`) so the next run
-   * creates a fresh session on the new runtime.
-   */
-  updateTaskRuntime(
-    taskId: string,
-    input: { provider?: string; model?: string | null },
-  ): Task {
-    const task = this.store.getTask(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
-
-    if (this.activeRuns.has(taskId) || this.getQueueLength(taskId) > 0) {
-      throw new Error(
-        "Cannot change provider/model while a run is active or queued",
-      );
-    }
-
-    const nextProvider =
-      input.provider !== undefined
-        ? normalizeProviderName(input.provider, task.provider)
-        : task.provider;
-    if (!isProviderName(nextProvider) || !this.providers.has(nextProvider)) {
-      throw new Error(
-        `Unknown agent provider "${nextProvider}". Supported: ${this.providers.names().join(", ")}`,
-      );
-    }
-
-    const providerChanged = nextProvider !== task.provider;
-    const modelPatch =
-      input.model !== undefined
-        ? { model: input.model?.trim() ? input.model.trim() : null }
-        : {};
-
-    const updated = this.store.updateTaskRuntime(taskId, {
-      ...(input.provider !== undefined ? { provider: nextProvider } : {}),
-      ...modelPatch,
-      clearAgentId: providerChanged,
-    });
-    if (!updated) throw new Error(`Task ${taskId} not found`);
-
-    this.publish({
-      type: "task_updated",
-      task: updated,
-      stats: this.store.getTaskStats(taskId),
-    });
-    return updated;
-  }
-
   listTasks(filter?: { projectId?: string }): Task[] {
     return this.store.listTasks(filter);
   }

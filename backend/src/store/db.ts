@@ -671,46 +671,6 @@ export class Store {
       .run(taskId);
   }
 
-  updateTaskRuntime(
-    taskId: string,
-    input: {
-      provider?: string;
-      model?: string | null;
-      clearAgentId?: boolean;
-    },
-  ): Task | undefined {
-    const existing = this.getTask(taskId);
-    if (!existing) return undefined;
-
-    const updates: string[] = [];
-    const values: Array<string | null> = [];
-
-    if (input.provider !== undefined) {
-      const provider = input.provider.trim();
-      if (!provider) throw new Error("provider is required");
-      updates.push("provider = ?");
-      values.push(provider);
-    }
-
-    if (input.model !== undefined) {
-      const model = input.model?.trim() || null;
-      updates.push("model = ?");
-      values.push(model);
-    }
-
-    if (input.clearAgentId) {
-      updates.push("agent_id = NULL");
-    }
-
-    if (!updates.length) return existing;
-
-    values.push(taskId);
-    this.db
-      .prepare(`UPDATE tasks SET ${updates.join(", ")} WHERE task_id = ?`)
-      .run(...values);
-    return this.getTask(taskId);
-  }
-
   updateTaskWorkflowState(taskId: string, workflowState: string): void {
     this.db
       .prepare(`UPDATE tasks SET workflow_state = ? WHERE task_id = ?`)

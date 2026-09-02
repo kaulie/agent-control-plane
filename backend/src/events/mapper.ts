@@ -5,6 +5,7 @@ import type {
   ToolUseBlock,
 } from "@cursor/sdk";
 import type { EventType, TokenUsage } from "../types.js";
+import { formatRunErrorMessage } from "../run-errors.js";
 
 export interface MappedEvent {
   eventType: EventType;
@@ -92,13 +93,21 @@ export function mapSdkMessage(msg: SDKMessage): MappedEvent[] {
       ];
     case "tool_call":
       return mapToolCall(msg);
-    case "status":
+    case "status": {
+      const status = String(msg.status ?? "");
+      const rawMessage =
+        typeof msg.message === "string" ? msg.message : undefined;
+      const message =
+        status.toLowerCase() === "error" || /cancel/i.test(status)
+          ? formatRunErrorMessage(rawMessage ?? status)
+          : rawMessage;
       return [
         {
           eventType: "status",
-          payload: { status: msg.status, message: msg.message },
+          payload: { status, ...(message ? { message } : {}) },
         },
       ];
+    }
     case "usage":
       return [{ eventType: "usage", payload: {}, usage: msg.usage }];
     case "task":

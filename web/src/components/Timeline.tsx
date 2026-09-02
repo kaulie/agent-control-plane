@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
 import { formatTime, truncate, formatDuration } from "../format";
+import { formatRunErrorMessage } from "../run-errors";
 
 const ICONS: Record<string, string> = {
   user_message: "👤",
@@ -136,10 +137,18 @@ function buildRows(events: AgentEvent[]): Row[] {
         body = String(p.model ?? "agent");
         detail = p.cwd ? String(p.cwd) : "";
         break;
-      case "status":
-        body = String(p.status ?? "");
-        detail = p.message ? String(p.message) : "";
+      case "status": {
+        const statusRaw = String(p.status ?? "");
+        if (statusRaw.toLowerCase() === "error" || /cancel/i.test(statusRaw)) {
+          body = formatRunErrorMessage(
+            String(p.message ?? statusRaw),
+          );
+        } else {
+          body = statusRaw;
+          detail = p.message ? String(p.message) : "";
+        }
         break;
+      }
       case "thinking":
         body = String(p.text ?? "");
         break;
@@ -182,15 +191,20 @@ function buildRows(events: AgentEvent[]): Row[] {
             p.durationMs != null
               ? `耗时 ${formatDuration(Number(p.durationMs))}`
               : "";
+        } else if (p.reason === "user_stop") {
+          body =
+            p.durationMs != null
+              ? `已手动停止 · 耗时 ${formatDuration(Number(p.durationMs))}`
+              : "已手动停止";
         } else {
           body =
             p.durationMs != null
               ? `已停止 · 耗时 ${formatDuration(Number(p.durationMs))}`
-              : "Stopped by user";
+              : "已停止";
         }
         break;
       case "run_error":
-        body = String(p.error ?? "error");
+        body = formatRunErrorMessage(String(p.error ?? "error"));
         break;
       case "plan_exported":
         body = String(p.path ?? p.fileName ?? "exported");

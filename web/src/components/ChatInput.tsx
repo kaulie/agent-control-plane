@@ -43,6 +43,8 @@ interface Props {
   onStop?: () => void;
   disabled: boolean;
   running: boolean;
+  /** Mode of the currently executing run (not queued messages). */
+  activeRunMode?: AgentMode;
   queueLength?: number;
   stopping?: boolean;
 }
@@ -96,6 +98,7 @@ export default function ChatInput({
   onStop,
   disabled,
   running,
+  activeRunMode,
   queueLength = 0,
   stopping = false,
 }: Props) {
@@ -157,6 +160,10 @@ export default function ChatInput({
       ? "Describe what to plan… (read-only planning mode)"
       : "Send an instruction… (paste or attach images)";
 
+  const modeSelectTitle = running
+    ? "切换模式不会中断当前任务，仅影响下一条排队消息"
+    : "Agent 可编辑代码；Plan 只读规划";
+
   return (
     <div className="chat-input">
       {images.length > 0 && (
@@ -178,6 +185,15 @@ export default function ChatInput({
         </div>
       )}
       {attachError && <div className="chat-attach-error">{attachError}</div>}
+      {running && activeRunMode && (
+        <div className="chat-mode-hint">
+          当前{" "}
+          <span className={`event-mode event-mode-${activeRunMode}`}>
+            {activeRunMode === "plan" ? "Plan" : "Agent"}
+          </span>{" "}
+          运行中；切换模式不会中断当前任务，仅影响下一条排队消息
+        </div>
+      )}
       <div className="chat-input-row">
         <input
           ref={fileRef}
@@ -205,7 +221,7 @@ export default function ChatInput({
           value={mode}
           disabled={disabled || stopping}
           aria-label="Conversation mode"
-          title="Agent can edit; Plan focuses on planning"
+          title={modeSelectTitle}
           onChange={(e) => selectMode(e.target.value as AgentMode)}
         >
           <option value="agent">Agent</option>

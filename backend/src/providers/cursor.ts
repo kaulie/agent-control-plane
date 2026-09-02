@@ -5,6 +5,7 @@ import { mapSdkMessage } from "../events/mapper.js";
 import { buildCost, type SdkCostLike } from "../usage/cost.js";
 import { newId } from "../store/db.js";
 import { composePromptWithBootstrap } from "../task-context.js";
+import { formatRunErrorMessage } from "../run-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "./types.js";
 
 export interface CursorProviderConfig {
@@ -320,7 +321,12 @@ export class CursorProvider implements AgentProvider {
 
     if (handle.cancelled) {
       const durationMs = Date.now() - startedAt;
-      await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
+      await emit("run_cancelled", {
+        durationMs,
+        modelCalls,
+        toolCalls,
+        reason: "user_stop",
+      });
       this.active.delete(input.runId);
       return {
         status: "cancelled",
@@ -396,6 +402,7 @@ export class CursorProvider implements AgentProvider {
           durationMs,
           modelCalls,
           toolCalls,
+          reason: handle.cancelled ? "user_stop" : "sdk_cancelled",
         });
         return {
           status: "cancelled",
@@ -446,7 +453,12 @@ export class CursorProvider implements AgentProvider {
     } catch (err) {
       const durationMs = Date.now() - startedAt;
       if (handle.cancelled) {
-        await emit("run_cancelled", { durationMs, modelCalls, toolCalls });
+        await emit("run_cancelled", {
+          durationMs,
+          modelCalls,
+          toolCalls,
+          reason: "user_stop",
+        });
         return {
           status: "cancelled",
           durationMs,
@@ -455,7 +467,9 @@ export class CursorProvider implements AgentProvider {
           agentId: agent.agentId,
         };
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = formatRunErrorMessage(
+        err instanceof Error ? err.message : String(err),
+      );
       await emit("run_error", { error: message, durationMs, modelCalls, toolCalls });
       return {
         status: "error",

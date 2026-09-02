@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import Timeline from "./components/Timeline";
-import ChatInput from "./components/ChatInput";
+import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
 
@@ -532,6 +532,21 @@ export default function App() {
     }
   }, [selectedId, loadingMore, hasMore, events]);
 
+  const activeRunMode = useMemo((): AgentMode | undefined => {
+    if (!running || !detail) return undefined;
+    const activeRun = detail.runs.find((r) => r.status === "running");
+    if (!activeRun) return undefined;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i];
+      if (ev.runId !== activeRun.runId) continue;
+      if (ev.eventType === "user_message" || ev.eventType === "run_started") {
+        const m = ev.payload?.mode;
+        if (m === "plan" || m === "agent") return m;
+      }
+    }
+    return "agent";
+  }, [running, detail, events]);
+
   return (
     <div className="app">
       <header className="header">
@@ -611,6 +626,7 @@ export default function App() {
                 onStop={() => void stopAgent()}
                 disabled={stopping}
                 running={running}
+                activeRunMode={activeRunMode}
                 queueLength={queueLength}
                 stopping={stopping}
               />

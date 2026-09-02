@@ -9,7 +9,14 @@ import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
 import PlanPreview from "./components/PlanPreview";
+import WorkflowStepper from "./components/WorkflowStepper";
+import PlanQuestionsWizard from "./components/PlanQuestionsWizard";
 import { extractPlanRuns, hasPlanContent } from "./plan-content";
+import {
+  findPendingPlanQuestionBatch,
+  type PlanAnswerBatch,
+} from "./plan-questions";
+import type { WorkflowState } from "./workflows";
 import { APP_VERSION } from "./version";
 import {
   dismissVersionUpdate,
@@ -62,6 +69,7 @@ export default function App() {
   const [view, setView] = useState<AppView>("chat");
   const [mainPanel, setMainPanel] = useState<MainPanel>("chat");
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
+  const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -523,13 +531,15 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        if (payload.mode === "plan") setMainPanel("plan");
+        if (payload.mode === "plan" || detail?.workflow.currentState === "plan") {
+          setMainPanel("plan");
+        }
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
       }
     },
-    [refreshDetail, selectedId],
+    [detail?.workflow.currentState, refreshDetail, selectedId],
   );
 
   const stopAgent = useCallback(async () => {
@@ -589,8 +599,83 @@ export default function App() {
     return extractPlanRuns(events, detail.task, detail.runs);
   }, [events, detail]);
 
+  const pendingPlanQuestions = useMemo(
+    () => findPendingPlanQuestionBatch(events),
+    [events],
+  );
+
+  const inPlanWorkflow = detail?.workflow.currentState === "plan";
+
   const showPlanTab =
-    activeRunMode === "plan" || hasPlanContent(planRuns) || planRuns.length > 0;
+    inPlanWorkflow ||
+    activeRunMode === "plan" ||
+    hasPlanContent(planRuns) ||
+    planRuns.length > 0 ||
+    !!pendingPlanQuestions;
+
+  const transitionWorkflow = useCallback(
+    async (toState: WorkflowState) => {
+      if (!selectedId) return;
+      setWorkflowTransitioning(true);
+      setError(null);
+      try {
+        const res = await api.transitionWorkflow(selectedId, toState);
+        setDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                task: res.task,
+                workflow: res.workflow,
+              }
+            : prev,
+        );
+        if (toState === "coding") setMainPanel("chat");
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setWorkflowTransitioning(false);
+      }
+    },
+    [selectedId],
+  );
+
+  const submitPlanAnswers = useCallback(
+    async (batch: PlanAnswerBatch) => {
+      if (!selectedId) return;
+      setError(null);
+      setInterruptNotice(null);
+      setStopping(false);
+      try {
+        const res = await api.sendMessage(
+          selectedId,
+          "",
+          undefined,
+          "plan",
+          batch,
+        );
+        if (res.queued) {
+          if (typeof res.queueLength === "number") {
+            setQueueLength(res.queueLength);
+          } else {
+            setQueueLength((n) => n + 1);
+          }
+        } else {
+          setRunning(true);
+        }
+        setMainPanel("plan");
+      } catch (e) {
+        setError(String(e));
+        void refreshDetail(selectedId);
+      }
+    },
+    [refreshDetail, selectedId],
+  );
+
+  useEffect(() => {
+    if (pendingPlanQuestions && inPlanWorkflow) {
+      setMainPanel("plan");
+    }
+  }, [pendingPlanQuestions, inPlanWorkflow]);
 
   return (
     <div className="app">
@@ -656,6 +741,11 @@ export default function App() {
         <main className="main">
           {selectedId && detail ? (
             <>
+              <WorkflowStepper
+                workflow={detail.workflow}
+                transitioning={workflowTransitioning}
+                onTransition={(to) => void transitionWorkflow(to)}
+              />
               <UsageBar task={detail.task} stats={detail.stats} />
               {showPlanTab && (
                 <div className="main-panel-tabs" role="tablist">
@@ -685,11 +775,20 @@ export default function App() {
                 </div>
               )}
               {mainPanel === "plan" && showPlanTab ? (
-                <PlanPreview
-                  planRuns={planRuns}
-                  running={running}
-                  activeRunId={activeRunId}
-                />
+                <>
+                  {pendingPlanQuestions && inPlanWorkflow && (
+                    <PlanQuestionsWizard
+                      batch={pendingPlanQuestions}
+                      disabled={running}
+                      onSubmit={(answers) => void submitPlanAnswers(answers)}
+                    />
+                  )}
+                  <PlanPreview
+                    planRuns={planRuns}
+                    running={running}
+                    activeRunId={activeRunId}
+                  />
+                </>
               ) : (
                 <Timeline
                   events={events}
@@ -706,15 +805,19 @@ export default function App() {
                   }
                 />
               )}
-              <ChatInput
-                onSend={sendMessage}
-                onStop={() => void stopAgent()}
-                disabled={stopping}
-                running={running}
-                activeRunMode={activeRunMode}
-                queueLength={queueLength}
-                stopping={stopping}
-              />
+              {!(pendingPlanQuestions && inPlanWorkflow) && (
+                <ChatInput
+                  onSend={sendMessage}
+                  onStop={() => void stopAgent()}
+                  disabled={stopping}
+                  running={running}
+                  activeRunMode={inPlanWorkflow ? "plan" : activeRunMode}
+                  defaultMode={inPlanWorkflow ? "plan" : undefined}
+                  lockMode={inPlanWorkflow}
+                  queueLength={queueLength}
+                  stopping={stopping}
+                />
+              )}
             </>
           ) : (
             <div className="empty">

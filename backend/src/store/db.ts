@@ -52,6 +52,8 @@ interface TaskRow {
   model: string | null;
   created_by: string | null;
   agent_id: string | null;
+  task_type: string | null;
+  workflow_state: string | null;
 }
 
 interface RunRow {
@@ -173,6 +175,19 @@ export class Store {
     if (!taskCols.some((c) => c.name === "agent_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`);
     }
+    if (!taskCols.some((c) => c.name === "task_type")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN task_type TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "workflow_state")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN workflow_state TEXT`);
+    }
+
+    this.db.exec(
+      `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
+    );
+    this.db.exec(
+      `UPDATE tasks SET workflow_state = 'plan' WHERE workflow_state IS NULL OR workflow_state = ''`,
+    );
 
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
@@ -549,11 +564,13 @@ export class Store {
       provider: input.provider,
       model: input.model,
       createdBy: input.createdBy,
+      taskType: "general",
+      workflowState: "plan",
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, workflow_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -566,6 +583,8 @@ export class Store {
         task.model ?? null,
         task.createdBy ?? null,
         null,
+        task.taskType,
+        task.workflowState,
       );
     return task;
   }
@@ -605,6 +624,12 @@ export class Store {
       .run(agentId, taskId);
   }
 
+  updateTaskWorkflowState(taskId: string, workflowState: string): void {
+    this.db
+      .prepare(`UPDATE tasks SET workflow_state = ? WHERE task_id = ?`)
+      .run(workflowState, taskId);
+  }
+
   private toTask(r: TaskRow): Task {
     return {
       taskId: r.task_id,
@@ -617,6 +642,8 @@ export class Store {
       model: r.model ?? undefined,
       createdBy: r.created_by ?? undefined,
       agentId: r.agent_id || undefined,
+      taskType: (r.task_type as Task["taskType"]) || "general",
+      workflowState: (r.workflow_state as Task["workflowState"]) || "plan",
     };
   }
 

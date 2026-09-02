@@ -39,6 +39,8 @@ export interface Task {
   provider: string;
   model?: string;
   agentId?: string;
+  taskType: "general";
+  workflowState: import("./workflows").WorkflowState;
 }
 
 export interface TokenUsage {
@@ -108,6 +110,7 @@ export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
+  workflow: import("./workflows").TaskWorkflowView;
 }
 
 export interface AuthStatus {

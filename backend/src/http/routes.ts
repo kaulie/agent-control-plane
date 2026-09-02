@@ -198,7 +198,47 @@ export async function registerRoutes(
 
   app.post<{
     Params: { taskId: string };
-    Body: { message?: string; images?: IncomingImage[]; mode?: string };
+    Body: { toState?: string };
+  }>("/api/tasks/:taskId/workflow/transition", async (req, reply) => {
+    const toState = req.body?.toState?.trim();
+    if (!toState) {
+      return reply.code(400).send({ error: "toState is required" });
+    }
+    const detail = gateway.getTaskDetail(req.params.taskId);
+    if (!detail) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    try {
+      const task = gateway.transitionTask(req.params.taskId, toState);
+      return { task, workflow: gateway.getTaskDetail(req.params.taskId)!.workflow };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: msg });
+    }
+  });
+
+  app.get("/api/workflows/coding", async () => {
+    const { CODING_WORKFLOW } = await import("../workflows/coding.js");
+    return CODING_WORKFLOW;
+  });
+
+  app.post<{
+    Params: { taskId: string };
+    Body: {
+      message?: string;
+      images?: IncomingImage[];
+      mode?: string;
+      planAnswerBatch?: {
+        batchId: string;
+        answers: Array<{
+          questionId: string;
+          optionId?: string;
+          optionLabel?: string;
+          otherText?: string;
+          skipped?: boolean;
+        }>;
+      };
+    };
   }>("/api/tasks/:taskId/messages", async (req, reply) => {
     const message = typeof req.body?.message === "string" ? req.body.message : "";
     const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
@@ -206,7 +246,12 @@ export async function registerRoutes(
     if (!validated.ok) {
       return reply.code(400).send({ error: validated.error });
     }
-    if (!message.trim() && validated.images.length === 0) {
+    const planAnswerBatch = req.body?.planAnswerBatch;
+    const hasPlanAnswers =
+      planAnswerBatch &&
+      typeof planAnswerBatch.batchId === "string" &&
+      Array.isArray(planAnswerBatch.answers);
+    if (!message.trim() && validated.images.length === 0 && !hasPlanAnswers) {
       return reply
         .code(400)
         .send({ error: "message text or at least one image is required" });
@@ -230,6 +275,7 @@ export async function registerRoutes(
           text: message,
           images: validated.images,
           mode,
+          ...(hasPlanAnswers ? { planAnswerBatch: planAnswerBatch! } : {}),
         },
       );
       return { runId, queued, queueLength };

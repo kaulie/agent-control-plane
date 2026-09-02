@@ -1,5 +1,16 @@
 export type TaskStatus = "active" | "completed" | "error";
 
+export type TaskType = "general";
+
+export type WorkflowState =
+  | "plan"
+  | "coding"
+  | "pr"
+  | "ci"
+  | "test"
+  | "deploy"
+  | "done";
+
 export interface AgentRulesConfig {
   rules?: string;
 }
@@ -49,6 +60,10 @@ export interface Task {
   createdBy?: string;
   /** Bound SDK agent for this task (1 task = 1 agent). Set on first message. */
   agentId?: string;
+  /** Task category; phase 1 only supports general. */
+  taskType: TaskType;
+  /** Current step in the task workflow state machine. */
+  workflowState: WorkflowState;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";
@@ -87,7 +102,9 @@ export type EventType =
   | "run_completed"
   | "run_cancelled"
   | "run_error"
-  | "plan_exported";
+  | "plan_exported"
+  | "plan_question_batch"
+  | "plan_draft";
 
 export interface TokenUsage {
   inputTokens: number;

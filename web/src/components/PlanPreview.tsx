@@ -34,7 +34,7 @@ export default function PlanPreview({
   if (!selected) {
     return (
       <div className="plan-preview plan-preview-empty">
-        <p>暂无 Plan 内容。使用 Plan 模式发送消息后，计划将在此处以 Markdown 格式展示。</p>
+        <p>Plan 采集中。Agent 会通过结构化问题澄清需求，成稿后将在此处以 Markdown 展示。</p>
       </div>
     );
   }

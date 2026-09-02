@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type AgentMode = "agent" | "plan";
 
@@ -45,6 +45,10 @@ interface Props {
   running: boolean;
   /** Mode of the currently executing run (not queued messages). */
   activeRunMode?: AgentMode;
+  /** Force initial mode (e.g. plan workflow). */
+  defaultMode?: AgentMode;
+  /** Disable mode selector. */
+  lockMode?: boolean;
   queueLength?: number;
   stopping?: boolean;
 }
@@ -99,13 +103,19 @@ export default function ChatInput({
   disabled,
   running,
   activeRunMode,
+  defaultMode,
+  lockMode = false,
   queueLength = 0,
   stopping = false,
 }: Props) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [mode, setMode] = useState<AgentMode>(() => loadStoredMode());
+  const [mode, setMode] = useState<AgentMode>(() => defaultMode ?? loadStoredMode());
+
+  useEffect(() => {
+    if (defaultMode) setMode(defaultMode);
+  }, [defaultMode]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canSend =
@@ -219,7 +229,7 @@ export default function ChatInput({
         <select
           className="mode-select"
           value={mode}
-          disabled={disabled || stopping}
+          disabled={disabled || stopping || lockMode}
           aria-label="Conversation mode"
           title={modeSelectTitle}
           onChange={(e) => selectMode(e.target.value as AgentMode)}

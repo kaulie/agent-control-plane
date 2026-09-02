@@ -24,16 +24,23 @@ function sanitizeSegment(raw: string): string {
 function collectPlanBody(events: AgentEvent[], runResult?: string): string {
   const parts: string[] = [];
   for (const ev of events) {
+    if (ev.eventType === "plan_draft") {
+      const text = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
+      if (text) parts.push(text);
+      continue;
+    }
     if (ev.eventType !== "agent_response") continue;
     const text = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
-    if (text) parts.push(text);
+    if (!text || text === "(questions pending)") continue;
+    if (/```web-cursor-plan-questions/i.test(text)) continue;
+    parts.push(text);
   }
   if (parts.length) return parts.join("\n\n");
   return runResult?.trim() || "(no plan content)";
 }
 
 export function buildPlanMarkdown(input: PlanExportInput): string {
-  const { task, project, runId, userText, runEvents, runResult } = input;
+  const { task, project, runId, runEvents, runResult } = input;
   const planBody = collectPlanBody(runEvents, runResult);
   const exportedAt = new Date().toISOString();
   return [
@@ -43,10 +50,6 @@ export function buildPlanMarkdown(input: PlanExportInput): string {
     `- runId: ${runId}`,
     `- project: ${project?.name ?? task.projectId} (${task.projectId})`,
     `- exportedAt: ${exportedAt}`,
-    "",
-    "## User request",
-    "",
-    userText.trim() || "(empty)",
     "",
     "## Plan",
     "",

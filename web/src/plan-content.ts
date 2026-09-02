@@ -2,13 +2,13 @@ import type { AgentEvent, RunRecord, Task } from "./types";
 
 export interface PlanRunContent {
   runId: string;
-  userText: string;
   planBody: string;
   markdown: string;
   exportedPath?: string;
   exportedFileName?: string;
   run?: RunRecord;
   startedAt?: string;
+  hasDraft: boolean;
 }
 
 function runMode(events: AgentEvent[], runId: string): "agent" | "plan" | undefined {
@@ -21,32 +21,43 @@ function runMode(events: AgentEvent[], runId: string): "agent" | "plan" | undefi
   return undefined;
 }
 
+function stripQuestionFence(text: string): string {
+  return text.replace(/```web-cursor-plan-questions[\s\S]*?```/gi, "").trim();
+}
+
+function isDraftText(text: string): boolean {
+  const t = text.trim();
+  if (/```web-cursor-plan-draft/i.test(t)) return true;
+  if (/^#\s*plan\b/im.test(t)) return true;
+  if (/^##\s*计划/m.test(t)) return true;
+  return false;
+}
+
 function collectPlanBody(events: AgentEvent[], runId: string, runResult?: string): string {
   const parts: string[] = [];
   for (const ev of events) {
-    if (ev.runId !== runId || ev.eventType !== "agent_response") continue;
-    const text = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
-    if (text) parts.push(text);
+    if (ev.runId !== runId) continue;
+    if (ev.eventType === "plan_draft") {
+      const text = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
+      if (text) parts.push(stripQuestionFence(text));
+      continue;
+    }
+    if (ev.eventType !== "agent_response") continue;
+    const raw = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
+    if (!raw || raw === "(questions pending)") continue;
+    const text = stripQuestionFence(raw);
+    if (!text || !isDraftText(text)) continue;
+    parts.push(text);
   }
   if (parts.length) return parts.join("\n\n");
-  return runResult?.trim() || "";
+  return runResult?.trim() && isDraftText(runResult) ? runResult.trim() : "";
 }
 
-function userTextForRun(events: AgentEvent[], runId: string): string {
-  for (const ev of events) {
-    if (ev.runId !== runId || ev.eventType !== "user_message") continue;
-    return String(ev.payload.text ?? "").trim();
+function buildMarkdown(taskTitle: string, planBody: string): string {
+  if (!planBody) {
+    return `# ${taskTitle}\n\n## 计划\n\n_(采集中 — Agent 正在澄清需求，成稿后将显示在此)_\n`;
   }
-  return "";
-}
-
-function buildMarkdown(taskTitle: string, userText: string, planBody: string): string {
-  const sections = [`# ${taskTitle}`, ""];
-  if (userText) {
-    sections.push("## 用户需求", "", userText, "");
-  }
-  sections.push("## 计划", "", planBody || "_(暂无内容)_", "");
-  return sections.join("\n");
+  return [`# ${taskTitle}`, "", "## 计划", "", planBody, ""].join("\n");
 }
 
 /** Extract plan-mode runs from task events, newest first. */
@@ -59,15 +70,19 @@ export function extractPlanRuns(
   for (const ev of events) {
     if (runMode(events, ev.runId) === "plan") runIds.add(ev.runId);
   }
+  if (task.workflowState === "plan") {
+    for (const r of runs) runIds.add(r.runId);
+  }
 
   const runById = new Map(runs.map((r) => [r.runId, r]));
   const out: PlanRunContent[] = [];
 
   for (const runId of runIds) {
     const run = runById.get(runId);
-    const userText = userTextForRun(events, runId);
     const planBody = collectPlanBody(events, runId, run?.result);
-    if (!planBody && !userText) continue;
+    const hasDraft =
+      planBody.length > 0 ||
+      events.some((e) => e.runId === runId && e.eventType === "plan_draft");
 
     let exportedPath: string | undefined;
     let exportedFileName: string | undefined;
@@ -85,13 +100,13 @@ export function extractPlanRuns(
 
     out.push({
       runId,
-      userText,
       planBody,
-      markdown: buildMarkdown(task.title, userText, planBody),
+      markdown: buildMarkdown(task.title, planBody),
       exportedPath,
       exportedFileName,
       run,
       startedAt,
+      hasDraft,
     });
   }
 
@@ -105,5 +120,5 @@ export function extractPlanRuns(
 }
 
 export function hasPlanContent(planRuns: PlanRunContent[]): boolean {
-  return planRuns.some((p) => p.planBody.length > 0 || p.userText.length > 0);
+  return planRuns.some((p) => p.hasDraft || p.planBody.length > 0);
 }

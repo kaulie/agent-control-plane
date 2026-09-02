@@ -18,6 +18,18 @@ import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
 import { mergeSettings, resolvePlanExportDir } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
+import { composePlanModePrompt } from "../plan-mode-guidance.js";
+import {
+  formatPlanAnswerBatchForAgent,
+  isPlanDraftText,
+  parsePlanQuestionBatch,
+  type PlanAnswerBatch,
+} from "../plan-question-parser.js";
+import {
+  buildWorkflowView,
+  validateTransition,
+  type TaskWorkflowView,
+} from "../workflows/index.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -35,6 +47,8 @@ export interface SendMessageInput {
   text?: string;
   images?: PromptImage[];
   mode?: "agent" | "plan";
+  /** Structured answers to a plan_question_batch (plan workflow). */
+  planAnswerBatch?: PlanAnswerBatch;
   /** Startup self-check for a run that never received terminal feedback. */
   selfCheck?: { resumesRunId: string };
 }
@@ -43,6 +57,7 @@ export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
+  workflow: TaskWorkflowView;
 }
 
 interface PendingRun {
@@ -51,6 +66,7 @@ interface PendingRun {
   images: PromptImage[];
   imageRefs: StoredImageRef[];
   mode: "agent" | "plan";
+  planAnswerBatch?: PlanAnswerBatch;
   selfCheck?: { resumesRunId: string };
 }
 
@@ -201,7 +217,19 @@ export class AgentGateway {
       task,
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
+      workflow: buildWorkflowView(task.taskType, task.workflowState),
     };
+  }
+
+  transitionTask(taskId: string, toState: string): Task {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const check = validateTransition(task.taskType, task.workflowState, toState);
+    if (!check.ok) throw new Error(check.error);
+    this.store.updateTaskWorkflowState(taskId, check.toState);
+    const updated = this.store.getTask(taskId)!;
+    this.publish({ type: "task_updated", task: updated });
+    return updated;
   }
 
   /**
@@ -296,12 +324,17 @@ export class AgentGateway {
       p.selfCheck === true && typeof p.resumesRunId === "string"
         ? { resumesRunId: p.resumesRunId }
         : undefined;
+    const planAnswerBatch =
+      p.planAnswerBatch && typeof p.planAnswerBatch === "object"
+        ? (p.planAnswerBatch as PlanAnswerBatch)
+        : undefined;
     return {
       runId: run.runId,
       text,
       images,
       imageRefs,
       mode,
+      planAnswerBatch,
       selfCheck,
     };
   }
@@ -353,6 +386,7 @@ export class AgentGateway {
       text: string;
       mode: "agent" | "plan";
       imageRefs: StoredImageRef[];
+      planAnswerBatch?: PlanAnswerBatch;
       selfCheck?: { resumesRunId: string };
       queued?: boolean;
     },
@@ -363,6 +397,7 @@ export class AgentGateway {
       mode: input.mode,
     };
     if (input.queued) payload.queued = true;
+    if (input.planAnswerBatch) payload.planAnswerBatch = input.planAnswerBatch;
     if (input.selfCheck) {
       payload.selfCheck = true;
       payload.resumesRunId = input.selfCheck.resumesRunId;
@@ -394,8 +429,11 @@ export class AgentGateway {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
 
-    const text = (input.text ?? "").trim();
     const images = input.images ?? [];
+    let text = (input.text ?? "").trim();
+    if (input.planAnswerBatch) {
+      text = formatPlanAnswerBatchForAgent(input.planAnswerBatch);
+    }
     if (!text && images.length === 0) {
       throw new Error("message text or at least one image is required");
     }
@@ -406,13 +444,19 @@ export class AgentGateway {
     }
 
     const runId = newId("run");
-    const mode = input.mode === "plan" ? "plan" : "agent";
+    const mode =
+      task.workflowState === "plan"
+        ? "plan"
+        : input.mode === "plan"
+          ? "plan"
+          : "agent";
     const pending: PendingRun = {
       runId,
       text,
       images,
       imageRefs,
       mode,
+      planAnswerBatch: input.planAnswerBatch,
       selfCheck: input.selfCheck,
     };
 
@@ -441,6 +485,7 @@ export class AgentGateway {
         text,
         mode,
         imageRefs,
+        planAnswerBatch: input.planAnswerBatch,
         selfCheck: input.selfCheck,
         queued: isQueued,
       },
@@ -467,6 +512,57 @@ export class AgentGateway {
     };
   }
 
+  private publishPlanSideEffects(
+    taskId: string,
+    runId: string,
+    agentId: string,
+    mode: "agent" | "plan",
+    event: AgentEvent,
+    persistAndPublish: (event: AgentEvent) => void,
+  ): void {
+    if (mode !== "plan" || event.eventType !== "agent_response") {
+      persistAndPublish(event);
+      return;
+    }
+    const rawText =
+      typeof event.payload.text === "string" ? event.payload.text : "";
+    const { batch, strippedText } = parsePlanQuestionBatch(rawText);
+    const displayText = batch ? strippedText : rawText;
+    persistAndPublish({
+      ...event,
+      payload: {
+        ...event.payload,
+        text: displayText || (batch ? "(questions pending)" : rawText),
+      },
+    });
+    if (batch) {
+      persistAndPublish({
+        eventId: newId("evt"),
+        taskId,
+        runId,
+        agentId,
+        timestamp: new Date().toISOString(),
+        eventType: "plan_question_batch",
+        payload: {
+          batchId: batch.batchId,
+          questions: batch.questions,
+        },
+      });
+    }
+    const draftSource = batch ? strippedText : rawText;
+    if (isPlanDraftText(draftSource)) {
+      persistAndPublish({
+        eventId: newId("evt"),
+        taskId,
+        runId,
+        agentId,
+        timestamp: new Date().toISOString(),
+        eventType: "plan_draft",
+        payload: { text: draftSource },
+      });
+    }
+  }
+
   private async executeRun(task: Task, pending: PendingRun): Promise<void> {
     const taskId = task.taskId;
     const { runId, text, images, mode, selfCheck } = pending;
@@ -475,6 +571,17 @@ export class AgentGateway {
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
       this.publish({ type: "agent_event", event });
+    };
+
+    const publishEvent = (event: AgentEvent): void => {
+      this.publishPlanSideEffects(
+        taskId,
+        runId,
+        agentId,
+        mode,
+        event,
+        persistAndPublish,
+      );
     };
 
     const bindAgentId = (id: string): void => {
@@ -507,12 +614,17 @@ export class AgentGateway {
         effectiveRules,
       });
 
+      const promptText =
+        task.workflowState === "plan" || mode === "plan"
+          ? composePlanModePrompt(text)
+          : text;
+
       const result = await this.provider.run({
         taskId,
         runId,
         agentId,
         prompt: {
-          text,
+          text: promptText,
           images: images.length ? images : undefined,
         },
         cwd: task.workspace,
@@ -522,7 +634,7 @@ export class AgentGateway {
         agentName: task.title,
         onEvent: (event) => {
           if (event.agentId) bindAgentId(event.agentId);
-          persistAndPublish(event);
+          publishEvent(event);
         },
       });
 

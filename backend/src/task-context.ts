@@ -81,6 +81,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     `- project: ${project?.name ?? task.projectId} (${task.projectId})`,
     `- workspace: ${task.workspace}`,
     `- status: ${task.status}`,
+    `- workflow: ${task.workflowState} (${task.taskType})`,
     `- createdAt: ${task.createdAt}`,
     "",
     "## Workspace isolation",

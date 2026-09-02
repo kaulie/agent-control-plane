@@ -99,6 +99,7 @@ export const api = {
       height?: number;
     }>,
     mode?: "agent" | "plan",
+    planAnswerBatch?: import("./plan-questions").PlanAnswerBatch,
   ) =>
     apiFetch(`${BASE}/tasks/${id}/messages`, {
       method: "POST",
@@ -107,8 +108,18 @@ export const api = {
         message,
         ...(images?.length ? { images } : {}),
         ...(mode ? { mode } : {}),
+        ...(planAnswerBatch ? { planAnswerBatch } : {}),
       }),
     }).then((r) => j<{ runId: string; queued?: boolean; queueLength?: number }>(r)),
+
+  transitionWorkflow: (id: string, toState: string) =>
+    apiFetch(`${BASE}/tasks/${id}/workflow/transition`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toState }),
+    }).then((r) =>
+      j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
+    ),
 
   stopTask: (id: string) =>
     apiFetch(`${BASE}/tasks/${id}/stop`, {

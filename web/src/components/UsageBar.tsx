@@ -10,6 +10,18 @@ export default function UsageBar({ task, stats }: { task: Task; stats: TaskStats
         <span className="usage-value">#{task.taskId.slice(-6)}</span>
       </div>
       <div className="usage-item">
+        <span className="usage-label">Provider</span>
+        <span className="usage-value" title="创建时选定，不可更改">
+          {task.provider}
+        </span>
+      </div>
+      <div className="usage-item">
+        <span className="usage-label">Model</span>
+        <span className="usage-value" title="创建时选定，不可更改">
+          {task.model || "（自动）"}
+        </span>
+      </div>
+      <div className="usage-item">
         <span className="usage-label">Tokens</span>
         <span className="usage-value">{formatTokens(stats.totalTokens)}</span>
       </div>

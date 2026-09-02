@@ -314,7 +314,7 @@ export class Store {
    * finalized rows so the gateway can push them to reconnecting browsers.
    */
   markInterruptedRuns(): {
-    orphans: Array<{ agentId: string; cwd: string }>;
+    orphans: Array<{ agentId: string; cwd: string; provider?: string }>;
     finalized: Array<{
       taskId: string;
       runId: string;
@@ -327,7 +327,8 @@ export class Store {
                 r.task_id AS task_id,
                 r.agent_id AS agent_id,
                 r.created_at AS created_at,
-                t.workspace AS workspace
+                t.workspace AS workspace,
+                t.provider AS provider
          FROM runs r
          JOIN tasks t ON t.task_id = r.task_id
          WHERE r.status = 'running'`,
@@ -338,6 +339,7 @@ export class Store {
       agent_id: string | null;
       created_at: string;
       workspace: string;
+      provider: string | null;
     }>;
 
     const now = new Date().toISOString();
@@ -347,7 +349,8 @@ export class Store {
       event: AgentEvent;
     }> = [];
     const orphanKeys = new Set<string>();
-    const orphans: Array<{ agentId: string; cwd: string }> = [];
+    const orphans: Array<{ agentId: string; cwd: string; provider?: string }> =
+      [];
 
     for (const row of rows) {
       const createdMs = Date.parse(row.created_at);
@@ -393,10 +396,15 @@ export class Store {
       });
 
       if (row.agent_id) {
-        const key = `${row.agent_id}::${row.workspace}`;
+        const provider = row.provider?.trim() || undefined;
+        const key = `${provider ?? ""}::${row.agent_id}::${row.workspace}`;
         if (!orphanKeys.has(key)) {
           orphanKeys.add(key);
-          orphans.push({ agentId: row.agent_id, cwd: row.workspace });
+          orphans.push({
+            agentId: row.agent_id,
+            cwd: row.workspace,
+            ...(provider ? { provider } : {}),
+          });
         }
       }
     }

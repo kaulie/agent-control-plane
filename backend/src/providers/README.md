@@ -24,16 +24,20 @@ See [`types.ts`](./types.ts):
 providers/
   types.ts              # AgentProvider contract
   create-provider.ts    # Factory (register new adapters here)
+  registry.ts           # Multi-provider registry (per-task routing)
   cursor/               # Cursor SDK implementation (only place that imports @cursor/sdk)
     index.ts
     mapper.ts           # SDK messages → AgentEvent
+  cline/                # Cline SDK implementation
 ```
 
 ## Adding another runtime
 
 1. Create `providers/<name>/` with a class `implements AgentProvider`.
 2. Map that runtime’s stream into the same `AgentEvent` shapes the UI already understands.
-3. Register the name in [`create-provider.ts`](./create-provider.ts).
-4. Wire startup (env / config) to pass `name` into `createProvider`.
+3. Register the name in [`create-provider.ts`](./create-provider.ts) and [`registry.ts`](./registry.ts).
+4. Startup builds a `ProviderRegistry` of all adapters; `AGENT_PROVIDER` is only the **default** when a task/project does not pin one.
 
-No gateway or frontend changes should be required if events and `RunResultData` stay compatible.
+Gateway routes each run via `task.provider` (stamped at create and immutable
+thereafter — switch runtime by creating a new task). Project settings may set
+defaults; `AGENT_PROVIDER` is the final fallback.

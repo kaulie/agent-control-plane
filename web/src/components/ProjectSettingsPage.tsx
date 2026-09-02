@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
 import PlanExportSection from "./settings/PlanExportSection";
+import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
 
 interface Props {
   projectId: string;
@@ -20,6 +21,11 @@ export default function ProjectSettingsPage({
   const [savedRules, setSavedRules] = useState("");
   const [exportDir, setExportDir] = useState("");
   const [savedExportDir, setSavedExportDir] = useState("");
+  const [defaultProvider, setDefaultProvider] = useState("");
+  const [savedDefaultProvider, setSavedDefaultProvider] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
+  const [savedDefaultModel, setSavedDefaultModel] = useState("");
+  const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,12 +35,20 @@ export default function ProjectSettingsPage({
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getProjectSettings(projectId);
+      const [data, providers] = await Promise.all([
+        api.getProjectSettings(projectId),
+        api.listProviders().catch(() => null),
+      ]);
       setView(data);
       setRules(data.project.agent?.rules ?? "");
       setSavedRules(data.project.agent?.rules ?? "");
       setExportDir(data.project.plan?.exportDir ?? "");
       setSavedExportDir(data.project.plan?.exportDir ?? "");
+      setDefaultProvider(data.project.runtime?.defaultProvider ?? "");
+      setSavedDefaultProvider(data.project.runtime?.defaultProvider ?? "");
+      setDefaultModel(data.project.runtime?.defaultModel ?? "");
+      setSavedDefaultModel(data.project.runtime?.defaultModel ?? "");
+      if (providers) setEnvDefaultProvider(providers.defaultProvider);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -54,10 +68,16 @@ export default function ProjectSettingsPage({
       const data = await api.updateProjectSettings(projectId, {
         agent: { rules },
         plan: { exportDir: exportDir.trim() || undefined },
+        runtime: {
+          defaultProvider: defaultProvider.trim(),
+          defaultModel: defaultModel.trim(),
+        },
       });
       setView(data);
       setSavedRules(rules);
       setSavedExportDir(exportDir);
+      setSavedDefaultProvider(defaultProvider);
+      setSavedDefaultModel(defaultModel);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -66,7 +86,11 @@ export default function ProjectSettingsPage({
     }
   };
 
-  const dirty = rules !== savedRules || exportDir !== savedExportDir;
+  const dirty =
+    rules !== savedRules ||
+    exportDir !== savedExportDir ||
+    defaultProvider !== savedDefaultProvider ||
+    defaultModel !== savedDefaultModel;
   const globalRules = view?.global.agent?.rules ?? "";
   const effectiveRules = view?.effective.agent?.rules ?? "";
   const globalExportDir = view?.global.plan?.exportDir ?? "";
@@ -85,6 +109,16 @@ export default function ProjectSettingsPage({
         <div className="settings-loading">加载中…</div>
       ) : (
         <div className="settings-body">
+          <RuntimeDefaultsSection
+            defaultProvider={defaultProvider}
+            defaultModel={defaultModel}
+            envDefaultProvider={envDefaultProvider}
+            onProviderChange={(v) => {
+              setDefaultProvider(v);
+              setDefaultModel("");
+            }}
+            onModelChange={setDefaultModel}
+          />
           <AgentRulesSection
             title="全局 Agent Rules（只读）"
             description="继承自全局设置，在本项目中作为基础规则。"

@@ -4,6 +4,7 @@ import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
+import CreateTaskDialog from "./components/CreateTaskDialog";
 import Timeline from "./components/Timeline";
 import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
@@ -69,6 +70,11 @@ export default function App() {
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
   const [creatingPr, setCreatingPr] = useState(false);
+  const [showCreateTask, setShowCreateTask] = useState(false);
+  const [createTaskDefaults, setCreateTaskDefaults] = useState<{
+    provider?: string;
+    model?: string;
+  }>({});
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -446,20 +452,34 @@ export default function App() {
     }
   }, [applyInterruptNotice, applyRunState]);
 
-  const createTask = useCallback(async () => {
+  const openCreateTask = useCallback(async () => {
     if (!selectedProjectId) return;
-    const title = window.prompt("Task title (optional):") || undefined;
     try {
+      const settings = await api.getProjectSettings(selectedProjectId);
+      setCreateTaskDefaults({
+        provider: settings.effective.runtime?.defaultProvider,
+        model: settings.effective.runtime?.defaultModel,
+      });
+    } catch {
+      setCreateTaskDefaults({});
+    }
+    setShowCreateTask(true);
+  }, [selectedProjectId]);
+
+  const createTask = useCallback(
+    async (input: { title?: string; provider?: string; model?: string }) => {
+      if (!selectedProjectId) return;
       const task = await api.createTask({
-        title,
+        title: input.title,
         projectId: selectedProjectId,
+        provider: input.provider,
+        model: input.model,
       });
       await refreshTasks(selectedProjectId);
       await selectTask(task.taskId);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [refreshTasks, selectTask, selectedProjectId]);
+    },
+    [refreshTasks, selectTask, selectedProjectId],
+  );
 
   const createProject = useCallback(async () => {
     const name = window.prompt("Project name:");
@@ -790,7 +810,7 @@ export default function App() {
           tasks={tasks}
           selectedId={selectedId}
           onSelect={selectTask}
-          onCreate={createTask}
+          onCreate={() => void openCreateTask()}
         />
         <main className="main">
           {selectedId && detail ? (
@@ -920,6 +940,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+      {selectedProjectId && (
+        <CreateTaskDialog
+          open={showCreateTask}
+          projectId={selectedProjectId}
+          projectDefaultProvider={createTaskDefaults.provider}
+          projectDefaultModel={createTaskDefaults.model}
+          onClose={() => setShowCreateTask(false)}
+          onCreate={createTask}
+        />
       )}
     </div>
   );

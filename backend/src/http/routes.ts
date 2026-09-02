@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
-import type { AgentProvider } from "../providers/types.js";
+import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings } from "../types.js";
 import {
   resolveAttachmentPath,
@@ -12,7 +12,7 @@ import {
 export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
-  provider: AgentProvider,
+  providers: ProviderRegistry,
   opts: { dataDir: string; appVersion: string },
 ): Promise<void> {
   app.get("/health", async (_req, reply) => {
@@ -20,18 +20,58 @@ export async function registerRoutes(
     return {
       ok: true,
       service: "web-cursor-agent-gateway",
-      provider: provider.name,
+      provider: providers.defaultProviderName,
+      providers: providers.names(),
       version: opts.appVersion,
       time: new Date().toISOString(),
     };
   });
 
-  app.get("/api/auth", async () => provider.verifyAuth());
+  app.get("/api/auth", async () => {
+    const results = await Promise.all(
+      providers.list().map(async (p) => {
+        const auth = await p.verifyAuth();
+        return { name: p.name, ...auth };
+      }),
+    );
+    const defaultAuth = results.find((r) => r.name === providers.defaultProviderName);
+    return {
+      ok: results.some((r) => r.ok),
+      detail: defaultAuth
+        ? `default=${defaultAuth.name}: ${defaultAuth.detail}`
+        : results.map((r) => `${r.name}: ${r.detail}`).join("; "),
+      providers: results,
+    };
+  });
 
-  app.get("/api/models", async () => {
-    const models = await provider.listModels();
-    const resolved = await provider.resolveModel();
-    return { models, resolved };
+  app.get("/api/providers", async () => {
+    const list = await Promise.all(
+      providers.list().map(async (p) => {
+        const auth = await p.verifyAuth();
+        return {
+          name: p.name,
+          ok: auth.ok,
+          detail: auth.detail,
+          isDefault: p.name === providers.defaultProviderName,
+        };
+      }),
+    );
+    return { providers: list, defaultProvider: providers.defaultProviderName };
+  });
+
+  app.get<{ Querystring: { provider?: string } }>("/api/models", async (req, reply) => {
+    const name =
+      req.query.provider?.trim() || providers.defaultProviderName;
+    try {
+      const provider = providers.get(name);
+      const models = await provider.listModels();
+      const resolved = await provider.resolveModel();
+      return { provider: provider.name, models, resolved };
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---- settings ----
@@ -156,13 +196,20 @@ export async function registerRoutes(
   );
 
   app.post<{
-    Body: { title?: string; workspace?: string; model?: string; projectId?: string };
+    Body: {
+      title?: string;
+      workspace?: string;
+      provider?: string;
+      model?: string;
+      projectId?: string;
+    };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
     try {
       const task = gateway.createTask({
         title: body.title,
         workspace: body.workspace,
+        provider: body.provider,
         model: body.model,
         projectId: body.projectId,
       });

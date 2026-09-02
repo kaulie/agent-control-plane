@@ -20,9 +20,18 @@ export interface PlanExportConfig {
   exportDir?: string;
 }
 
+/** Per-project (or global) defaults for which agent runtime to use. */
+export interface RuntimeConfig {
+  /** Provider name (`cursor` | `cline`). Empty = fall back to AGENT_PROVIDER. */
+  defaultProvider?: string;
+  /** Optional default model id for the chosen provider. */
+  defaultModel?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
+  runtime?: RuntimeConfig;
 }
 
 export interface ProjectSettingsView {

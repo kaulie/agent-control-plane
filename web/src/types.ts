@@ -17,9 +17,15 @@ export interface PlanExportConfig {
   exportDir?: string;
 }
 
+export interface RuntimeConfig {
+  defaultProvider?: string;
+  defaultModel?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
+  runtime?: RuntimeConfig;
 }
 
 export interface ProjectSettingsView {
@@ -138,4 +144,17 @@ export interface TaskDetail {
 export interface AuthStatus {
   ok: boolean;
   detail: string;
+  providers?: Array<{ name: string; ok: boolean; detail: string }>;
+}
+
+export interface ProviderInfo {
+  name: string;
+  ok: boolean;
+  detail: string;
+  isDefault: boolean;
+}
+
+export interface ModelInfo {
+  id: string;
+  displayName: string;
 }

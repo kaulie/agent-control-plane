@@ -112,16 +112,33 @@ export default function ChatInput({
   const [images, setImages] = useState<ChatImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [mode, setMode] = useState<AgentMode>(() => defaultMode ?? loadStoredMode());
+  const wasLockedRef = useRef(lockMode);
 
   useEffect(() => {
     if (defaultMode) setMode(defaultMode);
   }, [defaultMode]);
+
+  // While workflow is plan, keep UI on Plan even if localStorage said Agent.
+  useEffect(() => {
+    if (lockMode) {
+      setMode("plan");
+      storeMode("plan");
+    } else if (wasLockedRef.current) {
+      // Left plan workflow (e.g. 「开始开发」) → switch to executable Agent.
+      setMode("agent");
+      storeMode("agent");
+    }
+    wasLockedRef.current = lockMode;
+  }, [lockMode]);
+
   const fileRef = useRef<HTMLInputElement>(null);
+  const effectiveMode: AgentMode = lockMode ? "plan" : mode;
 
   const canSend =
     (!!text.trim() || images.length > 0) && !disabled && !stopping;
 
   const selectMode = (next: AgentMode): void => {
+    if (lockMode) return;
     setMode(next);
     storeMode(next);
   };
@@ -156,7 +173,7 @@ export default function ChatInput({
 
   const submit = (): void => {
     if (!canSend) return;
-    onSend({ text: text.trim(), images, mode });
+    onSend({ text: text.trim(), images, mode: effectiveMode });
     setText("");
     setImages([]);
     setAttachError(null);
@@ -166,13 +183,15 @@ export default function ChatInput({
     ? queueLength > 0
       ? `Agent 工作中，另有 ${queueLength} 条消息排队…`
       : "Agent 工作中，消息将加入队列…"
-    : mode === "plan"
+    : effectiveMode === "plan"
       ? "Describe what to plan… (read-only planning mode)"
       : "Send an instruction… (paste or attach images)";
 
-  const modeSelectTitle = running
-    ? "切换模式不会中断当前任务，仅影响下一条排队消息"
-    : "Agent 可编辑代码；Plan 只读规划";
+  const modeSelectTitle = lockMode
+    ? "规划阶段固定为 Plan（只读）；点「开始开发」后才能切换到 Agent"
+    : running
+      ? "切换模式不会中断当前任务，仅影响下一条排队消息"
+      : "Agent 可编辑代码；Plan 只读规划";
 
   return (
     <div className="chat-input">
@@ -195,6 +214,13 @@ export default function ChatInput({
         </div>
       )}
       {attachError && <div className="chat-attach-error">{attachError}</div>}
+      {lockMode && (
+        <div className="chat-mode-hint">
+          当前为规划阶段（
+          <span className="event-mode event-mode-plan">Plan</span>
+          ，只读）。要执行改代码 / 跑命令，请先点工作流「开始开发」。
+        </div>
+      )}
       {running && activeRunMode && (
         <div className="chat-mode-hint">
           当前{" "}
@@ -228,7 +254,7 @@ export default function ChatInput({
         </button>
         <select
           className="mode-select"
-          value={mode}
+          value={effectiveMode}
           disabled={disabled || stopping || lockMode}
           aria-label="Conversation mode"
           title={modeSelectTitle}

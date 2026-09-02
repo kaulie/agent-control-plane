@@ -654,7 +654,16 @@ export default function App() {
     [events],
   );
 
-  const inPlanWorkflow = detail?.workflow.currentState === "plan";
+  const selectedTask = useMemo(
+    () => tasks.find((t) => t.taskId === selectedId),
+    [tasks, selectedId],
+  );
+  // Prefer live detail when it matches selection; fall back to task list so
+  // ChatInput locks to Plan before detail finishes loading (avoids Agent flash).
+  const inPlanWorkflow =
+    (detail?.task.taskId === selectedId
+      ? detail.workflow.currentState
+      : selectedTask?.workflowState) === "plan";
 
   const transitionWorkflow = useCallback(
     async (toState: WorkflowState) => {
@@ -671,6 +680,9 @@ export default function App() {
                 workflow: res.workflow,
               }
             : prev,
+        );
+        setTasks((prev) =>
+          prev.map((t) => (t.taskId === res.task.taskId ? res.task : t)),
         );
         if (toState === "coding") setMainTab("timeline");
       } catch (e) {

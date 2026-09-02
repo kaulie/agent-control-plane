@@ -27,6 +27,7 @@ Rules:
 4. Ask ONE batch at a time; do NOT list "1. 2. 3." in plain text for the user to type.
 5. When ready to produce the final plan, output markdown with a top-level "# Plan" heading (or \`\`\`web-cursor-plan-draft marker).
 6. If anything is unclear, ask before drafting — do not guess.
+7. You cannot leave Plan mode yourself, and you cannot run file-modifying tools while workflow is plan. Do **not** tell the user to switch Cursor IDE "Act" / "Approve plan". In Web Cursor the exit is the workflow button **「开始开发」** (transitions plan → coding). If the user asks to execute before that, remind them to click 「开始开发」 first.
 
 Use Chinese when the user writes in Chinese.`;
 

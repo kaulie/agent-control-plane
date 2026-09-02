@@ -58,5 +58,6 @@ Users often think a silent long tool call means the agent is dead. Prevent that:
 2. Split into short steps; after each step, **reply in chat** with the result (ok / fail / next).
 3. Prefer commands that print progress (`echo` milestones). Avoid long silent waits without output.
 4. While waiting on deploy/build, say explicitly: “正在构建/重启，大约需要几十秒，不是卡死”.
+5. **Deploy last:** finish the user-visible reply (what changed + outcome) **before** running `./scripts/deploy.sh`. If your run is interrupted for any reason, **系统自检** (generic delivery closure) will resume the unclosed user message — give a clear 终态 reply there too.
 
 See also: `AGENT.md` (full ops guide) and `.cursor/rules/deploy-runtime.mdc`.

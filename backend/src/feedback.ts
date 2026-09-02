@@ -1,6 +1,12 @@
 import type { AgentEvent, RunRecord } from "./types.js";
 import type { Store } from "./store/db.js";
 
+/**
+ * Feedback closure for user messages: any run that lacks a terminal assistant
+ * outcome (completed / error / meaningful cancel) is "unclosed". Self-check is
+ * a generic delivery mechanism — not tied to deploy or any single interrupt cause.
+ */
+
 const INTERRUPTED_RUN_ERROR = "interrupted (server restart)";
 
 /** Terminal feedback that closes a user message (B: not server_restart cancel). */
@@ -105,7 +111,7 @@ export function buildSelfCheckPrompt(unclosed: UnclosedUserMessage): string {
     "被中断的用户消息：",
     unclosed.text,
     "",
-    "请核对当前状态（含未完成项、部署或健康检查结果如有），并给出明确的终态回复（完成或失败均可，不要停在中间过程）。",
+    "请核对当前状态与未完成项，并给出明确的终态回复（完成或失败均可，不要停在中间过程）。",
   ].join("\n");
 }
 

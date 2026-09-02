@@ -14,20 +14,26 @@ export interface RunPrompt {
 export interface RunInput {
   taskId: string;
   runId: string;
-  /** Empty = create a new agent; non-empty = resume/reuse that agent. */
+  /**
+   * Opaque session handle for the adapter.
+   * Empty = create a new session; non-empty = resume/reuse that session.
+   */
   agentId: string;
   prompt: RunPrompt;
   cwd: string;
   model?: string;
-  /** Conversation mode for this run (Cursor SDK: agent | plan). */
+  /**
+   * Product conversation mode for this run (`agent` | `plan`).
+   * The concrete adapter maps this onto its runtime if supported.
+   */
   mode?: "agent" | "plan";
   /**
-   * Task briefing prepended only when this run actually Agent.create's
+   * Task briefing prepended only when this run actually creates a new session
    * (first bind, resume-fail recreate, or busy-fallback fresh agent).
    * Not shown in the Web Cursor timeline.
    */
   bootstrapText?: string;
-  /** Display name for Agent.create / resume (typically task.title). */
+  /** Display name for the underlying session (typically task.title). */
   agentName?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;
 }
@@ -41,14 +47,16 @@ export interface RunResultData {
   cost?: CostInfo;
   modelCalls: number;
   toolCalls: number;
-  /** SDK agent used for this run (for task binding). */
+  /** Session handle used for this run (for task binding). */
   agentId?: string;
 }
 
 /**
- * Provider-agnostic interface implemented by each agent backend (Cursor today;
- * OpenAI / DeepSeek / ... later). The gateway and Web UI never depend on a
- * concrete SDK.
+ * Swappable agent runtime adapter.
+ *
+ * Gateway / HTTP / Web UI depend only on this interface — never on a concrete
+ * SDK. Cursor today lives in `providers/cursor/`; add another runtime by
+ * implementing this interface and registering it in `createProvider`.
  */
 export interface AgentProvider {
   readonly name: string;
@@ -59,12 +67,12 @@ export interface AgentProvider {
   /** Request cancellation of an in-flight run. Returns false if unknown. */
   cancel(runId: string): Promise<boolean>;
   /**
-   * Optional: after a process restart, cancel SDK-side runs that were still
-   * active for the given agents (our DB already marked them interrupted).
+   * Optional: after a process restart, cancel underlying runs that were still
+   * active for the given sessions (our DB already marked them interrupted).
    */
   reconcileAfterRestart?(
     orphans: Array<{ agentId: string; cwd: string }>,
   ): Promise<void>;
-  /** Optional: release long-lived resources (e.g. cached agents) on shutdown. */
+  /** Optional: release long-lived resources (e.g. cached sessions) on shutdown. */
   dispose?(): void;
 }

@@ -4,8 +4,8 @@ import type {
   TextBlock,
   ToolUseBlock,
 } from "@cursor/sdk";
-import type { EventType, TokenUsage } from "../types.js";
-import { formatRunErrorMessage } from "../run-errors.js";
+import type { EventType, TokenUsage } from "../../types.js";
+import { formatRunErrorMessage } from "../../run-errors.js";
 
 export interface MappedEvent {
   eventType: EventType;

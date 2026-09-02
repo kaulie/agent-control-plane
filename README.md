@@ -21,13 +21,13 @@ Browser (React + Vite)
 Agent Gateway (Fastify)
    │
    ▼
-AgentProvider interface ── CursorAdapter ── @cursor/sdk
+AgentProvider (adapter) ── CursorProvider ── @cursor/sdk
                                         (local agent: file system + terminal)
 ```
 
-The Web UI never depends on the Cursor SDK directly. New providers (OpenAI,
-DeepSeek, …) implement the same `AgentProvider` interface in
-`backend/src/providers/`.
+The Web UI never depends on the Cursor SDK directly. `@cursor/sdk` is imported
+only under `backend/src/providers/cursor/`. New runtimes implement the same
+`AgentProvider` interface and register in `createProvider`.
 
 ## Prerequisites
 
@@ -127,8 +127,7 @@ backend/src/
   config.ts       env config (.env)
   store/db.ts     SQLite persistence (projects / tasks / runs / events / stats)
   gateway/        Task → Run → Event → Usage orchestration
-  providers/      AgentProvider interface + CursorAdapter
-  events/         SDK message → unified AgentEvent mapper
+  providers/      AgentProvider adapter + createProvider + cursor/ (@cursor/sdk)
   usage/          pricing + CostCalculator
   http/ ws/       REST + WebSocket
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)

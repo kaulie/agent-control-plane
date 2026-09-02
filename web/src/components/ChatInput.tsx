@@ -241,7 +241,7 @@ export default function ChatInput({
           value={text}
           placeholder={placeholder}
           disabled={disabled || stopping}
-          rows={2}
+          rows={4}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
             const items = e.clipboardData?.items;

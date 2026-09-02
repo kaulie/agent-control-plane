@@ -47,6 +47,72 @@ assert(md.includes("# Plan — Dental plan"), "title in markdown");
 assert(md.includes("Step 1: analyze"), "plan body in markdown");
 assert(md.includes("Make a plan"), "user request in markdown");
 
+const streamed = buildPlanMarkdown({
+  exportDir: "/tmp/plans",
+  task,
+  project,
+  runId: "run-stream",
+  userText: "test",
+  runEvents: [
+    {
+      eventId: "e1",
+      taskId: "task-abc",
+      runId: "run-stream",
+      eventType: "agent_response",
+      payload: { text: "评价" },
+      createdAt: "",
+    },
+    {
+      eventId: "e2",
+      taskId: "task-abc",
+      runId: "run-stream",
+      eventType: "agent_response",
+      payload: { text: "：**" },
+      createdAt: "",
+    },
+    {
+      eventId: "e3",
+      taskId: "task-abc",
+      runId: "run-stream",
+      eventType: "agent_response",
+      payload: { text: "方向对了" },
+      createdAt: "",
+    },
+  ],
+});
+assert(
+  streamed.includes("评价：**方向对了"),
+  "streaming chunks concatenated, not one word per line",
+);
+assert(
+  !streamed.includes("评价\n\n**"),
+  "streaming chunks must not be joined with blank lines",
+);
+
+const prefersResult = buildPlanMarkdown({
+  exportDir: "/tmp/plans",
+  task,
+  project,
+  runId: "run-final",
+  userText: "test",
+  runEvents: [
+    {
+      eventId: "e1",
+      taskId: "task-abc",
+      runId: "run-final",
+      eventType: "agent_response",
+      payload: { text: "partial" },
+      createdAt: "",
+    },
+  ],
+  runResult: "Complete plan body",
+});
+assert(
+  prefersResult.includes("Complete plan body"),
+  "runResult preferred over streaming events",
+);
+assert(!prefersResult.includes("partial"), "runResult replaces partial events");
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "plan-export-test-"));
 const result = exportPlanDocument({
   exportDir: tmpRoot,

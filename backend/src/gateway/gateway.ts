@@ -30,6 +30,7 @@ import {
   validateTransition,
   type TaskWorkflowView,
 } from "../workflows/index.js";
+import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -265,6 +266,14 @@ export class AgentGateway {
 
   maxEventSeq(taskId: string): number {
     return this.store.maxEventSeq(taskId);
+  }
+
+  listPlanDocuments(taskId: string) {
+    return listPlanDocuments(this.store, taskId);
+  }
+
+  getPlanDocument(taskId: string, runId: string) {
+    return readPlanDocument(this.store, taskId, runId);
   }
 
   getQueueLength(taskId: string): number {

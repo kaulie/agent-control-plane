@@ -5,13 +5,12 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from 
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import Timeline from "./components/Timeline";
+import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
-import PlanPreview from "./components/PlanPreview";
 import WorkflowStepper from "./components/WorkflowStepper";
 import PlanQuestionsWizard from "./components/PlanQuestionsWizard";
-import { extractPlanRuns, hasPlanContent } from "./plan-content";
 import {
   findPendingPlanQuestionBatch,
   type PlanAnswerBatch,
@@ -45,8 +44,6 @@ function storeProjectId(id: string): void {
   }
 }
 
-export type MainPanel = "chat" | "plan";
-
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -67,7 +64,8 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
-  const [mainPanel, setMainPanel] = useState<MainPanel>("chat");
+  const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
+  const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
 
@@ -194,6 +192,8 @@ export default function App() {
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
+    setMainTab("timeline");
+    setSelectedPlanRunId(null);
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
@@ -238,7 +238,7 @@ export default function App() {
 
   useEffect(() => subscribeVersionUpdate(setVersionUpdate), []);
 
-  // Idle tabs: poll /health for version drift (API calls cover active use).
+  // Poll /health for version drift (covers idle tabs between API calls).
   useEffect(() => {
     void pollHealthVersion();
     const onVisible = (): void => {
@@ -281,6 +281,10 @@ export default function App() {
                   ),
                 );
               }
+            }
+            if (ev.eventType === "plan_exported") {
+              setSelectedPlanRunId(ev.runId);
+              setMainTab("plan");
             }
           }
         } else if (msg.type === "task_queue_updated") {
@@ -410,7 +414,6 @@ export default function App() {
 
   const selectTask = useCallback(async (id: string) => {
     setSelectedId(id);
-    setMainPanel("chat");
     setEvents([]);
     setDetail(null);
     setStopping(false);
@@ -532,7 +535,7 @@ export default function App() {
           setRunning(true);
         }
         if (payload.mode === "plan" || detail?.workflow.currentState === "plan") {
-          setMainPanel("plan");
+          setMainTab("plan");
         }
       } catch (e) {
         setError(String(e));
@@ -589,14 +592,23 @@ export default function App() {
     return "agent";
   }, [running, detail, events]);
 
-  const activeRunId = useMemo((): string | undefined => {
-    if (!running || !detail) return undefined;
-    return detail.runs.find((r) => r.status === "running")?.runId;
-  }, [running, detail]);
-
-  const planRuns = useMemo(() => {
-    if (!detail) return [];
-    return extractPlanRuns(events, detail.task, detail.runs);
+  const planRunCount = useMemo(() => {
+    const finished = new Set(
+      (detail?.runs ?? [])
+        .filter((r) => r.status === "finished")
+        .map((r) => r.runId),
+    );
+    let count = 0;
+    for (const ev of events) {
+      if (
+        ev.eventType === "user_message" &&
+        ev.payload.mode === "plan" &&
+        finished.has(ev.runId)
+      ) {
+        count += 1;
+      }
+    }
+    return count;
   }, [events, detail]);
 
   const pendingPlanQuestions = useMemo(
@@ -605,13 +617,6 @@ export default function App() {
   );
 
   const inPlanWorkflow = detail?.workflow.currentState === "plan";
-
-  const showPlanTab =
-    inPlanWorkflow ||
-    activeRunMode === "plan" ||
-    hasPlanContent(planRuns) ||
-    planRuns.length > 0 ||
-    !!pendingPlanQuestions;
 
   const transitionWorkflow = useCallback(
     async (toState: WorkflowState) => {
@@ -629,7 +634,7 @@ export default function App() {
               }
             : prev,
         );
-        if (toState === "coding") setMainPanel("chat");
+        if (toState === "coding") setMainTab("timeline");
       } catch (e) {
         setError(String(e));
       } finally {
@@ -662,7 +667,7 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        setMainPanel("plan");
+        setMainTab("plan");
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
@@ -673,9 +678,15 @@ export default function App() {
 
   useEffect(() => {
     if (pendingPlanQuestions && inPlanWorkflow) {
-      setMainPanel("plan");
+      setMainTab("plan");
     }
   }, [pendingPlanQuestions, inPlanWorkflow]);
+
+  const openPlanForRun = useCallback((runId: string) => {
+    setSelectedPlanRunId(runId);
+    setMainTab("plan");
+  }, []);
+
 
   return (
     <div className="app">
@@ -747,49 +758,28 @@ export default function App() {
                 onTransition={(to) => void transitionWorkflow(to)}
               />
               <UsageBar task={detail.task} stats={detail.stats} />
-              {showPlanTab && (
-                <div className="main-panel-tabs" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mainPanel === "chat"}
-                    className={`main-panel-tab${mainPanel === "chat" ? " active" : ""}`}
-                    onClick={() => setMainPanel("chat")}
-                  >
-                    对话
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mainPanel === "plan"}
-                    className={`main-panel-tab${mainPanel === "plan" ? " active" : ""}`}
-                    onClick={() => setMainPanel("plan")}
-                  >
-                    Plan 预览
-                    {activeRunMode === "plan" && (
-                      <span className="main-panel-tab-live" aria-hidden>
-                        ●
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-              {mainPanel === "plan" && showPlanTab ? (
-                <>
-                  {pendingPlanQuestions && inPlanWorkflow && (
-                    <PlanQuestionsWizard
-                      batch={pendingPlanQuestions}
-                      disabled={running}
-                      onSubmit={(answers) => void submitPlanAnswers(answers)}
-                    />
+              <div className="main-tabs">
+                <button
+                  type="button"
+                  className={`main-tab${mainTab === "timeline" ? " active" : ""}`}
+                  onClick={() => setMainTab("timeline")}
+                >
+                  Timeline
+                </button>
+                <button
+                  type="button"
+                  className={`main-tab${mainTab === "plan" ? " active" : ""}`}
+                  onClick={() => setMainTab("plan")}
+                >
+                  Plan
+                  {(planRunCount > 0 || inPlanWorkflow) && (
+                    <span className="main-tab-badge">
+                      {planRunCount > 0 ? planRunCount : "●"}
+                    </span>
                   )}
-                  <PlanPreview
-                    planRuns={planRuns}
-                    running={running}
-                    activeRunId={activeRunId}
-                  />
-                </>
-              ) : (
+                </button>
+              </div>
+              {mainTab === "timeline" ? (
                 <Timeline
                   events={events}
                   running={running}
@@ -800,10 +790,24 @@ export default function App() {
                   hasMore={hasMore}
                   loadingMore={loadingMore}
                   onLoadMore={() => void loadMore()}
-                  onOpenPlanPreview={
-                    showPlanTab ? () => setMainPanel("plan") : undefined
-                  }
+                  onPlanExportedClick={openPlanForRun}
                 />
+              ) : (
+                <>
+                  {pendingPlanQuestions && inPlanWorkflow && (
+                    <PlanQuestionsWizard
+                      batch={pendingPlanQuestions}
+                      disabled={running}
+                      onSubmit={(answers) => void submitPlanAnswers(answers)}
+                    />
+                  )}
+                  <PlanDocumentPanel
+                    taskId={selectedId}
+                    selectedRunId={selectedPlanRunId}
+                    onSelectRunId={setSelectedPlanRunId}
+                    onOpenSettings={() => setView("project-settings")}
+                  />
+                </>
               )}
               {!(pendingPlanQuestions && inPlanWorkflow) && (
                 <ChatInput

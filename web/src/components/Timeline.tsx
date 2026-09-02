@@ -107,9 +107,13 @@ interface Row {
 
 function buildRows(events: AgentEvent[]): Row[] {
   const rows: Row[] = [];
+  const runModes = new Map<string, "agent" | "plan">();
   for (const ev of events) {
     const type = ev.eventType;
     const p = ev.payload;
+    if (p.mode === "plan" || p.mode === "agent") {
+      runModes.set(ev.runId, p.mode);
+    }
     let body = "";
     let detail = "";
     let images: Array<{ id: string; mimeType: string }> = [];
@@ -225,7 +229,7 @@ function buildRows(events: AgentEvent[]): Row[] {
       continue;
     }
 
-    let mode: "agent" | "plan" | undefined;
+    let mode: "agent" | "plan" | undefined = runModes.get(ev.runId);
     if (p.mode === "plan" || p.mode === "agent") {
       mode = p.mode;
     }
@@ -352,6 +356,7 @@ function EventCard({
   groupCount,
   groupExpanded,
   onGroupToggle,
+  onOpenPlanPreview,
 }: {
   row: Row;
   collapsed: boolean;
@@ -360,6 +365,7 @@ function EventCard({
   groupCount?: number;
   groupExpanded?: boolean;
   onGroupToggle?: () => void;
+  onOpenPlanPreview?: () => void;
 }) {
   const foldable = row.role === "activity";
   const isGroupProxy = groupCount != null && groupCount > 1 && !groupExpanded;
@@ -447,6 +453,24 @@ function EventCard({
           )}
           {row.body && <div className="event-body">{row.body}</div>}
           {row.detail && <pre className="event-detail">{row.detail}</pre>}
+          {row.type === "plan_exported" && onOpenPlanPreview && (
+            <button
+              type="button"
+              className="event-plan-preview-btn"
+              onClick={onOpenPlanPreview}
+            >
+              在 Markdown 阅读器中查看
+            </button>
+          )}
+          {row.type === "agent_response" && row.mode === "plan" && onOpenPlanPreview && (
+            <button
+              type="button"
+              className="event-plan-preview-btn"
+              onClick={onOpenPlanPreview}
+            >
+              打开 Plan 预览
+            </button>
+          )}
           {row.type === "agent_response" && row.agentId && (
             <div className="event-agent-id" title={row.agentId}>
               {shortAgentId(row.agentId)}
@@ -466,6 +490,7 @@ function EventGroup({
   autoFold,
   expandedItems,
   onToggleItem,
+  onOpenPlanPreview,
 }: {
   groupKey: string;
   rows: Row[];
@@ -474,6 +499,7 @@ function EventGroup({
   autoFold: boolean;
   expandedItems: Record<string, boolean>;
   onToggleItem: (key: string) => void;
+  onOpenPlanPreview?: () => void;
 }) {
   const last = rows[rows.length - 1];
   const count = rows.length;
@@ -487,6 +513,7 @@ function EventGroup({
         groupCount={count}
         groupExpanded={false}
         onGroupToggle={onToggleGroup}
+        onOpenPlanPreview={onOpenPlanPreview}
       />
     );
   }
@@ -522,6 +549,7 @@ function EventGroup({
               onToggle={
                 foldable && autoFold ? () => onToggleItem(r.key) : undefined
               }
+              onOpenPlanPreview={onOpenPlanPreview}
             />
           );
         })}
@@ -538,6 +566,7 @@ export default function Timeline({
   hasMore,
   loadingMore,
   onLoadMore,
+  onOpenPlanPreview,
 }: {
   events: AgentEvent[];
   running: boolean;
@@ -546,6 +575,7 @@ export default function Timeline({
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
+  onOpenPlanPreview?: () => void;
 }) {
   const queuedSet = useMemo(() => new Set(queuedRunIds), [queuedRunIds]);
   const rows = useMemo(
@@ -652,6 +682,7 @@ export default function Timeline({
                 autoFold={autoFold}
                 expandedItems={expanded}
                 onToggleItem={toggleExpanded}
+                onOpenPlanPreview={onOpenPlanPreview}
               />
             );
           }
@@ -666,6 +697,7 @@ export default function Timeline({
               onToggle={
                 foldable && autoFold ? () => toggleExpanded(r.key) : undefined
               }
+              onOpenPlanPreview={onOpenPlanPreview}
             />
           );
         })}

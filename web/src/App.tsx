@@ -8,6 +8,8 @@ import Timeline from "./components/Timeline";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
+import PlanPreview from "./components/PlanPreview";
+import { extractPlanRuns, hasPlanContent } from "./plan-content";
 import { APP_VERSION } from "./version";
 import {
   dismissVersionUpdate,
@@ -36,6 +38,8 @@ function storeProjectId(id: string): void {
   }
 }
 
+export type MainPanel = "chat" | "plan";
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -56,6 +60,7 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
+  const [mainPanel, setMainPanel] = useState<MainPanel>("chat");
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
 
   const selectedRef = useRef(selectedId);
@@ -397,6 +402,7 @@ export default function App() {
 
   const selectTask = useCallback(async (id: string) => {
     setSelectedId(id);
+    setMainPanel("chat");
     setEvents([]);
     setDetail(null);
     setStopping(false);
@@ -517,6 +523,7 @@ export default function App() {
         } else {
           setRunning(true);
         }
+        if (payload.mode === "plan") setMainPanel("plan");
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
@@ -571,6 +578,19 @@ export default function App() {
     }
     return "agent";
   }, [running, detail, events]);
+
+  const activeRunId = useMemo((): string | undefined => {
+    if (!running || !detail) return undefined;
+    return detail.runs.find((r) => r.status === "running")?.runId;
+  }, [running, detail]);
+
+  const planRuns = useMemo(() => {
+    if (!detail) return [];
+    return extractPlanRuns(events, detail.task, detail.runs);
+  }, [events, detail]);
+
+  const showPlanTab =
+    activeRunMode === "plan" || hasPlanContent(planRuns) || planRuns.length > 0;
 
   return (
     <div className="app">
@@ -637,17 +657,55 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              <Timeline
-                events={events}
-                running={running}
-                queueLength={queueLength}
-                queuedRunIds={detail.runs
-                  .filter((r) => r.status === "queued")
-                  .map((r) => r.runId)}
-                hasMore={hasMore}
-                loadingMore={loadingMore}
-                onLoadMore={() => void loadMore()}
-              />
+              {showPlanTab && (
+                <div className="main-panel-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mainPanel === "chat"}
+                    className={`main-panel-tab${mainPanel === "chat" ? " active" : ""}`}
+                    onClick={() => setMainPanel("chat")}
+                  >
+                    对话
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mainPanel === "plan"}
+                    className={`main-panel-tab${mainPanel === "plan" ? " active" : ""}`}
+                    onClick={() => setMainPanel("plan")}
+                  >
+                    Plan 预览
+                    {activeRunMode === "plan" && (
+                      <span className="main-panel-tab-live" aria-hidden>
+                        ●
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+              {mainPanel === "plan" && showPlanTab ? (
+                <PlanPreview
+                  planRuns={planRuns}
+                  running={running}
+                  activeRunId={activeRunId}
+                />
+              ) : (
+                <Timeline
+                  events={events}
+                  running={running}
+                  queueLength={queueLength}
+                  queuedRunIds={detail.runs
+                    .filter((r) => r.status === "queued")
+                    .map((r) => r.runId)}
+                  hasMore={hasMore}
+                  loadingMore={loadingMore}
+                  onLoadMore={() => void loadMore()}
+                  onOpenPlanPreview={
+                    showPlanTab ? () => setMainPanel("plan") : undefined
+                  }
+                />
+              )}
               <ChatInput
                 onSend={sendMessage}
                 onStop={() => void stopAgent()}

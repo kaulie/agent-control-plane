@@ -21,7 +21,7 @@ fi
 
 # 必须已由 deployment 同步过来的构建产物
 [ -f "${BACKEND_DIR}/dist/index.js" ] || {
-  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先 ./scripts/release.sh && ./scripts/deploy.sh deployment-<hash>" >&2
+  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先 /Users/gaolei/deployment/web-cursor/bin/release.sh && bin/deploy.sh deployment-<hash>" >&2
   exit 1
 }
 

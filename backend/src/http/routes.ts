@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
-import type { AgentProvider } from "../providers/types.js";
+import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings } from "../types.js";
 import {
   resolveAttachmentPath,
@@ -12,7 +12,7 @@ import {
 export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
-  provider: AgentProvider,
+  providers: ProviderRegistry,
   opts: { dataDir: string; appVersion: string },
 ): Promise<void> {
   app.get("/health", async (_req, reply) => {
@@ -20,18 +20,58 @@ export async function registerRoutes(
     return {
       ok: true,
       service: "web-cursor-agent-gateway",
-      provider: provider.name,
+      provider: providers.defaultProviderName,
+      providers: providers.names(),
       version: opts.appVersion,
       time: new Date().toISOString(),
     };
   });
 
-  app.get("/api/auth", async () => provider.verifyAuth());
+  app.get("/api/auth", async () => {
+    const results = await Promise.all(
+      providers.list().map(async (p) => {
+        const auth = await p.verifyAuth();
+        return { name: p.name, ...auth };
+      }),
+    );
+    const defaultAuth = results.find((r) => r.name === providers.defaultProviderName);
+    return {
+      ok: results.some((r) => r.ok),
+      detail: defaultAuth
+        ? `default=${defaultAuth.name}: ${defaultAuth.detail}`
+        : results.map((r) => `${r.name}: ${r.detail}`).join("; "),
+      providers: results,
+    };
+  });
 
-  app.get("/api/models", async () => {
-    const models = await provider.listModels();
-    const resolved = await provider.resolveModel();
-    return { models, resolved };
+  app.get("/api/providers", async () => {
+    const list = await Promise.all(
+      providers.list().map(async (p) => {
+        const auth = await p.verifyAuth();
+        return {
+          name: p.name,
+          ok: auth.ok,
+          detail: auth.detail,
+          isDefault: p.name === providers.defaultProviderName,
+        };
+      }),
+    );
+    return { providers: list, defaultProvider: providers.defaultProviderName };
+  });
+
+  app.get<{ Querystring: { provider?: string } }>("/api/models", async (req, reply) => {
+    const name =
+      req.query.provider?.trim() || providers.defaultProviderName;
+    try {
+      const provider = providers.get(name);
+      const models = await provider.listModels();
+      const resolved = await provider.resolveModel();
+      return { provider: provider.name, models, resolved };
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---- settings ----
@@ -156,13 +196,20 @@ export async function registerRoutes(
   );
 
   app.post<{
-    Body: { title?: string; workspace?: string; model?: string; projectId?: string };
+    Body: {
+      title?: string;
+      workspace?: string;
+      provider?: string;
+      model?: string;
+      projectId?: string;
+    };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
     try {
       const task = gateway.createTask({
         title: body.title,
         workspace: body.workspace,
+        provider: body.provider,
         model: body.model,
         projectId: body.projectId,
       });
@@ -231,16 +278,48 @@ export async function registerRoutes(
 
   app.patch<{
     Params: { taskId: string };
-    Body: { prUrl?: string | null };
+    Body: {
+      prUrl?: string | null;
+      provider?: string;
+      model?: string | null;
+    };
   }>("/api/tasks/:taskId", async (req, reply) => {
-    if (req.body?.prUrl === undefined) {
-      return reply.code(400).send({ error: "prUrl is required" });
+    const body = req.body ?? {};
+    const hasPrUrl = body.prUrl !== undefined;
+    const hasProvider = body.provider !== undefined;
+    const hasModel = body.model !== undefined;
+    if (!hasPrUrl && !hasProvider && !hasModel) {
+      return reply
+        .code(400)
+        .send({ error: "prUrl, provider, or model is required" });
     }
-    const task = gateway.updateTaskPrUrl(req.params.taskId, req.body.prUrl);
-    if (!task) {
-      return reply.code(404).send({ error: "task not found" });
+
+    try {
+      if (hasProvider || hasModel) {
+        const task = gateway.updateTaskRuntime(req.params.taskId, {
+          ...(hasProvider ? { provider: body.provider } : {}),
+          ...(hasModel ? { model: body.model } : {}),
+        });
+        if (hasPrUrl) {
+          const withPr = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl!);
+          return withPr ?? task;
+        }
+        return task;
+      }
+
+      const task = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl!);
+      if (!task) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      return task;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const notFound = /not found/i.test(msg);
+      const conflict = /active or queued/i.test(msg);
+      return reply
+        .code(notFound ? 404 : conflict ? 409 : 400)
+        .send({ error: msg });
     }
-    return task;
   });
 
   app.post<{

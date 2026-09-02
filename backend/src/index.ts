@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.js";
 import { Store } from "./store/db.js";
-import { createProvider } from "./providers/create-provider.js";
+import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
@@ -16,24 +16,23 @@ const config = loadConfig();
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
 
-if (config.provider === "cline") {
-  if (!config.clineApiKey) {
-    console.warn(
-      "[startup] DEEPSEEK_API_KEY is not set. The gateway will start, but agent runs will fail.\n" +
-        "          Set it in backend/.env (see backend/.env.example).",
-    );
-  }
-} else if (!config.apiKey) {
+if (!config.apiKey) {
   console.warn(
-    "[startup] CURSOR_API_KEY is not set. The gateway will start, but agent runs will fail.\n" +
+    "[startup] CURSOR_API_KEY is not set. Cursor-backed tasks will fail until it is set.\n" +
+      "          Set it in backend/.env (see backend/.env.example).",
+  );
+}
+if (!config.clineApiKey) {
+  console.warn(
+    "[startup] DEEPSEEK_API_KEY is not set. Cline-backed tasks will fail until it is set.\n" +
       "          Set it in backend/.env (see backend/.env.example).",
   );
 }
 
 const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
-const provider = createProvider({
-  name: config.provider,
+const providers = createProviderRegistry({
+  defaultName: config.provider,
   apiKey: config.apiKey,
   model: config.model,
   cline: {
@@ -48,7 +47,7 @@ if (interrupted.orphans.length) {
   console.warn(
     `[startup] clearing ${interrupted.orphans.length} orphaned SDK agent run(s) from prior process`,
   );
-  await provider.reconcileAfterRestart?.(interrupted.orphans);
+  await providers.reconcileAfterRestart(interrupted.orphans);
 }
 if (interrupted.finalized.length) {
   console.warn(
@@ -80,7 +79,7 @@ if (fs.existsSync(config.webDistDir)) {
 
 const gateway = new AgentGateway(
   store,
-  provider,
+  providers,
   {
     agentWorkspaceRoot: config.agentWorkspaceRoot,
     agentWorkspace: config.agentWorkspaceRoot,
@@ -90,7 +89,7 @@ const gateway = new AgentGateway(
   publish,
 );
 
-await registerRoutes(app, gateway, provider, {
+await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
   appVersion: config.appVersion,
 });
@@ -98,8 +97,13 @@ await registerRoutes(app, gateway, provider, {
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
 fs.writeFileSync(runningFlag, String(process.pid));
 
-const auth = await provider.verifyAuth();
-app.log.info(`auth: ${auth.ok ? "OK" : "FAILED"} — ${auth.detail}`);
+for (const provider of providers.list()) {
+  const auth = await provider.verifyAuth();
+  app.log.info(
+    `auth[${provider.name}]: ${auth.ok ? "OK" : "FAILED"} — ${auth.detail}`,
+  );
+}
+app.log.info(`default agent provider: ${providers.defaultProviderName}`);
 app.log.info(`agent workspace root: ${config.agentWorkspaceRoot}`);
 
 try {
@@ -154,7 +158,7 @@ const shutdown = (): void => {
   } catch {
     /* ignore */
   }
-  provider.dispose?.();
+  providers.dispose();
   store.close();
   app.close().then(() => process.exit(0));
 };

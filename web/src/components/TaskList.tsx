@@ -126,7 +126,9 @@ export default function TaskList({
             >
               <div className="task-title">{t.title || t.taskId}</div>
               <div className="task-meta">
-                #{t.taskId.slice(-6)} · {t.status} · {formatTime(t.createdAt)}
+                #{t.taskId.slice(-6)} · {t.provider}
+                {t.model ? `/${t.model}` : ""} · {t.status} ·{" "}
+                {formatTime(t.createdAt)}
               </div>
             </button>
           ))}

@@ -1796,3 +1796,98 @@ body {
   color: #fff;
   font-weight: 600;
 }
+
+.runtime-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.runtime-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 180px;
+  min-width: 160px;
+}
+
+.runtime-field-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.runtime-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.runtime-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.runtime-select-compact {
+  min-width: 110px;
+  max-width: 180px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.usage-item.usage-runtime {
+  align-items: flex-start;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.modal-dialog {
+  width: min(440px, 100%);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-cancel {
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modal-error {
+  color: var(--red);
+  font-size: 13px;
+}

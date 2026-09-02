@@ -4,6 +4,11 @@ import type { AgentEvent, AppSettings, Project, ProjectSettingsView, RunRecord, 
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 import {
+  isProviderName,
+  normalizeProviderName,
+  type ProviderRegistry,
+} from "../providers/registry.js";
+import {
   saveTaskImages,
   loadPromptImagesFromRefs,
   type PromptImage,
@@ -16,7 +21,7 @@ import {
 } from "../feedback.js";
 import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
-import { mergeSettings, resolvePlanExportDir } from "../settings.js";
+import { mergeSettings, resolvePlanExportDir, resolveRuntimeDefaults } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
 import { composePlanModePrompt } from "../plan-mode-guidance.js";
 import {
@@ -90,10 +95,23 @@ export class AgentGateway {
 
   constructor(
     private store: Store,
-    private provider: AgentProvider,
+    private providers: ProviderRegistry,
     private config: GatewayConfig,
     private publish: Publish,
   ) {}
+
+  /** Resolve the live adapter for a task (falls back to registry default). */
+  providerFor(task: Task): AgentProvider {
+    const name = task.provider?.trim();
+    if (name && this.providers.has(name)) {
+      return this.providers.get(name);
+    }
+    return this.providers.default;
+  }
+
+  listProviders(): ProviderRegistry {
+    return this.providers;
+  }
 
   // ---- projects ----
 
@@ -179,6 +197,7 @@ export class AgentGateway {
   createTask(input: {
     title?: string;
     workspace?: string;
+    provider?: string;
     model?: string;
     projectId?: string;
     createdBy?: string;
@@ -189,6 +208,25 @@ export class AgentGateway {
     if (!project) {
       throw new Error(`project ${projectId} not found`);
     }
+
+    const globalSettings = this.store.getGlobalSettings();
+    const projectSettings = this.store.getProjectSettings(projectId) ?? {};
+    const runtimeDefaults = resolveRuntimeDefaults(globalSettings, projectSettings);
+
+    const providerName = normalizeProviderName(
+      input.provider ?? runtimeDefaults.defaultProvider,
+      this.providers.defaultProviderName,
+    );
+    if (!isProviderName(providerName) || !this.providers.has(providerName)) {
+      throw new Error(
+        `Unknown agent provider "${providerName}". Supported: ${this.providers.names().join(", ")}`,
+      );
+    }
+
+    const model =
+      input.model?.trim() ||
+      runtimeDefaults.defaultModel ||
+      undefined;
 
     const taskId = newId("task");
     const globalRoot =
@@ -205,13 +243,62 @@ export class AgentGateway {
       taskId,
       title,
       workspace,
-      provider: this.provider.name,
-      model: input.model,
+      provider: providerName,
+      model,
       projectId,
       createdBy: input.createdBy,
     });
     this.publish({ type: "task_created", task });
     return task;
+  }
+
+  /**
+   * Change provider and/or model when the task has no active or queued run.
+   * Switching provider clears the bound session (`agentId`) so the next run
+   * creates a fresh session on the new runtime.
+   */
+  updateTaskRuntime(
+    taskId: string,
+    input: { provider?: string; model?: string | null },
+  ): Task {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
+    if (this.activeRuns.has(taskId) || this.getQueueLength(taskId) > 0) {
+      throw new Error(
+        "Cannot change provider/model while a run is active or queued",
+      );
+    }
+
+    const nextProvider =
+      input.provider !== undefined
+        ? normalizeProviderName(input.provider, task.provider)
+        : task.provider;
+    if (!isProviderName(nextProvider) || !this.providers.has(nextProvider)) {
+      throw new Error(
+        `Unknown agent provider "${nextProvider}". Supported: ${this.providers.names().join(", ")}`,
+      );
+    }
+
+    const providerChanged = nextProvider !== task.provider;
+    const modelPatch =
+      input.model !== undefined
+        ? { model: input.model?.trim() ? input.model.trim() : null }
+        : {};
+
+    const updated = this.store.updateTaskRuntime(taskId, {
+      ...(input.provider !== undefined ? { provider: nextProvider } : {}),
+      ...modelPatch,
+      clearAgentId: providerChanged,
+    });
+    if (!updated) throw new Error(`Task ${taskId} not found`);
+
+    this.publish({
+      type: "task_updated",
+      task: updated,
+      stats: this.store.getTaskStats(taskId),
+    });
+    return updated;
   }
 
   listTasks(filter?: { projectId?: string }): Task[] {
@@ -538,7 +625,7 @@ export class AgentGateway {
       runId,
       taskId,
       agentId,
-      provider: this.provider.name,
+      provider: this.providerFor(task).name,
       model: task.model,
       status: isQueued ? "queued" : "running",
     });
@@ -690,7 +777,7 @@ export class AgentGateway {
           ? composePlanModePrompt(text)
           : text;
 
-      const result = await this.provider.run({
+      const result = await this.providerFor(task).run({
         taskId,
         runId,
         agentId,
@@ -828,7 +915,7 @@ export class AgentGateway {
       throw new Error("No active run to stop");
     }
 
-    const cancelled = await this.provider.cancel(runId);
+    const cancelled = await this.providerFor(task).cancel(runId);
     if (!cancelled) {
       throw new Error("Failed to cancel the active run");
     }

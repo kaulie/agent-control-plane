@@ -2,10 +2,12 @@ import type {
   AgentEvent,
   AppSettings,
   AuthStatus,
+  ModelInfo,
   PlanDocumentContent,
   PlanDocumentSummary,
   Project,
   ProjectSettingsView,
+  ProviderInfo,
   Task,
   TaskDetail,
   TokenUsage,
@@ -29,6 +31,18 @@ async function j<T>(res: Response): Promise<T> {
 
 export const api = {
   getAuth: () => fetch(`${BASE}/auth`).then((r) => j<AuthStatus>(r)),
+
+  listProviders: () =>
+    fetch(`${BASE}/providers`).then((r) =>
+      j<{ providers: ProviderInfo[]; defaultProvider: string }>(r),
+    ),
+
+  listModels: (provider?: string) => {
+    const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+    return fetch(`${BASE}/models${q}`).then((r) =>
+      j<{ provider: string; models: ModelInfo[]; resolved?: string }>(r),
+    );
+  },
 
   listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
@@ -68,7 +82,13 @@ export const api = {
     return fetch(`${BASE}/tasks${q}`).then((r) => j<Task[]>(r));
   },
 
-  createTask: (body: { title?: string; workspace?: string; projectId?: string }) =>
+  createTask: (body: {
+    title?: string;
+    workspace?: string;
+    projectId?: string;
+    provider?: string;
+    model?: string;
+  }) =>
     fetch(`${BASE}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -123,7 +143,10 @@ export const api = {
       j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
     ),
 
-  updateTask: (id: string, body: { prUrl?: string | null }) =>
+  updateTask: (
+    id: string,
+    body: { prUrl?: string | null; provider?: string; model?: string | null },
+  ) =>
     fetch(`${BASE}/tasks/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },

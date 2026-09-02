@@ -31,6 +31,24 @@ export function patchSettings(
   if (patch.plan !== undefined) {
     next.plan = { ...existing.plan, ...patch.plan };
   }
+  if (patch.runtime !== undefined) {
+    const runtime = { ...existing.runtime, ...patch.runtime };
+    if (!runtime.defaultProvider?.trim()) {
+      delete runtime.defaultProvider;
+    } else {
+      runtime.defaultProvider = runtime.defaultProvider.trim();
+    }
+    if (!runtime.defaultModel?.trim()) {
+      delete runtime.defaultModel;
+    } else {
+      runtime.defaultModel = runtime.defaultModel.trim();
+    }
+    if (runtime.defaultProvider || runtime.defaultModel) {
+      next.runtime = runtime;
+    } else {
+      delete next.runtime;
+    }
+  }
   return next;
 }
 
@@ -59,6 +77,24 @@ export function resolveEffectiveRules(
   return parts.join(SECTION_SEP);
 }
 
+export function resolveRuntimeDefaults(
+  global: AppSettings,
+  project: AppSettings,
+): { defaultProvider?: string; defaultModel?: string } {
+  const defaultProvider =
+    project.runtime?.defaultProvider?.trim() ||
+    global.runtime?.defaultProvider?.trim() ||
+    undefined;
+  const defaultModel =
+    project.runtime?.defaultModel?.trim() ||
+    global.runtime?.defaultModel?.trim() ||
+    undefined;
+  return {
+    ...(defaultProvider ? { defaultProvider } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+  };
+}
+
 export function mergeSettings(
   global: AppSettings,
   project: AppSettings,
@@ -68,5 +104,9 @@ export function mergeSettings(
   if (rules) out.agent = { rules };
   const exportDir = resolvePlanExportDir(global, project);
   if (exportDir) out.plan = { exportDir };
+  const runtime = resolveRuntimeDefaults(global, project);
+  if (runtime.defaultProvider || runtime.defaultModel) {
+    out.runtime = runtime;
+  }
   return out;
 }

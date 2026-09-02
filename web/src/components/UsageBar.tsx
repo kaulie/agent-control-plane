@@ -1,7 +1,22 @@
 import type { Task, TaskStats } from "../types";
 import { formatCost, formatDuration, formatTokens } from "../format";
+import TaskRuntimeControls from "./TaskRuntimeControls";
 
-export default function UsageBar({ task, stats }: { task: Task; stats: TaskStats }) {
+interface Props {
+  task: Task;
+  stats: TaskStats;
+  busy: boolean;
+  onRuntimeUpdated: (task: Task) => void;
+  onError: (message: string) => void;
+}
+
+export default function UsageBar({
+  task,
+  stats,
+  busy,
+  onRuntimeUpdated,
+  onError,
+}: Props) {
   const cost = stats.costCents ?? stats.estimatedCents;
   return (
     <div className="usage-bar">
@@ -9,6 +24,12 @@ export default function UsageBar({ task, stats }: { task: Task; stats: TaskStats
         <span className="usage-label">Task</span>
         <span className="usage-value">#{task.taskId.slice(-6)}</span>
       </div>
+      <TaskRuntimeControls
+        task={task}
+        busy={busy}
+        onUpdated={onRuntimeUpdated}
+        onError={onError}
+      />
       <div className="usage-item">
         <span className="usage-label">Tokens</span>
         <span className="usage-value">{formatTokens(stats.totalTokens)}</span>

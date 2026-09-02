@@ -22,14 +22,17 @@ function sanitizeSegment(raw: string): string {
 }
 
 function collectPlanBody(events: AgentEvent[], runResult?: string): string {
-  const parts: string[] = [];
+  const final = runResult?.trim();
+  if (final) return final;
+
+  let merged = "";
   for (const ev of events) {
     if (ev.eventType !== "agent_response") continue;
-    const text = typeof ev.payload.text === "string" ? ev.payload.text.trim() : "";
-    if (text) parts.push(text);
+    const text = typeof ev.payload.text === "string" ? ev.payload.text : "";
+    if (text) merged += text;
   }
-  if (parts.length) return parts.join("\n\n");
-  return runResult?.trim() || "(no plan content)";
+  if (merged.trim()) return merged.trim();
+  return "(no plan content)";
 }
 
 export function buildPlanMarkdown(input: PlanExportInput): string {

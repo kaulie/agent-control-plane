@@ -93,7 +93,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
           `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,
           "- Follow [`BRANCHING.md`](BRANCHING.md): clone **this** GitHub URL into the task workspace, branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
           "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides the project git URL.",
-          "- Do not merge the PR or run `./scripts/deploy.sh` unless the user asks. After merge, deploy is: pull `main` in `/Users/gaolei/Projects/deepseek_web_cursor`, then `deploy.sh`.",
+          "- Do not merge the PR or run release/deploy unless the user asks. After merge, ship with `./scripts/release.sh` then `./scripts/deploy.sh deployment-<hash>` (build only in the deployment package; runtime is rsync + restart).",
         ].join("\n")
       : [
           "- Clone the repo you need into that directory (or a subfolder), then develop only there.",

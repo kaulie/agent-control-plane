@@ -2,18 +2,18 @@
 
 本文是 agent 在本仓库开发时必须遵守的约定。
 
-## 三个目录的职责
+## 目录职责
 
 | 目录 | 含义 | 谁改 |
 |---|---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 独立 workspace（clone GitHub + task 分支） | agent 在此改代码 |
 | 项目 `gitRepoUrl`（GitHub） | 开发远程 origin（clone / push / PR） | 在项目设置中配置；agent 不改配置本身 |
-| `/Users/gaolei/Projects/deepseek_web_cursor` | 部署工作树（PR 合入 `main` 后 pull，再 `deploy.sh`） | 不要在此直接开发 |
-| `/Users/gaolei/deployment/web-cursor/deployment-<hash>` | 待上线版本（用 git 短 hash 命名） | 每次上线前生成，一般不改 |
-| `/Users/gaolei/runtime/web-cursor` | 线上当前运行目录 | 只保留运行相关内容，**不要直接改** |
+| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | **待上线精确包**（release 时已 build；禁止手改） | 仅 `release.sh` 生成 |
+| `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录 | 仅 `deploy.sh` rsync 代码；保留 `.env`/`data` |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | 可选本机 clone（**不是**部署源） | 不要在此直接开发 |
 
-Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `settingSources: ["project"]`，以加载本仓库的 `AGENTS.md` / `.cursor/rules`。  
-约束摘要见根目录 [`AGENTS.md`](AGENTS.md)、主干分支与 GitHub PR 规范 [`BRANCHING.md`](BRANCHING.md)，以及 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
+Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `settingSources: ["project"]`，以加载本仓库的 `AGENTS.md` / `.cursor/rules`。  
+约束摘要见根目录 [`AGENTS.md`](AGENTS.md)、[`BRANCHING.md`](BRANCHING.md)，以及 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
 
 ## 端口规范（重要）
 
@@ -23,53 +23,35 @@ Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `setti
   2. `web/vite.config.ts` → 代理目标改成 `http://127.0.0.1:4212` 与 `ws://127.0.0.1:4212`
 - 永远不要占用 `4211`，避免与线上冲突。
 
-## 版本管理
+## 版本与发版
 
-- 改动后提交 git：`git add -A && git commit -m "描述"`。
-- 每次「待上线」对应一个 deployment 版本，用 git 短 hash 命名（如 `deployment-d7198f15`）：
-  - 在 dev 打 tag：`git tag deployment-$(git rev-parse --short=8 HEAD)`
-  - 生成目录快照：`deployment/web-cursor/deployment-<hash>/`
-- 上线 = 把某个 `deployment-<hash>` 部署到 `runtime/web-cursor` 并重启（必须遵守下方「部署动作约束」）。
+- 开发：在 task 分支 commit / push / GitHub PR。
+- 发版包：`./scripts/release.sh [ref]` → 生成 `/Users/gaolei/deployment/web-cursor/deployment-<hash>/`，并在**该目录内** `npm install` + `npm run build`。
+- 上线：`./scripts/deploy.sh deployment-<hash>` → rsync 到 runtime（排除 `.env`/`data` 等）→ 重启。
+- runtime **不再**现场构建，也 **不再**用 `git reset` 换版。
 
-## 部署动作约束（重要，基于事故教训）
+## 部署动作约束（重要）
 
-**上线一律执行标准脚本 `./scripts/deploy.sh <hash>`**（在 dev 仓库根目录运行，不传参数则部署 main 最新），**不要手工操作**。下面是脚本的行为说明，也是必须遵守的底线：
+**上线一律：`release.sh` → `deploy.sh deployment-<hash>`**，不要手工操作。
 
-部署**只允许**走下面的固定流程，禁止任何「手工复制/直接改文件」的做法：
-
-1. **runtime 目录禁止直接改文件**：runtime 只能通过 git 同步到某个 `deployment-<hash>`：
-   - 允许：`cd /Users/gaolei/runtime/web-cursor && git fetch origin && git reset --hard <hash>`
-   - **禁止**：`cp` / `rsync` 复制源码、用编辑器或脚本直接写 runtime 里的文件。
-
-2. **部署必须按顺序执行，每步校验，失败即停**：
-   ```
-   ① git fetch origin && git reset --hard <hash>
-   ② npm run build              —— 必须构建成功
-   ③ 重启进程                    —— 先 kill 旧进程，再启动新进程
-   ④ curl http://127.0.0.1:4211/health   —— 必须返回 200
-   ```
-   任一步失败就立刻停下，不要继续，并向用户报告。
-
-3. **重启进程必须确认「新进程存活」才算完成**：禁止只 kill 不启动，或启动失败却当作部署成功。
-
-4. **禁止触碰 runtime 的 `backend/data/`（数据库）和 `backend/.env`（API key）**：部署只更新代码，不迁移、不覆盖数据与密钥。
-
-5. **部署完成后必须自查**：`curl /health` 返回 200、打开首页能正常加载，才算上线完成。
+1. **禁止**对 runtime 手改文件或 ad-hoc `cp`/`rsync`；代码同步只允许 `deploy.sh`。
+2. **禁止**覆盖 runtime 的 `backend/.env`、`backend/data/`。
+3. 部署顺序：校验快照已构建 → rsync → restart → `curl /health` 必须 200。
+4. 重启必须确认新进程存活；禁止只 kill 不启动。
 
 ## 运维脚本（`scripts/`）
 
-所有脚本都在 **dev 仓库根目录**执行（`./scripts/xxx.sh`），操作对象是 runtime：
+在仓库根目录执行：
 
 | 脚本 | 用法 | 作用 |
 |---|---|---|
-| `deploy.sh` | `./scripts/deploy.sh [<hash\|tag>]` | 上线：git 同步 + 构建 + 重启。不传参数部署 main 最新 |
-| `start.sh` | `./scripts/start.sh` | 启动（已在运行则跳过；带健康检查） |
-| `stop.sh` | `./scripts/stop.sh` | 停止（PID 文件 + 端口兜底） |
-| `restart.sh` | `./scripts/restart.sh` | 重启（stop → start，不构建） |
+| `release.sh` | `./scripts/release.sh [ref]` | 冻结 `deployment-<hash>` 并在快照内构建 |
+| `deploy.sh` | `./scripts/deploy.sh deployment-<hash>` | rsync 快照 → runtime，然后重启（不构建） |
+| `start.sh` | `./scripts/start.sh` | 启动（已在运行则跳过；读 `VERSION`） |
+| `stop.sh` | `./scripts/stop.sh` | 停止 |
+| `restart.sh` | `./scripts/restart.sh` | 重启（不构建） |
 
-- `start.sh` / `stop.sh` / `restart.sh` 只做进程启停，**不构建**；要更新代码请用 `deploy.sh`。
-- 脚本支持环境变量覆盖：`RUNTIME_DIR`（默认 `/Users/gaolei/runtime/web-cursor`）、`PORT`（默认 `4211`）。
-- 运维时**优先用这些脚本**，不要手工 kill / 启动 / 复制文件。
+环境变量：`RUNTIME_DIR`、`DEPLOYMENT_ROOT`、`PORT`、`APP_VERSION`。
 
 ## 安全
 
@@ -81,14 +63,12 @@ Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `setti
 - `backend/` —— Agent Gateway（Fastify + `@cursor/sdk` + `node:sqlite`）
 - `web/` —— 前端（React + Vite）
 - `workspace/` —— 旧版相对沙盒（遗留；新 task 默认用 `/Users/gaolei/agent-workspace/<taskId>/`）
-- `scripts/` —— 运维/部署脚本（如 `deploy.sh`）
-
-Agent 工作约定：每个 task 在 `/Users/gaolei/agent-workspace/<taskId>/` 下 clone **项目 GitHub `gitRepoUrl`** 后开发，互不影响；交付默认 `push` + `gh pr create`。上线：PR 合入 `main` 后，在部署工作树 pull，再执行 `./scripts/deploy.sh`。
+- `scripts/` —— 运维/部署脚本（`release.sh` / `deploy.sh` 等）
 
 ## 开发与上线流程
 
 1. 在 **task workspace** 改代码、本地自测（避开 4211）。
-2. `git commit` → `git push` → `gh pr create`（或网关「创建 PR」），回写 `prUrl`。
-3. PR 在 GitHub 合入 `main` 后：`cd /Users/gaolei/Projects/deepseek_web_cursor && git pull --ff-only origin main`。
-4. 运行 `./scripts/deploy.sh`（或不传参部署 main 最新）完成上线。
+2. `git commit` → `git push` → `gh pr create`，回写 `prUrl`。
+3. PR 合入 GitHub `main` 后：`./scripts/release.sh` → `./scripts/deploy.sh deployment-<hash>`。
+4. 确认 `curl http://127.0.0.1:4211/health` 的 `version` 为该 hash。
 

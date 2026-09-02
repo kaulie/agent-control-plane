@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 启动 runtime 进程（不构建；构建请用 deploy.sh）。
+# 启动 runtime 进程（不构建；换版请用 release.sh + deploy.sh）。
 set -euo pipefail
 
 RUNTIME_DIR="${RUNTIME_DIR:-/Users/gaolei/runtime/web-cursor}"
@@ -19,26 +19,31 @@ if [ -n "$(lsof -ti:${PORT} 2>/dev/null || true)" ]; then
   exit 0
 fi
 
-# 必须先构建
+# 必须已由 deployment 同步过来的构建产物
 [ -f "${BACKEND_DIR}/dist/index.js" ] || {
-  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先运行 ./scripts/deploy.sh 构建" >&2
+  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先 ./scripts/release.sh && ./scripts/deploy.sh deployment-<hash>" >&2
   exit 1
 }
 
 mkdir -p "${BACKEND_DIR}"
 
-# 与 deploy 一致：用 runtime git HEAD 作为运行版本（restart 不经 deploy 时也正确）
-if [ -d "${RUNTIME_DIR}/.git" ]; then
-  export APP_VERSION="$(git -C "${RUNTIME_DIR}" rev-parse --short=8 HEAD 2>/dev/null || echo dev)"
+# 版本优先：环境变量 → runtime/VERSION → 兼容旧 git HEAD
+if [ -n "${APP_VERSION:-}" ]; then
+  :
+elif [ -f "${RUNTIME_DIR}/VERSION" ]; then
+  APP_VERSION="$(tr -d '[:space:]' < "${RUNTIME_DIR}/VERSION")"
+elif [ -d "${RUNTIME_DIR}/.git" ]; then
+  APP_VERSION="$(git -C "${RUNTIME_DIR}" rev-parse --short=8 HEAD 2>/dev/null || echo dev)"
 else
-  export APP_VERSION="${APP_VERSION:-dev}"
+  APP_VERSION="dev"
 fi
+export APP_VERSION
 
 cd "${BACKEND_DIR}"
 nohup env APP_VERSION="${APP_VERSION}" node dist/index.js > "${LOG_FILE}" 2>&1 &
 NEW_PID=$!
 echo "${NEW_PID}" > "${PID_FILE}"
-echo "[start] 新进程 PID=${NEW_PID}"
+echo "[start] 新进程 PID=${NEW_PID} APP_VERSION=${APP_VERSION}"
 
 for _ in $(seq 1 30); do
   if curl -s -m 2 "${HEALTH_URL}" >/dev/null 2>&1; then

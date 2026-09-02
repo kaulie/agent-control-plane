@@ -11,9 +11,9 @@
 |---|---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 的独立工作区（clone 后在此开发） | 是（唯一开发目录） |
 | 项目 `gitRepoUrl`（GitHub） | **origin**：clone / push / 开 PR 的远程 | 否（只读配置；用它作 remote） |
-| `/Users/gaolei/Projects/deepseek_web_cursor` | 部署工作树：PR 合进 `main` 后在此 `git pull`，再 `deploy.sh` | 否（不要在此直接开发） |
-| `/Users/gaolei/runtime/web-cursor` | 线上运行目录 | 禁止改 |
-| `/Users/gaolei/deployment/web-cursor/...` | 部署快照 | 禁止手改 |
+| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | **待上线精确包**（release 时 build 完成；禁止手改） | 否 |
+| `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录（只收 deploy rsync + 启停） | 禁止改 |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | 可选本机 clone（**不是**部署源） | 否 |
 
 若 bootstrap / 项目设置里给出了 `gitRepoUrl`，**必须**用该地址作为 `origin`，不要擅自改用本地 path remote。
 
@@ -104,15 +104,15 @@ EOF
 ## 合入后上线（非 agent 默认步骤）
 
 1. 在 GitHub 上把 PR merge 进 `main`
-2. 更新部署工作树并上线：
+2. 在任意含最新脚本的 checkout 中发版并上线：
 
 ```bash
-cd /Users/gaolei/Projects/deepseek_web_cursor
-git fetch origin && git checkout main && git pull --ff-only origin main
-./scripts/deploy.sh
+./scripts/release.sh                 # 冻结 deployment-<hash>，并在快照内 npm install + build
+./scripts/deploy.sh deployment-<hash>  # rsync 到 runtime（保留 .env/data），然后重启
 ```
 
-部署工作树的 `origin` 应指向同一 GitHub 仓。
+- **构建只发生在 `release.sh` / deployment 目录**；runtime 不再 build，也不再靠 git reset 换版。
+- 对 runtime 的代码更新 **只允许** 经 `deploy.sh` 的 rsync；禁止手工 cp/rsync/改文件。
 
 ## 硬性约束
 
@@ -121,7 +121,7 @@ git fetch origin && git checkout main && git pull --ff-only origin main
 3. **分支短命**：做完即 commit + push + 开 PR。
 4. **开发前同步**：开分支或长时间开发前 `git fetch`，并基于最新 `main`。
 5. **冲突在本分支解决**：需要时把 `main` rebase/merge 进自己的分支后再 push。
-6. **部署与开发分离**：开发在 workspace；上线只在部署工作树跑 `deploy.sh`。
+6. **部署与开发分离**：开发在 workspace；上线 = `release.sh` → `deploy.sh deployment-<hash>`。
 
 ## 反例（禁止）
 
@@ -129,8 +129,10 @@ git fetch origin && git checkout main && git pull --ff-only origin main
 - 在 `/Users/gaolei/Projects/deepseek_web_cursor` 上直接改并 commit（应在 task workspace + GitHub PR）
 - 分支名不含 task id（如 `tmp`、`dev`、`my-fix`）
 - `git push origin main` 或 force push 到 `main`
-- 直接改 `/Users/gaolei/runtime/**`
+- 直接改 `/Users/gaolei/runtime/**`，或对 runtime 手工 cp/rsync
+- 覆盖 runtime 的 `backend/.env` / `backend/data/`
 - 未配置 / 无视项目 `gitRepoUrl`，擅自换远程
+- 无参 `./scripts/deploy.sh` 部署「漂浮 main」
 
 ## 交付检查清单（止于开 PR）
 
@@ -141,4 +143,4 @@ git fetch origin && git checkout main && git pull --ff-only origin main
 - [ ] 已 `git push -u origin HEAD`
 - [ ] 已 `gh pr create`（或网关开 PR），任务已有 `prUrl`
 - [ ] 未直推 / 未 force push `main`
-- [ ] 未擅自 merge、未擅自 `deploy.sh`（除非用户另行要求）
+- [ ] 未擅自 merge、未擅自 `release.sh`/`deploy.sh`（除非用户另行要求）

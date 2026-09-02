@@ -8,9 +8,9 @@ You are the agent behind **Web Cursor**. These rules always apply.
 |---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here |
 | Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR — do not invent another remote |
-| `/Users/gaolei/Projects/deepseek_web_cursor` | Deploy worktree only (pull `main` after PR merge, then `deploy.sh`) — do not develop here |
-| `/Users/gaolei/runtime/web-cursor` | **Never** edit source; production only |
-| `/Users/gaolei/deployment/web-cursor/...` | Snapshots; do not hand-edit |
+| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | Frozen release package (built at release time) — never hand-edit |
+| `/Users/gaolei/runtime/web-cursor` | Fixed production dir — **never** edit; only `deploy.sh` may rsync code in |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | Optional local clone — **not** the deploy source |
 
 **Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, GitHub origin, deliver with `git push` + `gh pr create` (do not merge `main` or deploy unless the user asks).
 
@@ -18,7 +18,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 
 1. Your task workspace is already created (empty) under `agent-workspace/<taskId>/`.
 2. Clone the project's **GitHub** `gitRepoUrl` into that directory, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
-3. Do **not** edit other tasks' directories. Do **not** edit runtime. Do **not** edit the deploy worktree in place.
+3. Do **not** edit other tasks' directories. Do **not** edit runtime or deployment snapshots.
 
 ```bash
 # from your task workspace cwd (use the project gitRepoUrl from bootstrap)
@@ -31,22 +31,21 @@ gh pr create --base main --title "..." --body "..."
 # write PR URL back to the task (or POST /api/tasks/<taskId>/pull-request)
 ```
 
-## Deploy only via script
+## Deploy only via release + deploy
 
-After the GitHub PR is **merged** into `main`, update the local deploy worktree and run:
+After the GitHub PR is **merged** into `main`:
 
 ```bash
-cd /Users/gaolei/Projects/deepseek_web_cursor
-git fetch origin && git checkout main && git pull --ff-only origin main
-./scripts/deploy.sh              # main latest
-# or ./scripts/deploy.sh <hash>
+./scripts/release.sh                    # freeze deployment-<hash> + build inside it
+./scripts/deploy.sh deployment-<hash>   # rsync package → runtime, then restart
 ```
 
-`deploy.sh` does: `git fetch` + `reset --hard` on runtime → `npm run build` → restart → health check.
+- Build happens **only** in `release.sh` / the deployment directory.
+- Runtime does **not** `npm install` / `build`, and does **not** use git to change versions.
+- `deploy.sh` rsync **must** preserve `backend/.env` and `backend/data/`.
+- Never hand-edit or ad-hoc copy into runtime.
 
-**Do not** patch runtime with editors, `cp`, `rsync`, or ad-hoc `npm run build` in runtime.
-
-**Self-deploy note:** running `./scripts/deploy.sh` kills the gateway mid-run (all tasks). Expect WS disconnect + interrupted runs after restart. Prefer finishing the reply, then deploy in a short final step, and tell the user the UI may briefly show “后端暂时不可达”.
+**Self-deploy note:** `deploy.sh` restarts the gateway (all tasks). Expect WS disconnect. Prefer finishing the reply, then deploy, and tell the user the UI may briefly show “后端暂时不可达”.
 
 ## Ports
 
@@ -61,10 +60,10 @@ Never commit or overwrite `backend/.env` or `backend/data/`.
 
 Users often think a silent long tool call means the agent is dead. Prevent that:
 
-1. **Never** chain typecheck + commit + deploy (or other multi-minute steps) in **one** shell command.
+1. **Never** chain typecheck + commit + release/deploy (or other multi-minute steps) in **one** shell command.
 2. Split into short steps; after each step, **reply in chat** with the result (ok / fail / next).
 3. Prefer commands that print progress (`echo` milestones). Avoid long silent waits without output.
-4. While waiting on deploy/build, say explicitly: “正在构建/重启，大约需要几十秒，不是卡死”.
-5. **Deploy last:** finish the user-visible reply (what changed + outcome) **before** running `./scripts/deploy.sh`. If your run is interrupted for any reason, **系统自检** (generic delivery closure) will resume the unclosed user message — give a clear 终态 reply there too.
+4. While waiting on release/deploy, say explicitly: “正在构建/同步/重启，大约需要几十秒，不是卡死”.
+5. **Deploy last:** finish the user-visible reply **before** running release/deploy. If interrupted, **系统自检** will resume — give a clear 终态 reply there too.
 
-See also: [`BRANCHING.md`](BRANCHING.md) (trunk-based branching + GitHub PR), `AGENT.md` (full ops guide), and `.cursor/rules/deploy-runtime.mdc`.
+See also: [`BRANCHING.md`](BRANCHING.md), `AGENT.md`, and `.cursor/rules/deploy-runtime.mdc`.

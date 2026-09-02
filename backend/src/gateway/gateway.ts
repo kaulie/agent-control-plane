@@ -16,7 +16,8 @@ import {
 } from "../feedback.js";
 import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
-import { mergeSettings } from "../settings.js";
+import { mergeSettings, resolvePlanExportDir } from "../settings.js";
+import { exportPlanDocument } from "../plan-export.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -538,6 +539,44 @@ export class AgentGateway {
         modelCalls: result.modelCalls,
         toolCalls: result.toolCalls,
       });
+
+      if (mode === "plan" && result.status === "finished") {
+        const exportDir = resolvePlanExportDir(globalSettings, projectSettings);
+        if (exportDir) {
+          try {
+            const { events: runEvents } = this.store.listEvents(taskId, {
+              limit: 500,
+            });
+            const exported = exportPlanDocument({
+              exportDir,
+              task,
+              project: project ?? undefined,
+              runId,
+              userText: text,
+              runEvents: runEvents.filter((e) => e.runId === runId),
+              runResult: result.result,
+            });
+            persistAndPublish({
+              eventId: newId("evt"),
+              taskId,
+              runId,
+              agentId,
+              timestamp: new Date().toISOString(),
+              eventType: "plan_exported",
+              payload: {
+                path: exported.filePath,
+                fileName: exported.fileName,
+              },
+            });
+          } catch (err) {
+            console.warn(
+              "[plan-export] failed:",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+      }
+
       this.store.updateTaskStatus(
         taskId,
         result.status === "error"

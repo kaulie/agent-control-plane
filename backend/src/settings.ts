@@ -28,7 +28,19 @@ export function patchSettings(
   if (patch.agent !== undefined) {
     next.agent = { ...existing.agent, ...patch.agent };
   }
+  if (patch.plan !== undefined) {
+    next.plan = { ...existing.plan, ...patch.plan };
+  }
   return next;
+}
+
+export function resolvePlanExportDir(
+  global: AppSettings,
+  project: AppSettings,
+): string | undefined {
+  const dir =
+    project.plan?.exportDir?.trim() || global.plan?.exportDir?.trim() || "";
+  return dir || undefined;
 }
 
 export function resolveEffectiveRules(
@@ -51,7 +63,10 @@ export function mergeSettings(
   global: AppSettings,
   project: AppSettings,
 ): AppSettings {
+  const out: AppSettings = {};
   const rules = resolveEffectiveRules(global, project);
-  if (!rules) return {};
-  return { agent: { rules } };
+  if (rules) out.agent = { rules };
+  const exportDir = resolvePlanExportDir(global, project);
+  if (exportDir) out.plan = { exportDir };
+  return out;
 }

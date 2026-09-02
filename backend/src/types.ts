@@ -4,8 +4,14 @@ export interface AgentRulesConfig {
   rules?: string;
 }
 
+export interface PlanExportConfig {
+  /** Absolute directory; empty/omit = disabled at this level. */
+  exportDir?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
+  plan?: PlanExportConfig;
 }
 
 export interface ProjectSettingsView {
@@ -80,7 +86,8 @@ export type EventType =
   | "usage"
   | "run_completed"
   | "run_cancelled"
-  | "run_error";
+  | "run_error"
+  | "plan_exported";
 
 export interface TokenUsage {
   inputTokens: number;

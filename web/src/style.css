@@ -918,6 +918,18 @@ body {
   line-height: 1.45;
 }
 
+.settings-path-input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
 .settings-rules-input,
 .settings-rules-block {
   width: 100%;

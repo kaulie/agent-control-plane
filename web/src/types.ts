@@ -11,8 +11,13 @@ export interface AgentRulesConfig {
   rules?: string;
 }
 
+export interface PlanExportConfig {
+  exportDir?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
+  plan?: PlanExportConfig;
 }
 
 export interface ProjectSettingsView {

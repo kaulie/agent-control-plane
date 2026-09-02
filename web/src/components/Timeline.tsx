@@ -18,6 +18,7 @@ const ICONS: Record<string, string> = {
   run_completed: "✅",
   run_cancelled: "⏹",
   run_error: "❌",
+  plan_exported: "📄",
 };
 
 const LABELS: Record<string, string> = {
@@ -36,6 +37,7 @@ const LABELS: Record<string, string> = {
   run_completed: "Completed",
   run_cancelled: "Stopped",
   run_error: "Error",
+  plan_exported: "Plan exported",
 };
 
 type EventRole = "user" | "assistant" | "activity";
@@ -189,6 +191,9 @@ function buildRows(events: AgentEvent[]): Row[] {
         break;
       case "run_error":
         body = String(p.error ?? "error");
+        break;
+      case "plan_exported":
+        body = String(p.path ?? p.fileName ?? "exported");
         break;
       default:
         body = truncate(JSON.stringify(p), 300);

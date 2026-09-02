@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
+import PlanExportSection from "./settings/PlanExportSection";
 
 interface Props {
   projectId: string;
@@ -17,6 +18,8 @@ export default function ProjectSettingsPage({
   const [view, setView] = useState<ProjectSettingsView | null>(null);
   const [rules, setRules] = useState("");
   const [savedRules, setSavedRules] = useState("");
+  const [exportDir, setExportDir] = useState("");
+  const [savedExportDir, setSavedExportDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +31,10 @@ export default function ProjectSettingsPage({
     try {
       const data = await api.getProjectSettings(projectId);
       setView(data);
-      const text = data.project.agent?.rules ?? "";
-      setRules(text);
-      setSavedRules(text);
+      setRules(data.project.agent?.rules ?? "");
+      setSavedRules(data.project.agent?.rules ?? "");
+      setExportDir(data.project.plan?.exportDir ?? "");
+      setSavedExportDir(data.project.plan?.exportDir ?? "");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -49,9 +53,11 @@ export default function ProjectSettingsPage({
     try {
       const data = await api.updateProjectSettings(projectId, {
         agent: { rules },
+        plan: { exportDir: exportDir.trim() || undefined },
       });
       setView(data);
       setSavedRules(rules);
+      setSavedExportDir(exportDir);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -60,9 +66,11 @@ export default function ProjectSettingsPage({
     }
   };
 
-  const dirty = rules !== savedRules;
+  const dirty = rules !== savedRules || exportDir !== savedExportDir;
   const globalRules = view?.global.agent?.rules ?? "";
   const effectiveRules = view?.effective.agent?.rules ?? "";
+  const globalExportDir = view?.global.plan?.exportDir ?? "";
+  const effectiveExportDir = view?.effective.plan?.exportDir ?? "";
 
   return (
     <div className="settings-page">
@@ -93,7 +101,30 @@ export default function ProjectSettingsPage({
           <AgentRulesSection
             title="生效预览"
             description="合并后的规则（全局 + 项目）。"
-            value={dirty ? buildPreview(globalRules, rules) : effectiveRules}
+            value={dirty ? buildRulesPreview(globalRules, rules) : effectiveRules}
+            mode="preview"
+          />
+          <PlanExportSection
+            title="全局 Plan 导出目录（只读）"
+            description="继承自全局设置；项目未配置时使用。"
+            value={globalExportDir}
+            mode="readonly"
+          />
+          <PlanExportSection
+            title="项目 Plan 导出目录"
+            description="留空则使用全局目录；填写则覆盖全局。"
+            value={exportDir}
+            mode="edit"
+            onChange={setExportDir}
+          />
+          <PlanExportSection
+            title="生效导出目录"
+            description="实际用于 Plan 文档导出的目录。"
+            value={
+              exportDir !== savedExportDir
+                ? exportDir.trim() || globalExportDir
+                : effectiveExportDir
+            }
             mode="preview"
           />
           {view?.cwdRules && (
@@ -111,7 +142,7 @@ export default function ProjectSettingsPage({
               disabled={!dirty || saving}
               onClick={() => void save()}
             >
-              {saving ? "保存中…" : "保存项目规则"}
+              {saving ? "保存中…" : "保存项目设置"}
             </button>
             {dirty && !saving && (
               <span className="settings-dirty">有未保存的更改</span>
@@ -129,7 +160,7 @@ export default function ProjectSettingsPage({
   );
 }
 
-function buildPreview(globalRules: string, projectRules: string): string {
+function buildRulesPreview(globalRules: string, projectRules: string): string {
   const parts: string[] = [];
   const g = globalRules.trim();
   const p = projectRules.trim();

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppSettings } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
+import PlanExportSection from "./settings/PlanExportSection";
 
 interface Props {
   onBack: () => void;
@@ -10,6 +11,8 @@ interface Props {
 export default function GlobalSettingsPage({ onBack }: Props) {
   const [rules, setRules] = useState("");
   const [savedRules, setSavedRules] = useState("");
+  const [exportDir, setExportDir] = useState("");
+  const [savedExportDir, setSavedExportDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +24,11 @@ export default function GlobalSettingsPage({ onBack }: Props) {
     try {
       const settings = await api.getGlobalSettings();
       const text = settings.agent?.rules ?? "";
+      const dir = settings.plan?.exportDir ?? "";
       setRules(text);
       setSavedRules(text);
+      setExportDir(dir);
+      setSavedExportDir(dir);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -39,9 +45,13 @@ export default function GlobalSettingsPage({ onBack }: Props) {
     setError(null);
     setNotice(null);
     try {
-      const patch: AppSettings = { agent: { rules } };
+      const patch: AppSettings = {
+        agent: { rules },
+        plan: { exportDir: exportDir.trim() || undefined },
+      };
       await api.updateGlobalSettings(patch);
       setSavedRules(rules);
+      setSavedExportDir(exportDir);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -50,7 +60,7 @@ export default function GlobalSettingsPage({ onBack }: Props) {
     }
   };
 
-  const dirty = rules !== savedRules;
+  const dirty = rules !== savedRules || exportDir !== savedExportDir;
 
   return (
     <div className="settings-page">
@@ -60,7 +70,7 @@ export default function GlobalSettingsPage({ onBack }: Props) {
         </button>
         <h1 className="settings-title">全局设置</h1>
         <p className="settings-subtitle">
-          作用于所有项目；项目级规则会叠加在全局规则之后。
+          作用于所有项目；项目级配置可覆盖全局。
         </p>
       </header>
       {loading ? (
@@ -73,6 +83,13 @@ export default function GlobalSettingsPage({ onBack }: Props) {
             value={rules}
             mode="edit"
             onChange={setRules}
+          />
+          <PlanExportSection
+            title="Plan 导出"
+            description="Plan 模式 run 成功后，自动将计划文档导出到此目录（绝对路径）。"
+            value={exportDir}
+            mode="edit"
+            onChange={setExportDir}
           />
           <div className="settings-actions">
             <button

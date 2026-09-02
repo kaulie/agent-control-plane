@@ -11,6 +11,8 @@ export const CANONICAL_DEV_REPO = "/Users/gaolei/Projects/deepseek_web_cursor";
 export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 
 export interface Config {
+  /** Git short SHA baked into web build; exposed via /health and X-App-Version. */
+  appVersion: string;
   port: number;
   host: string;
   apiKey: string | undefined;
@@ -63,6 +65,7 @@ export function loadConfig(): Config {
   );
 
   return {
+    appVersion: process.env.APP_VERSION?.trim() || "dev",
     port: Number(process.env.PORT || 4211),
     host: process.env.HOST || "127.0.0.1",
     apiKey: process.env.CURSOR_API_KEY || undefined,

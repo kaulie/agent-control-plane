@@ -26,8 +26,16 @@ fi
 }
 
 mkdir -p "${BACKEND_DIR}"
+
+# 与 deploy 一致：用 runtime git HEAD 作为运行版本（restart 不经 deploy 时也正确）
+if [ -d "${RUNTIME_DIR}/.git" ]; then
+  export APP_VERSION="$(git -C "${RUNTIME_DIR}" rev-parse --short=8 HEAD 2>/dev/null || echo dev)"
+else
+  export APP_VERSION="${APP_VERSION:-dev}"
+fi
+
 cd "${BACKEND_DIR}"
-nohup node dist/index.js > "${LOG_FILE}" 2>&1 &
+nohup env APP_VERSION="${APP_VERSION}" node dist/index.js > "${LOG_FILE}" 2>&1 &
 NEW_PID=$!
 echo "${NEW_PID}" > "${PID_FILE}"
 echo "[start] 新进程 PID=${NEW_PID}"

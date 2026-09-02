@@ -13,12 +13,13 @@ export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
   provider: AgentProvider,
-  opts: { dataDir: string },
+  opts: { dataDir: string; appVersion: string },
 ): Promise<void> {
   app.get("/health", async () => ({
     ok: true,
     service: "web-cursor-agent-gateway",
     provider: provider.name,
+    version: opts.appVersion,
     time: new Date().toISOString(),
   }));
 

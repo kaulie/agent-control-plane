@@ -35,6 +35,7 @@ log "    版本号: ${VERSION}"
 
 # ---- 2. 构建 ----
 log "2/3 构建"
+export APP_VERSION="${VERSION}"
 (cd "${RUNTIME_DIR}" && npm run build) || die "构建失败"
 
 # ---- 3. 重启（复用 restart.sh：stop -> start -> 健康检查） ----

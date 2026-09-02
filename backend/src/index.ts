@@ -44,6 +44,11 @@ if (interrupted.finalized.length) {
 // Allow text + several base64 images in one JSON POST (decoded images are capped separately).
 const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 
+app.addHook("onSend", async (_req, reply, payload) => {
+  reply.header("X-App-Version", config.appVersion);
+  return payload;
+});
+
 await app.register(cors, { origin: true });
 await app.register(websocket, { options: { maxPayload: 1048576 } });
 
@@ -70,7 +75,10 @@ const gateway = new AgentGateway(
   publish,
 );
 
-await registerRoutes(app, gateway, provider, { dataDir: config.dataDir });
+await registerRoutes(app, gateway, provider, {
+  dataDir: config.dataDir,
+  appVersion: config.appVersion,
+});
 
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
 fs.writeFileSync(runningFlag, String(process.pid));

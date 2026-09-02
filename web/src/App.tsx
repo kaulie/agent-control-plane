@@ -8,6 +8,14 @@ import Timeline from "./components/Timeline";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
+import { APP_VERSION } from "./version";
+import {
+  dismissVersionUpdate,
+  pollHealthVersion,
+  reloadForUpdate,
+  subscribeVersionUpdate,
+  type VersionUpdate,
+} from "./version-check";
 
 const PROJECT_STORAGE_KEY = "web-cursor:selectedProjectId";
 const DEFAULT_PROJECT_ID = "project-default";
@@ -48,6 +56,7 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
+  const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -213,6 +222,22 @@ export default function App() {
       }
     })();
   }, [refreshProjects, refreshTasks]);
+
+  useEffect(() => subscribeVersionUpdate(setVersionUpdate), []);
+
+  // Idle tabs: poll /health for version drift (API calls cover active use).
+  useEffect(() => {
+    void pollHealthVersion();
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") void pollHealthVersion();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const id = window.setInterval(() => void pollHealthVersion(), 5 * 60 * 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     const close = connectWs(
@@ -567,6 +592,8 @@ export default function App() {
           <span className="sep">·</span>
           <span className={`dot ${wsStatus === "connected" ? "ok" : "bad"}`} />
           ws: {wsStatus}
+          <span className="sep">·</span>
+          v{APP_VERSION}
         </div>
       </header>
       {(backendDown || wsStatus === "reconnecting") && (
@@ -645,6 +672,35 @@ export default function App() {
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} ✕
+        </div>
+      )}
+      {versionUpdate && (
+        <div className="update-modal-backdrop" role="presentation">
+          <div className="update-modal" role="dialog" aria-labelledby="update-modal-title">
+            <h2 id="update-modal-title" className="update-modal-title">
+              系统版本已更新
+            </h2>
+            <p className="update-modal-body">
+              当前页面版本为 <code>{versionUpdate.clientVersion}</code>，服务端已更新至{" "}
+              <code>{versionUpdate.serverVersion}</code>。请刷新页面以获取最新功能。
+            </p>
+            <div className="update-modal-actions">
+              <button
+                type="button"
+                className="update-modal-btn primary"
+                onClick={() => reloadForUpdate()}
+              >
+                立即更新
+              </button>
+              <button
+                type="button"
+                className="update-modal-btn"
+                onClick={() => dismissVersionUpdate(versionUpdate.serverVersion)}
+              >
+                暂不更新
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

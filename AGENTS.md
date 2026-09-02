@@ -6,10 +6,11 @@ You are the agent behind **Web Cursor**. These rules always apply.
 
 | Path | Action |
 |---|---|
-| `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here |
-| Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR — do not invent another remote |
+| `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here（**开发 only**） |
+| Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
+| `/Users/gaolei/deployment/web-cursor/bin/` | Independent ship tools (`release.sh` / `deploy.sh`) — not part of the app |
 | `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | Frozen release package (built at release time) — never hand-edit |
-| `/Users/gaolei/runtime/web-cursor` | Fixed production dir — **never** edit; only `deploy.sh` may rsync code in |
+| `/Users/gaolei/runtime/web-cursor` | Fixed production dir — **never** edit; only `bin/deploy.sh` may rsync code in |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | Optional local clone — **not** the deploy source |
 
 **Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, GitHub origin, deliver with `git push` + `gh pr create` (do not merge `main` or deploy unless the user asks).
@@ -18,7 +19,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 
 1. Your task workspace is already created (empty) under `agent-workspace/<taskId>/`.
 2. Clone the project's **GitHub** `gitRepoUrl` into that directory, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
-3. Do **not** edit other tasks' directories. Do **not** edit runtime or deployment snapshots.
+3. Do **not** edit other tasks' directories. Do **not** edit runtime or `deployment-<hash>/` snapshots.
 
 ```bash
 # from your task workspace cwd (use the project gitRepoUrl from bootstrap)
@@ -31,16 +32,21 @@ gh pr create --base main --title "..." --body "..."
 # write PR URL back to the task (or POST /api/tasks/<taskId>/pull-request)
 ```
 
-## Deploy only via release + deploy
+## Deploy only via independent bin scripts
 
-After the GitHub PR is **merged** into `main`:
+After the GitHub PR is **merged** into `main` (and the user asks to ship):
 
 ```bash
-./scripts/release.sh                    # freeze deployment-<hash> + build inside it
-./scripts/deploy.sh deployment-<hash>   # rsync package → runtime, then restart
+/Users/gaolei/deployment/web-cursor/bin/release.sh
+# freeze + build deployment-<hash>/ from GitHub (default: main)
+
+/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
+# rsync package → runtime, then restart
 ```
 
-- Build happens **only** in `release.sh` / the deployment directory.
+- `release.sh` / `deploy.sh` are **ops tools**, independent of the app and of task workspaces.
+- **Never** run release/deploy from `agent-workspace/**`; do not rely on a long-lived app checkout to ship.
+- Build happens **only** inside `deployment-<hash>/`.
 - Runtime does **not** `npm install` / `build`, and does **not** use git to change versions.
 - `deploy.sh` rsync **must** preserve `backend/.env` and `backend/data/`.
 - Never hand-edit or ad-hoc copy into runtime.

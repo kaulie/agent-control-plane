@@ -9,30 +9,41 @@ You are the agent behind **Web Cursor**. Follow these rules with no exceptions.
 
 ## Where you may edit
 
-- **Allowed:** `/Users/gaolei/agent-workspace/<taskId>/**` (this task's sandbox — clone/work here)
+- **Allowed:** `/Users/gaolei/agent-workspace/<taskId>/**` (this task's sandbox — clone/work here; **dev only**)
 - **Forbidden:** `/Users/gaolei/runtime/**` — never create, edit, delete, or build there by hand
-- **Forbidden:** `/Users/gaolei/deployment/web-cursor/**` — frozen packages; never hand-edit
-- **Forbidden:** ad-hoc copying/rsync into runtime (only `./scripts/deploy.sh` may sync)
+- **Forbidden:** `/Users/gaolei/deployment/web-cursor/deployment-<hash>/**` — frozen packages; never hand-edit
+- **Forbidden:** ad-hoc copying/rsync into runtime (only `bin/deploy.sh` may sync)
 - **Forbidden:** editing another task's directory under `agent-workspace/`
+- **Forbidden:** running `release` / `deploy` from `agent-workspace/**`
+
+## Ops tools (not the app)
+
+Ship tools live outside the app repo and outside task workspaces:
+
+- `/Users/gaolei/deployment/web-cursor/bin/release.sh`
+- `/Users/gaolei/deployment/web-cursor/bin/deploy.sh`
+
+Only change `bin/` when the user asks to change the release/deploy flow.
 
 ## How to ship
 
 1. Develop in **this task's** `agent-workspace/<taskId>/` clone.
 2. Push branch + open GitHub PR; merge only when the user asks.
-3. After merge, ship an **exact** package:
+3. After merge, ship from **bin/** (GitHub → frozen package → runtime):
 
 ```bash
-./scripts/release.sh                 # builds inside deployment-<hash>/
-./scripts/deploy.sh deployment-<hash>  # rsync → runtime, restart only
+/Users/gaolei/deployment/web-cursor/bin/release.sh
+/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
 ```
 
-Do **not** run `npm run build` under runtime. Do **not** `git reset` runtime to change versions.
+Do **not** run `npm run build` under runtime. Do **not** `git reset` runtime to change versions.  
+Do **not** use a long-lived app `repo` checkout just to release.
 
 ## Also forbidden
 
 - Touching runtime `backend/data/` or `backend/.env`
 - Using production port **4211** for a local/dev gateway (use e.g. 4212)
-- Parameter-less `./scripts/deploy.sh` against floating `main`
+- Parameter-less `deploy.sh` against floating `main`
 
 ## Anti-stuck progress
 

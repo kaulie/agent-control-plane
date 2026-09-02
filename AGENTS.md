@@ -11,18 +11,21 @@ You are the agent behind **Web Cursor**. These rules always apply.
 | `/Users/gaolei/runtime/web-cursor` | **Never** edit source; production only |
 | `/Users/gaolei/deployment/web-cursor/...` | Snapshots; do not hand-edit |
 
+**Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, one task branch, deliver at `git push` (do not merge `main` or deploy unless the user asks).
+
 **How to start work**
 
 1. Your task workspace is already created (empty) under `agent-workspace/<taskId>/`.
-2. Clone the repo you need **into that directory** (or a subfolder), then develop only there.
-3. Do **not** edit other tasks' directories. Do **not** edit runtime.
-
-**Web Cursor product tip:** prefer a local clone or git worktree of the canonical repo so tasks do not stomp each other's working tree:
+2. Clone the canonical repo **into that directory**, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
+3. Do **not** edit other tasks' directories. Do **not** edit runtime. Do **not** edit the shared canonical tree in place.
 
 ```bash
 # from your task workspace cwd
 git clone /Users/gaolei/Projects/deepseek_web_cursor .
-# or: git -C /Users/gaolei/Projects/deepseek_web_cursor worktree add "$PWD" -b "task/<taskId>"
+git fetch origin && git checkout main && git pull --ff-only origin main
+git checkout -b feature/<taskId>
+# ... edit, commit ...
+git push -u origin HEAD
 ```
 
 ## Deploy only via script
@@ -60,4 +63,4 @@ Users often think a silent long tool call means the agent is dead. Prevent that:
 4. While waiting on deploy/build, say explicitly: “正在构建/重启，大约需要几十秒，不是卡死”.
 5. **Deploy last:** finish the user-visible reply (what changed + outcome) **before** running `./scripts/deploy.sh`. If your run is interrupted for any reason, **系统自检** (generic delivery closure) will resume the unclosed user message — give a clear 终态 reply there too.
 
-See also: `AGENT.md` (full ops guide) and `.cursor/rules/deploy-runtime.mdc`.
+See also: [`BRANCHING.md`](BRANCHING.md) (trunk-based branching), `AGENT.md` (full ops guide), and `.cursor/rules/deploy-runtime.mdc`.

@@ -6,12 +6,13 @@
 
 | 目录 | 含义 | 谁改 |
 |---|---|---|
-| `/Users/gaolei/Projects/deepseek_web_cursor` | 开发目录（git 仓库） | agent 在这里改代码 |
+| `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 独立 workspace（clone + task 分支） | agent 在此改代码 |
+| `/Users/gaolei/Projects/deepseek_web_cursor` | Canonical 主干仓库（`main` / merge·deploy 源） | 不要在此直接改；作 clone / push 目标 |
 | `/Users/gaolei/deployment/web-cursor/deployment-<hash>` | 待上线版本（用 git 短 hash 命名） | 每次上线前生成，一般不改 |
 | `/Users/gaolei/runtime/web-cursor` | 线上当前运行目录 | 只保留运行相关内容，**不要直接改** |
 
 Gateway 默认把本地 agent 的 `cwd` 设为 **dev 仓库**，并启用 `settingSources: ["project"]`，以加载本仓库的 `AGENTS.md` / `.cursor/rules`。  
-约束摘要见根目录 [`AGENTS.md`](AGENTS.md) 与 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
+约束摘要见根目录 [`AGENTS.md`](AGENTS.md)、主干分支规范 [`BRANCHING.md`](BRANCHING.md)，以及 [`.cursor/rules/deploy-runtime.mdc`](.cursor/rules/deploy-runtime.mdc)。
 
 ## 端口规范（重要）
 

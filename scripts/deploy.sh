@@ -1,45 +1,80 @@
 #!/usr/bin/env bash
 #
-# 标准部署脚本：把 dev 仓库的某个版本安全地部署到 runtime 并重启。
+# 将已构建的 deployment-<hash> 同步到 runtime 并重启（runtime 内不构建）。
 #
 # 用法：
-#   ./scripts/deploy.sh                    # 部署 dev 的 main 最新
-#   ./scripts/deploy.sh <commit-hash>      # 部署某个 commit
-#   ./scripts/deploy.sh deployment-<hash>  # 部署某个版本 tag
+#   ./scripts/deploy.sh deployment-<hash>
+#   ./scripts/deploy.sh <8-char-hash>
 #
-# 约束：只允许用 git 同步 runtime（禁止 cp/rsync/直接改文件），
-#       并且每步校验、失败即停，避免把线上搞挂。
+# 约束：
+#   - 必须指定精确版本（禁止无参部署漂浮 main）
+#   - 只允许通过本脚本 rsync 更新 runtime 代码
+#   - 永不覆盖 backend/.env 与 backend/data/
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-/Users/gaolei/runtime/web-cursor}"
-TARGET="${1:-main}"
-# 分支名统一解析到远程引用，避免用到 runtime 里过期的本地分支
-case "${TARGET}" in
-  main) TARGET="origin/main" ;;
-  master) TARGET="origin/master" ;;
-esac
+DEPLOYMENT_ROOT="${DEPLOYMENT_ROOT:-/Users/gaolei/deployment/web-cursor}"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy][错误] $*" >&2; exit 1; }
 
-[ -d "${RUNTIME_DIR}/.git" ] || die "runtime 目录不存在或不是 git 仓库: ${RUNTIME_DIR}"
+[ "${1:-}" ] || die "用法: ./scripts/deploy.sh deployment-<hash>  （请先 ./scripts/release.sh）"
 
-# ---- 1. 同步 git（只允许 git，禁止直接复制文件） ----
-log "1/3 同步 runtime 到版本: ${TARGET}"
-git -C "${RUNTIME_DIR}" fetch origin || die "git fetch 失败"
-git -C "${RUNTIME_DIR}" reset --hard "${TARGET}" || die "git reset --hard ${TARGET} 失败"
-VERSION=$(git -C "${RUNTIME_DIR}" rev-parse --short=8 HEAD)
-log "    版本号: ${VERSION}"
+RAW="$1"
+case "${RAW}" in
+  deployment-*)
+    TAG="${RAW}"
+    HASH="${RAW#deployment-}"
+    ;;
+  *)
+    HASH="${RAW}"
+    TAG="deployment-${HASH}"
+    ;;
+esac
 
-# ---- 2. 构建 ----
-log "2/3 安装依赖并构建"
-export APP_VERSION="${VERSION}"
-(cd "${RUNTIME_DIR}" && npm install && npm run build) || die "构建失败"
+# 归一成 8 位短 hash 目录名（若传入更长 sha，取前 8 位目录惯例）
+if [ "${#HASH}" -gt 8 ]; then
+  HASH="${HASH:0:8}"
+  TAG="deployment-${HASH}"
+fi
 
-# ---- 3. 重启（复用 restart.sh：stop -> start -> 健康检查） ----
-log "3/3 重启"
-"${SCRIPT_DIR}/restart.sh"
+SRC="${DEPLOYMENT_ROOT}/${TAG}"
+[ -d "${SRC}" ] || die "快照不存在: ${SRC}（先运行 ./scripts/release.sh）"
+[ -f "${SRC}/VERSION" ] || die "缺少 ${SRC}/VERSION"
+[ -f "${SRC}/backend/dist/index.js" ] || die "快照未构建: 缺少 backend/dist/index.js"
+[ -f "${SRC}/web/dist/index.html" ] || die "快照未构建: 缺少 web/dist/index.html"
 
-log "部署完成 ✓  版本=${VERSION}"
+SNAP_VER="$(tr -d '[:space:]' < "${SRC}/VERSION")"
+[ "${SNAP_VER}" = "${HASH}" ] || die "VERSION(${SNAP_VER}) 与目录 hash(${HASH}) 不一致"
+
+mkdir -p "${RUNTIME_DIR}"
+
+log "1/2 rsync ${TAG} → ${RUNTIME_DIR}"
+# P = protect on receiver: 不被 --delete 删掉；exclude 避免被源覆盖
+rsync -a --delete \
+  --filter='P backend/.env' \
+  --filter='P backend/data/' \
+  --filter='P backend/runtime.pid' \
+  --filter='P backend/server.log' \
+  --filter='P backend/.watchdog-paused' \
+  --exclude='backend/.env' \
+  --exclude='backend/data/' \
+  --exclude='backend/runtime.pid' \
+  --exclude='backend/server.log' \
+  --exclude='backend/.watchdog-paused' \
+  --exclude='.git/' \
+  "${SRC}/" "${RUNTIME_DIR}/" || die "rsync 失败"
+
+# 在 runtime 写入版本标记，供 start.sh 使用
+printf '%s\n' "${HASH}" > "${RUNTIME_DIR}/VERSION"
+printf '%s\n' "${TAG}" > "${RUNTIME_DIR}/DEPLOYMENT"
+
+[ -f "${RUNTIME_DIR}/backend/dist/index.js" ] || die "同步后缺少 backend/dist/index.js"
+
+log "2/2 重启 runtime（不构建）"
+export APP_VERSION="${HASH}"
+"${SCRIPT_DIR}/restart.sh" || die "重启失败"
+
+log "部署完成 ✓  版本=${HASH}"

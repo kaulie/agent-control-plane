@@ -16,7 +16,14 @@ const config = loadConfig();
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
 
-if (!config.apiKey) {
+if (config.provider === "cline") {
+  if (!config.clineApiKey) {
+    console.warn(
+      "[startup] DEEPSEEK_API_KEY is not set. The gateway will start, but agent runs will fail.\n" +
+        "          Set it in backend/.env (see backend/.env.example).",
+    );
+  }
+} else if (!config.apiKey) {
   console.warn(
     "[startup] CURSOR_API_KEY is not set. The gateway will start, but agent runs will fail.\n" +
       "          Set it in backend/.env (see backend/.env.example).",
@@ -26,9 +33,16 @@ if (!config.apiKey) {
 const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
 const provider = createProvider({
-  name: "cursor",
+  name: config.provider,
   apiKey: config.apiKey,
   model: config.model,
+  cline: {
+    providerId: config.clineProviderId,
+    model: config.clineModel,
+    apiKey: config.clineApiKey,
+    baseUrl: config.clineBaseUrl,
+    systemPrompt: config.clineSystemPrompt,
+  },
 });
 if (interrupted.orphans.length) {
   console.warn(

@@ -23,6 +23,13 @@ export interface Config {
   /** Product source used for deploy and special system tasks. */
   canonicalDevRepo: string;
   model: string | undefined;
+  /** Which agent runtime adapter to use: "cursor" | "cline". */
+  provider: string;
+  clineProviderId: string;
+  clineModel: string | undefined;
+  clineApiKey: string | undefined;
+  clineBaseUrl: string | undefined;
+  clineSystemPrompt: string | undefined;
   dataDir: string;
   webDistDir: string;
 }
@@ -73,6 +80,12 @@ export function loadConfig(): Config {
     agentWorkspace: agentWorkspaceRoot,
     canonicalDevRepo: CANONICAL_DEV_REPO,
     model: process.env.CURSOR_MODEL || undefined,
+    provider: process.env.AGENT_PROVIDER?.trim() || "cursor",
+    clineProviderId: process.env.CLINE_PROVIDER_ID?.trim() || "deepseek",
+    clineModel: process.env.CLINE_MODEL?.trim() || undefined,
+    clineApiKey: process.env.DEEPSEEK_API_KEY?.trim() || undefined,
+    clineBaseUrl: process.env.CLINE_BASE_URL?.trim() || undefined,
+    clineSystemPrompt: process.env.CLINE_SYSTEM_PROMPT?.trim() || undefined,
     dataDir: resolveFromBackend("data"),
     webDistDir: resolveFromBackend("..", "web", "dist"),
   };

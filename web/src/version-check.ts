@@ -65,13 +65,17 @@ export function dismissVersionUpdate(serverVersion: string): void {
   }
 }
 
+/** Hard navigation so HTML/JS are not served from a soft-reload / bfcache path. */
 export function reloadForUpdate(): void {
-  location.reload();
+  const url = new URL(window.location.href);
+  url.searchParams.set("_v", Date.now().toString());
+  window.location.replace(url.toString());
 }
 
 export async function pollHealthVersion(): Promise<void> {
   try {
-    const res = await fetch("/health");
+    // Avoid sticky cached /health after deploy (was causing update-modal loops).
+    const res = await fetch("/health", { cache: "no-store" });
     if (!res.ok) return;
     checkServerVersion(res.headers.get("X-App-Version"));
     const body = (await res.json()) as { version?: string };

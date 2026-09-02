@@ -15,13 +15,16 @@ export async function registerRoutes(
   provider: AgentProvider,
   opts: { dataDir: string; appVersion: string },
 ): Promise<void> {
-  app.get("/health", async () => ({
-    ok: true,
-    service: "web-cursor-agent-gateway",
-    provider: provider.name,
-    version: opts.appVersion,
-    time: new Date().toISOString(),
-  }));
+  app.get("/health", async (_req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+    return {
+      ok: true,
+      service: "web-cursor-agent-gateway",
+      provider: provider.name,
+      version: opts.appVersion,
+      time: new Date().toISOString(),
+    };
+  });
 
   app.get("/api/auth", async () => provider.verifyAuth());
 

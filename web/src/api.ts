@@ -32,11 +32,14 @@ export const api = {
 
   listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
-  createProject: (name: string, workspaceRoot?: string) =>
+  createProject: (
+    name: string,
+    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+  ) =>
     fetch(`${BASE}/projects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, ...(workspaceRoot ? { workspaceRoot } : {}) }),
+      body: JSON.stringify({ name, ...options }),
     }).then((r) => j<Project>(r)),
 
   renameProject: (projectId: string, name: string) =>
@@ -48,7 +51,11 @@ export const api = {
 
   updateProject: (
     projectId: string,
-    body: { name?: string; workspaceRoot?: string | null },
+    body: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    },
   ) =>
     fetch(`${BASE}/projects/${projectId}`, {
       method: "PATCH",
@@ -115,6 +122,20 @@ export const api = {
     }).then((r) =>
       j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
     ),
+
+  updateTask: (id: string, body: { prUrl?: string | null }) =>
+    fetch(`${BASE}/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<Task>(r)),
+
+  createPullRequest: (id: string, body?: { title?: string; body?: string }) =>
+    fetch(`${BASE}/tasks/${id}/pull-request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }).then((r) => j<{ task: Task; url: string; created: boolean }>(r)),
 
   stopTask: (id: string) =>
     fetch(`${BASE}/tasks/${id}/stop`, {

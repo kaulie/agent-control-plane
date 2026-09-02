@@ -37,6 +37,8 @@ export interface Project {
   name: string;
   /** Per-project agent sandbox root; new tasks use `<workspaceRoot>/<taskId>/`. */
   workspaceRoot?: string;
+  /** Git remote/clone URL for this project (https, ssh, or local path). */
+  gitRepoUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +62,8 @@ export interface Task {
   createdBy?: string;
   /** Bound SDK agent for this task (1 task = 1 agent). Set on first message. */
   agentId?: string;
+  /** GitHub pull request URL once opened for this task. */
+  prUrl?: string;
   /** Task category; phase 1 only supports general. */
   taskType: TaskType;
   /** Current step in the task workflow state machine. */

@@ -101,8 +101,11 @@ export class AgentGateway {
     return this.store.listProjects();
   }
 
-  createProject(name: string, workspaceRoot?: string): Project {
-    const project = this.store.createProject(name, workspaceRoot);
+  createProject(
+    name: string,
+    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+  ): Project {
+    const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });
     return project;
   }
@@ -113,7 +116,11 @@ export class AgentGateway {
 
   updateProject(
     projectId: string,
-    input: { name?: string; workspaceRoot?: string | null },
+    input: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    },
   ): Project | undefined {
     const project = this.store.updateProject(projectId, input);
     if (project) {
@@ -231,6 +238,61 @@ export class AgentGateway {
     const updated = this.store.getTask(taskId)!;
     this.publish({ type: "task_updated", task: updated });
     return updated;
+  }
+
+  updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
+    const updated = this.store.updateTaskPrUrl(taskId, prUrl);
+    if (updated) {
+      this.publish({ type: "task_updated", task: updated });
+    }
+    return updated;
+  }
+
+  async createPullRequest(
+    taskId: string,
+    opts?: { title?: string; body?: string },
+  ): Promise<{ task: Task; url: string; created: boolean }> {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const project = this.store.getProject(task.projectId);
+    const gitRepoUrl = project?.gitRepoUrl?.trim();
+    if (!gitRepoUrl) {
+      throw new Error("project gitRepoUrl is required before opening a pull request");
+    }
+    if (task.prUrl?.trim()) {
+      return { task, url: task.prUrl.trim(), created: false };
+    }
+    if (!fs.existsSync(path.join(task.workspace, ".git"))) {
+      throw new Error(
+        `task workspace is not a git repo: ${task.workspace} (clone ${gitRepoUrl} first)`,
+      );
+    }
+
+    const { ensurePullRequest } = await import("../github-pr.js");
+    const title =
+      opts?.title?.trim() ||
+      task.title?.trim() ||
+      `Task ${task.taskId}`;
+    const body =
+      opts?.body?.trim() ||
+      [
+        "## Summary",
+        `- taskId: ${task.taskId}`,
+        `- project: ${project?.name ?? task.projectId}`,
+        "",
+        "## Test plan",
+        "- [ ] Verify changes in review",
+      ].join("\n");
+
+    const result = await ensurePullRequest({
+      cwd: task.workspace,
+      title,
+      body,
+    });
+    const updated = this.store.updateTaskPrUrl(taskId, result.url);
+    if (!updated) throw new Error(`failed to persist prUrl for ${taskId}`);
+    this.publish({ type: "task_updated", task: updated });
+    return { task: updated, url: result.url, created: result.created };
   }
 
   /**

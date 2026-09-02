@@ -5,10 +5,18 @@ export default function WorkflowStepper({
   workflow,
   onTransition,
   transitioning,
+  prUrl,
+  canCreatePr,
+  creatingPr,
+  onCreatePr,
 }: {
   workflow: TaskWorkflowView;
   onTransition?: (toState: WorkflowState) => void;
   transitioning?: boolean;
+  prUrl?: string;
+  canCreatePr?: boolean;
+  creatingPr?: boolean;
+  onCreatePr?: () => void;
 }) {
   const currentIdx = workflow.states.indexOf(workflow.currentState);
 
@@ -49,21 +57,41 @@ export default function WorkflowStepper({
           );
         })}
       </ol>
-      {workflow.allowedNextStates.length > 0 && onTransition && (
-        <div className="workflow-stepper-actions">
-          {workflow.currentState === "plan" &&
-            workflow.allowedNextStates.includes("coding") && (
-              <button
-                type="button"
-                className="workflow-primary-btn"
-                disabled={transitioning}
-                onClick={() => onTransition("coding")}
-              >
-                开始开发
-              </button>
-            )}
-        </div>
-      )}
+      <div className="workflow-stepper-actions">
+        {workflow.allowedNextStates.length > 0 &&
+          onTransition &&
+          workflow.currentState === "plan" &&
+          workflow.allowedNextStates.includes("coding") && (
+            <button
+              type="button"
+              className="workflow-primary-btn"
+              disabled={transitioning}
+              onClick={() => onTransition("coding")}
+            >
+              开始开发
+            </button>
+          )}
+        {prUrl ? (
+          <a
+            className="workflow-pr-link"
+            href={prUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={prUrl}
+          >
+            查看 PR
+          </a>
+        ) : canCreatePr && onCreatePr ? (
+          <button
+            type="button"
+            className="workflow-primary-btn"
+            disabled={creatingPr || transitioning}
+            onClick={() => onCreatePr()}
+          >
+            {creatingPr ? "创建 PR 中…" : "创建 PR"}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

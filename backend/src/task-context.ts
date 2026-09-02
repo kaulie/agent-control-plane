@@ -88,9 +88,24 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     project?.workspaceRoot
       ? `- This project uses file root \`${project.workspaceRoot}\`; this task's cwd is \`${task.workspace}\`.`
       : `- workspace: ${task.workspace}`,
-    "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
+    project?.gitRepoUrl
+      ? [
+          `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,
+          "- Follow [`BRANCHING.md`](BRANCHING.md): clone **this** GitHub URL into the task workspace, branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
+          "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides the project git URL.",
+          "- Do not merge the PR or run `./scripts/deploy.sh` unless the user asks. After merge, deploy is: pull `main` in `/Users/gaolei/Projects/deepseek_web_cursor`, then `deploy.sh`.",
+        ].join("\n")
+      : [
+          "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
+          "- Prefer not to edit the shared deploy worktree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks.",
+        ].join("\n"),
+    task.prUrl
+      ? `- **Existing pull request:** ${task.prUrl} (do not open a duplicate PR).`
+      : "",
+    task.workflowState === "pr" || task.workflowState === "coding"
+      ? `- Current workflow is \`${task.workflowState}\`: treat GitHub PR as the coding delivery artifact when \`gitRepoUrl\` is set.`
+      : "",
     "- Do not edit other tasks' directories, and never edit `/Users/gaolei/runtime/**`.",
-    "- Prefer not to edit the shared canonical tree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks; that tree is for merge/deploy.",
     "",
     "## Your role",
     "- Your lifecycle is this task: you exist to solve problems for this task until it is completed or closed.",
@@ -124,7 +139,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     "The text after this block is the user's actual message for this turn.",
   );
 
-  let text = sections.join("\n");
+  let text = sections.filter((s) => s !== "").join("\n");
   if (text.length > MAX_BOOTSTRAP_CHARS) {
     text = `${text.slice(0, MAX_BOOTSTRAP_CHARS - 1)}…`;
   }

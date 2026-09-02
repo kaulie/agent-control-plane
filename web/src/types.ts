@@ -3,6 +3,8 @@ export interface Project {
   name: string;
   /** Per-project file root; new tasks use `<workspaceRoot>/<taskId>/`. */
   workspaceRoot?: string;
+  /** Git remote/clone URL for this project. */
+  gitRepoUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +41,8 @@ export interface Task {
   provider: string;
   model?: string;
   agentId?: string;
+  /** GitHub pull request URL once opened for this task. */
+  prUrl?: string;
   taskType: "general";
   workflowState: import("./workflows").WorkflowState;
 }

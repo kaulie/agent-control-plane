@@ -68,6 +68,7 @@ export default function App() {
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
+  const [creatingPr, setCreatingPr] = useState(false);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -502,6 +503,23 @@ export default function App() {
     }
   }, [projects, refreshProjects, selectedProjectId]);
 
+  const setProjectGitRepoUrl = useCallback(async () => {
+    if (!selectedProjectId) return;
+    const current = projects.find((p) => p.projectId === selectedProjectId);
+    const hint =
+      "项目 Git 仓库地址（https / ssh / 本地路径）。\nAgent 将按 BRANCHING 规范从此地址 clone/push。\n留空则清除配置。";
+    const value = window.prompt(hint, current?.gitRepoUrl ?? "");
+    if (value === null) return;
+    try {
+      await api.updateProject(selectedProjectId, {
+        gitRepoUrl: value.trim() || null,
+      });
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [projects, refreshProjects, selectedProjectId]);
+
   const sendMessage = useCallback(
     async (payload: {
       text: string;
@@ -644,6 +662,30 @@ export default function App() {
     [selectedId],
   );
 
+  const createPullRequest = useCallback(async () => {
+    if (!selectedId) return;
+    setCreatingPr(true);
+    setError(null);
+    try {
+      const res = await api.createPullRequest(selectedId);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              task: res.task,
+            }
+          : prev,
+      );
+      setTasks((prev) =>
+        prev.map((t) => (t.taskId === res.task.taskId ? res.task : t)),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCreatingPr(false);
+    }
+  }, [selectedId]);
+
   const submitPlanAnswers = useCallback(
     async (batch: PlanAnswerBatch) => {
       if (!selectedId) return;
@@ -743,6 +785,7 @@ export default function App() {
           onCreateProject={() => void createProject()}
           onRenameProject={() => void renameProject()}
           onSetWorkspaceRoot={() => void setProjectWorkspaceRoot()}
+          onSetGitRepoUrl={() => void setProjectGitRepoUrl()}
           onOpenProjectSettings={() => setView("project-settings")}
           tasks={tasks}
           selectedId={selectedId}
@@ -756,6 +799,16 @@ export default function App() {
                 workflow={detail.workflow}
                 transitioning={workflowTransitioning}
                 onTransition={(to) => void transitionWorkflow(to)}
+                prUrl={detail.task.prUrl}
+                canCreatePr={Boolean(
+                  projects.find((p) => p.projectId === detail.task.projectId)
+                    ?.gitRepoUrl &&
+                    (detail.workflow.currentState === "coding" ||
+                      detail.workflow.currentState === "pr") &&
+                    !detail.task.prUrl,
+                )}
+                creatingPr={creatingPr}
+                onCreatePr={() => void createPullRequest()}
               />
               <UsageBar task={detail.task} stats={detail.stats} />
               <div className="main-tabs">

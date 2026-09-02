@@ -561,6 +561,8 @@ body {
   margin-top: 8px;
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .workflow-primary-btn {
@@ -577,6 +579,20 @@ body {
 .workflow-primary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.workflow-pr-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.workflow-pr-link:hover {
+  text-decoration: underline;
 }
 
 .plan-questions-wizard {
@@ -1369,7 +1385,8 @@ body {
 
 .chat-input textarea {
   flex: 1;
-  resize: none;
+  resize: vertical;
+  min-height: 88px;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1377,6 +1394,7 @@ body {
   padding: 10px;
   font-family: inherit;
   font-size: 14px;
+  line-height: 1.45;
 }
 
 .chat-input button {

@@ -29,6 +29,7 @@ interface ProjectRow {
   project_id: string;
   name: string;
   workspace_root: string | null;
+  git_repo_url: string | null;
   settings_json: string | null;
   created_at: string;
   updated_at: string;
@@ -52,6 +53,7 @@ interface TaskRow {
   model: string | null;
   created_by: string | null;
   agent_id: string | null;
+  pr_url: string | null;
   task_type: string | null;
   workflow_state: string | null;
 }
@@ -147,6 +149,7 @@ export class Store {
         project_id     TEXT PRIMARY KEY,
         name           TEXT NOT NULL,
         workspace_root TEXT,
+        git_repo_url   TEXT,
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
       );
@@ -181,6 +184,9 @@ export class Store {
     if (!taskCols.some((c) => c.name === "workflow_state")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN workflow_state TEXT`);
     }
+    if (!taskCols.some((c) => c.name === "pr_url")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    }
 
     this.db.exec(
       `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
@@ -198,6 +204,9 @@ export class Store {
       .all() as unknown as Array<{ name: string }>;
     if (!projectCols.some((c) => c.name === "workspace_root")) {
       this.db.exec(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
+    }
+    if (!projectCols.some((c) => c.name === "git_repo_url")) {
+      this.db.exec(`ALTER TABLE projects ADD COLUMN git_repo_url TEXT`);
     }
     if (!projectCols.some((c) => c.name === "settings_json")) {
       this.db.exec(`ALTER TABLE projects ADD COLUMN settings_json TEXT`);
@@ -411,27 +420,33 @@ export class Store {
     return row ? this.toProject(row) : undefined;
   }
 
-  createProject(name: string, workspaceRoot?: string): Project {
+  createProject(
+    name: string,
+    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+  ): Project {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("project name is required");
     const now = new Date().toISOString();
-    const root = workspaceRoot?.trim() || null;
+    const root = options?.workspaceRoot?.trim() || null;
+    const gitRepoUrl = options?.gitRepoUrl?.trim() || null;
     const project: Project = {
       projectId: newId("project"),
       name: trimmed,
       ...(root ? { workspaceRoot: root } : {}),
+      ...(gitRepoUrl ? { gitRepoUrl } : {}),
       createdAt: now,
       updatedAt: now,
     };
     this.db
       .prepare(
-        `INSERT INTO projects (project_id, name, workspace_root, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (project_id, name, workspace_root, git_repo_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
         project.projectId,
         project.name,
         root,
+        gitRepoUrl,
         project.createdAt,
         project.updatedAt,
       );
@@ -444,7 +459,11 @@ export class Store {
 
   updateProject(
     projectId: string,
-    input: { name?: string; workspaceRoot?: string | null },
+    input: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    },
   ): Project | undefined {
     const existing = this.getProject(projectId);
     if (!existing) return undefined;
@@ -469,6 +488,18 @@ export class Store {
         next = { ...next, workspaceRoot: root };
       } else {
         const { workspaceRoot: _removed, ...rest } = next;
+        next = rest;
+      }
+    }
+
+    if (input.gitRepoUrl !== undefined) {
+      const url = input.gitRepoUrl?.trim() || null;
+      updates.push("git_repo_url = ?");
+      values.push(url);
+      if (url) {
+        next = { ...next, gitRepoUrl: url };
+      } else {
+        const { gitRepoUrl: _removed, ...rest } = next;
         next = rest;
       }
     }
@@ -530,10 +561,12 @@ export class Store {
 
   private toProject(r: ProjectRow): Project {
     const root = r.workspace_root?.trim();
+    const gitRepoUrl = r.git_repo_url?.trim();
     return {
       projectId: r.project_id,
       name: r.name,
       ...(root ? { workspaceRoot: root } : {}),
+      ...(gitRepoUrl ? { gitRepoUrl } : {}),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
@@ -630,7 +663,17 @@ export class Store {
       .run(workflowState, taskId);
   }
 
+  updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
+    if (!this.getTask(taskId)) return undefined;
+    const url = prUrl?.trim() || null;
+    this.db
+      .prepare(`UPDATE tasks SET pr_url = ? WHERE task_id = ?`)
+      .run(url, taskId);
+    return this.getTask(taskId);
+  }
+
   private toTask(r: TaskRow): Task {
+    const prUrl = r.pr_url?.trim();
     return {
       taskId: r.task_id,
       projectId: r.project_id || DEFAULT_PROJECT_ID,
@@ -642,6 +685,7 @@ export class Store {
       model: r.model ?? undefined,
       createdBy: r.created_by ?? undefined,
       agentId: r.agent_id || undefined,
+      ...(prUrl ? { prUrl } : {}),
       taskType: (r.task_type as Task["taskType"]) || "general",
       workflowState: (r.workflow_state as Task["workflowState"]) || "plan",
     };

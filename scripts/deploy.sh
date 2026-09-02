@@ -34,9 +34,9 @@ VERSION=$(git -C "${RUNTIME_DIR}" rev-parse --short=8 HEAD)
 log "    版本号: ${VERSION}"
 
 # ---- 2. 构建 ----
-log "2/3 构建"
+log "2/3 安装依赖并构建"
 export APP_VERSION="${VERSION}"
-(cd "${RUNTIME_DIR}" && npm run build) || die "构建失败"
+(cd "${RUNTIME_DIR}" && npm install && npm run build) || die "构建失败"
 
 # ---- 3. 重启（复用 restart.sh：stop -> start -> 健康检查） ----
 log "3/3 重启"

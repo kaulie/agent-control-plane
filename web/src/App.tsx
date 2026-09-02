@@ -237,7 +237,7 @@ export default function App() {
       if (document.visibilityState === "visible") void pollHealthVersion();
     };
     document.addEventListener("visibilitychange", onVisible);
-    const id = window.setInterval(() => void pollHealthVersion(), 5 * 60 * 1000);
+    const id = window.setInterval(() => void pollHealthVersion(), 30 * 1000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.clearInterval(id);

@@ -80,15 +80,22 @@ export async function registerRoutes(
 
   app.get("/api/projects", async () => gateway.listProjects());
 
-  app.post<{ Body: { name?: string; workspaceRoot?: string } }>(
-    "/api/projects",
-    async (req, reply) => {
+  app.post<{
+    Body: { name?: string; workspaceRoot?: string; gitRepoUrl?: string };
+  }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
       return reply.code(400).send({ error: "name is required" });
     }
     try {
-      const project = gateway.createProject(name, req.body?.workspaceRoot?.trim());
+      const project = gateway.createProject(name, {
+        ...(req.body?.workspaceRoot?.trim()
+          ? { workspaceRoot: req.body.workspaceRoot.trim() }
+          : {}),
+        ...(req.body?.gitRepoUrl?.trim()
+          ? { gitRepoUrl: req.body.gitRepoUrl.trim() }
+          : {}),
+      });
       reply.code(201);
       return project;
     } catch (err) {
@@ -96,27 +103,30 @@ export async function registerRoutes(
         .code(400)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
-  },
-  );
+  });
 
   app.patch<{
     Params: { projectId: string };
-    Body: { name?: string; workspaceRoot?: string | null };
-  }>(
-    "/api/projects/:projectId",
-    async (req, reply) => {
+    Body: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    };
+  }>("/api/projects/:projectId", async (req, reply) => {
       const name = req.body?.name?.trim();
       const hasName = name !== undefined && name.length > 0;
       const hasWorkspaceRoot = req.body?.workspaceRoot !== undefined;
-      if (!hasName && !hasWorkspaceRoot) {
+      const hasGitRepoUrl = req.body?.gitRepoUrl !== undefined;
+      if (!hasName && !hasWorkspaceRoot && !hasGitRepoUrl) {
         return reply
           .code(400)
-          .send({ error: "name or workspaceRoot is required" });
+          .send({ error: "name, workspaceRoot, or gitRepoUrl is required" });
       }
       try {
         const project = gateway.updateProject(req.params.projectId, {
           ...(hasName ? { name } : {}),
           ...(hasWorkspaceRoot ? { workspaceRoot: req.body?.workspaceRoot } : {}),
+          ...(hasGitRepoUrl ? { gitRepoUrl: req.body?.gitRepoUrl } : {}),
         });
         if (!project) {
           return reply.code(404).send({ error: "project not found" });
@@ -127,8 +137,7 @@ export async function registerRoutes(
           .code(400)
           .send({ error: err instanceof Error ? err.message : String(err) });
       }
-    },
-  );
+  });
 
   // ---- tasks ----
 

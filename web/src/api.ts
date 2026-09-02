@@ -32,11 +32,14 @@ export const api = {
 
   listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
-  createProject: (name: string, workspaceRoot?: string) =>
+  createProject: (
+    name: string,
+    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+  ) =>
     fetch(`${BASE}/projects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, ...(workspaceRoot ? { workspaceRoot } : {}) }),
+      body: JSON.stringify({ name, ...options }),
     }).then((r) => j<Project>(r)),
 
   renameProject: (projectId: string, name: string) =>
@@ -48,7 +51,11 @@ export const api = {
 
   updateProject: (
     projectId: string,
-    body: { name?: string; workspaceRoot?: string | null },
+    body: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    },
   ) =>
     fetch(`${BASE}/projects/${projectId}`, {
       method: "PATCH",

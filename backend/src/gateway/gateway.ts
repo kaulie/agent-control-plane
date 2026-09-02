@@ -101,8 +101,11 @@ export class AgentGateway {
     return this.store.listProjects();
   }
 
-  createProject(name: string, workspaceRoot?: string): Project {
-    const project = this.store.createProject(name, workspaceRoot);
+  createProject(
+    name: string,
+    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+  ): Project {
+    const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });
     return project;
   }
@@ -113,7 +116,11 @@ export class AgentGateway {
 
   updateProject(
     projectId: string,
-    input: { name?: string; workspaceRoot?: string | null },
+    input: {
+      name?: string;
+      workspaceRoot?: string | null;
+      gitRepoUrl?: string | null;
+    },
   ): Project | undefined {
     const project = this.store.updateProject(projectId, input);
     if (project) {

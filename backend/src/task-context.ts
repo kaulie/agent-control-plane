@@ -88,9 +88,17 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     project?.workspaceRoot
       ? `- This project uses file root \`${project.workspaceRoot}\`; this task's cwd is \`${task.workspace}\`.`
       : `- workspace: ${task.workspace}`,
-    "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
+    project?.gitRepoUrl
+      ? [
+          `- **Configured git repository:** \`${project.gitRepoUrl}\``,
+          "- Follow [`BRANCHING.md`](BRANCHING.md) (trunk-based): clone **this** URL into the task workspace (or ensure origin points here), create branch `feature|fix|issue/<taskId>`, develop only there, then `git commit` and `git push -u origin HEAD`.",
+          "- Do not invent a different remote unless the user explicitly overrides the project git URL.",
+        ].join("\n")
+      : [
+          "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
+          "- Prefer not to edit the shared canonical tree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks; that tree is for merge/deploy.",
+        ].join("\n"),
     "- Do not edit other tasks' directories, and never edit `/Users/gaolei/runtime/**`.",
-    "- Prefer not to edit the shared canonical tree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks; that tree is for merge/deploy.",
     "",
     "## Your role",
     "- Your lifecycle is this task: you exist to solve problems for this task until it is completed or closed.",

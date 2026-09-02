@@ -502,6 +502,23 @@ export default function App() {
     }
   }, [projects, refreshProjects, selectedProjectId]);
 
+  const setProjectGitRepoUrl = useCallback(async () => {
+    if (!selectedProjectId) return;
+    const current = projects.find((p) => p.projectId === selectedProjectId);
+    const hint =
+      "项目 Git 仓库地址（https / ssh / 本地路径）。\nAgent 将按 BRANCHING 规范从此地址 clone/push。\n留空则清除配置。";
+    const value = window.prompt(hint, current?.gitRepoUrl ?? "");
+    if (value === null) return;
+    try {
+      await api.updateProject(selectedProjectId, {
+        gitRepoUrl: value.trim() || null,
+      });
+      await refreshProjects();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [projects, refreshProjects, selectedProjectId]);
+
   const sendMessage = useCallback(
     async (payload: {
       text: string;
@@ -743,6 +760,7 @@ export default function App() {
           onCreateProject={() => void createProject()}
           onRenameProject={() => void renameProject()}
           onSetWorkspaceRoot={() => void setProjectWorkspaceRoot()}
+          onSetGitRepoUrl={() => void setProjectGitRepoUrl()}
           onOpenProjectSettings={() => setView("project-settings")}
           tasks={tasks}
           selectedId={selectedId}

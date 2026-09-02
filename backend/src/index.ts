@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.js";
 import { Store } from "./store/db.js";
-import { CursorProvider } from "./providers/cursor.js";
+import { createProvider } from "./providers/create-provider.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
@@ -25,7 +25,8 @@ if (!config.apiKey) {
 
 const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
-const provider = new CursorProvider({
+const provider = createProvider({
+  name: "cursor",
   apiKey: config.apiKey,
   model: config.model,
 });
@@ -33,7 +34,7 @@ if (interrupted.orphans.length) {
   console.warn(
     `[startup] clearing ${interrupted.orphans.length} orphaned SDK agent run(s) from prior process`,
   );
-  await provider.reconcileAfterRestart(interrupted.orphans);
+  await provider.reconcileAfterRestart?.(interrupted.orphans);
 }
 if (interrupted.finalized.length) {
   console.warn(
@@ -139,7 +140,7 @@ const shutdown = (): void => {
   } catch {
     /* ignore */
   }
-  provider.dispose();
+  provider.dispose?.();
   store.close();
   app.close().then(() => process.exit(0));
 };

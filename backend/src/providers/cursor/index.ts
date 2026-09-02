@@ -1,12 +1,12 @@
 import { Agent, AgentBusyError, Cursor } from "@cursor/sdk";
 import type { AgentOptions, Run, SDKAgent, SDKMessage, SDKUserMessage } from "@cursor/sdk";
-import type { CostInfo, EventType, TokenUsage } from "../types.js";
-import { mapSdkMessage } from "../events/mapper.js";
-import { buildCost, type SdkCostLike } from "../usage/cost.js";
-import { newId } from "../store/db.js";
-import { composePromptWithBootstrap } from "../task-context.js";
-import { formatRunErrorMessage } from "../run-errors.js";
-import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "./types.js";
+import type { CostInfo, EventType, TokenUsage } from "../../types.js";
+import { mapSdkMessage } from "./mapper.js";
+import { buildCost, type SdkCostLike } from "../../usage/cost.js";
+import { newId } from "../../store/db.js";
+import { composePromptWithBootstrap } from "../../task-context.js";
+import { formatRunErrorMessage } from "../../run-errors.js";
+import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 
 export interface CursorProviderConfig {
   apiKey?: string;

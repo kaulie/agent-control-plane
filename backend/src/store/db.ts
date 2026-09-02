@@ -665,12 +665,6 @@ export class Store {
       .run(agentId, taskId);
   }
 
-  clearTaskAgentId(taskId: string): void {
-    this.db
-      .prepare(`UPDATE tasks SET agent_id = NULL WHERE task_id = ?`)
-      .run(taskId);
-  }
-
   updateTaskWorkflowState(taskId: string, workflowState: string): void {
     this.db
       .prepare(`UPDATE tasks SET workflow_state = ? WHERE task_id = ?`)

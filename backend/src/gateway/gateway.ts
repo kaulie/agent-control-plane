@@ -18,6 +18,7 @@ import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
 import { mergeSettings, resolvePlanExportDir } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
+import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -237,6 +238,14 @@ export class AgentGateway {
 
   maxEventSeq(taskId: string): number {
     return this.store.maxEventSeq(taskId);
+  }
+
+  listPlanDocuments(taskId: string) {
+    return listPlanDocuments(this.store, taskId);
+  }
+
+  getPlanDocument(taskId: string, runId: string) {
+    return readPlanDocument(this.store, taskId, runId);
   }
 
   getQueueLength(taskId: string): number {

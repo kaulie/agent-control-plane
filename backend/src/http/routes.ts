@@ -13,13 +13,12 @@ export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
   provider: AgentProvider,
-  opts: { dataDir: string; appVersion: string },
+  opts: { dataDir: string },
 ): Promise<void> {
   app.get("/health", async () => ({
     ok: true,
     service: "web-cursor-agent-gateway",
     provider: provider.name,
-    version: opts.appVersion,
     time: new Date().toISOString(),
   }));
 
@@ -276,6 +275,41 @@ export async function registerRoutes(
         const msg = err instanceof Error ? err.message : String(err);
         const code = msg.includes("No active run") ? 409 : 400;
         return reply.code(code).send({ error: msg });
+      }
+    },
+  );
+
+  app.get<{ Params: { taskId: string } }>(
+    "/api/tasks/:taskId/plans",
+    async (req, reply) => {
+      const detail = gateway.getTaskDetail(req.params.taskId);
+      if (!detail) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      return { plans: gateway.listPlanDocuments(req.params.taskId) };
+    },
+  );
+
+  app.get<{ Params: { taskId: string; runId: string } }>(
+    "/api/tasks/:taskId/plans/:runId",
+    async (req, reply) => {
+      const detail = gateway.getTaskDetail(req.params.taskId);
+      if (!detail) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      try {
+        const doc = gateway.getPlanDocument(
+          req.params.taskId,
+          req.params.runId,
+        );
+        if (!doc) {
+          return reply.code(404).send({ error: "plan not found" });
+        }
+        return doc;
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );

@@ -2,13 +2,14 @@ import type {
   AgentEvent,
   AppSettings,
   AuthStatus,
+  PlanDocumentContent,
+  PlanDocumentSummary,
   Project,
   ProjectSettingsView,
   Task,
   TaskDetail,
   TokenUsage,
 } from "./types";
-import { checkServerVersion } from "./version-check";
 
 const BASE = "/api";
 
@@ -26,26 +27,20 @@ async function j<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init);
-  checkServerVersion(res.headers.get("X-App-Version"));
-  return res;
-}
-
 export const api = {
-  getAuth: () => apiFetch(`${BASE}/auth`).then((r) => j<AuthStatus>(r)),
+  getAuth: () => fetch(`${BASE}/auth`).then((r) => j<AuthStatus>(r)),
 
-  listProjects: () => apiFetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
+  listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
   createProject: (name: string, workspaceRoot?: string) =>
-    apiFetch(`${BASE}/projects`, {
+    fetch(`${BASE}/projects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, ...(workspaceRoot ? { workspaceRoot } : {}) }),
     }).then((r) => j<Project>(r)),
 
   renameProject: (projectId: string, name: string) =>
-    apiFetch(`${BASE}/projects/${projectId}`, {
+    fetch(`${BASE}/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
@@ -55,7 +50,7 @@ export const api = {
     projectId: string,
     body: { name?: string; workspaceRoot?: string | null },
   ) =>
-    apiFetch(`${BASE}/projects/${projectId}`, {
+    fetch(`${BASE}/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -63,17 +58,17 @@ export const api = {
 
   listTasks: (projectId?: string) => {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-    return apiFetch(`${BASE}/tasks${q}`).then((r) => j<Task[]>(r));
+    return fetch(`${BASE}/tasks${q}`).then((r) => j<Task[]>(r));
   },
 
   createTask: (body: { title?: string; workspace?: string; projectId?: string }) =>
-    apiFetch(`${BASE}/tasks`, {
+    fetch(`${BASE}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<Task>(r)),
 
-  getTask: (id: string) => apiFetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
+  getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 
   getEvents: (
     id: string,
@@ -84,7 +79,7 @@ export const api = {
     if (opts?.before != null) params.set("before", String(opts.before));
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     const q = params.toString();
-    return apiFetch(`${BASE}/tasks/${id}/events${q ? `?${q}` : ""}`).then(
+    return fetch(`${BASE}/tasks/${id}/events${q ? `?${q}` : ""}`).then(
       (r) => j<{ events: AgentEvent[]; nextSeq: number; hasMore: boolean }>(r),
     );
   },
@@ -100,7 +95,7 @@ export const api = {
     }>,
     mode?: "agent" | "plan",
   ) =>
-    apiFetch(`${BASE}/tasks/${id}/messages`, {
+    fetch(`${BASE}/tasks/${id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -111,27 +106,37 @@ export const api = {
     }).then((r) => j<{ runId: string; queued?: boolean; queueLength?: number }>(r)),
 
   stopTask: (id: string) =>
-    apiFetch(`${BASE}/tasks/${id}/stop`, {
+    fetch(`${BASE}/tasks/${id}/stop`, {
       method: "POST",
     }).then((r) => j<{ runId: string; stopped: boolean }>(r)),
 
+  listPlans: (taskId: string) =>
+    fetch(`${BASE}/tasks/${taskId}/plans`).then((r) =>
+      j<{ plans: PlanDocumentSummary[] }>(r),
+    ),
+
+  getPlan: (taskId: string, runId: string) =>
+    fetch(`${BASE}/tasks/${taskId}/plans/${encodeURIComponent(runId)}`).then(
+      (r) => j<PlanDocumentContent>(r),
+    ),
+
   getGlobalSettings: () =>
-    apiFetch(`${BASE}/settings/global`).then((r) => j<AppSettings>(r)),
+    fetch(`${BASE}/settings/global`).then((r) => j<AppSettings>(r)),
 
   updateGlobalSettings: (body: AppSettings) =>
-    apiFetch(`${BASE}/settings/global`, {
+    fetch(`${BASE}/settings/global`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<AppSettings>(r)),
 
   getProjectSettings: (projectId: string) =>
-    apiFetch(`${BASE}/projects/${projectId}/settings`).then((r) =>
+    fetch(`${BASE}/projects/${projectId}/settings`).then((r) =>
       j<ProjectSettingsView>(r),
     ),
 
   updateProjectSettings: (projectId: string, body: AppSettings) =>
-    apiFetch(`${BASE}/projects/${projectId}/settings`, {
+    fetch(`${BASE}/projects/${projectId}/settings`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),

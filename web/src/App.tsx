@@ -5,19 +5,10 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from 
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import Timeline from "./components/Timeline";
+import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
-import PlanPreview from "./components/PlanPreview";
-import { extractPlanRuns, hasPlanContent } from "./plan-content";
-import { APP_VERSION } from "./version";
-import {
-  dismissVersionUpdate,
-  pollHealthVersion,
-  reloadForUpdate,
-  subscribeVersionUpdate,
-  type VersionUpdate,
-} from "./version-check";
 
 const PROJECT_STORAGE_KEY = "web-cursor:selectedProjectId";
 const DEFAULT_PROJECT_ID = "project-default";
@@ -37,8 +28,6 @@ function storeProjectId(id: string): void {
     /* ignore */
   }
 }
-
-export type MainPanel = "chat" | "plan";
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -60,8 +49,8 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
-  const [mainPanel, setMainPanel] = useState<MainPanel>("chat");
-  const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
+  const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
+  const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
 
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
@@ -186,6 +175,8 @@ export default function App() {
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
+    setMainTab("timeline");
+    setSelectedPlanRunId(null);
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
@@ -228,22 +219,6 @@ export default function App() {
     })();
   }, [refreshProjects, refreshTasks]);
 
-  useEffect(() => subscribeVersionUpdate(setVersionUpdate), []);
-
-  // Idle tabs: poll /health for version drift (API calls cover active use).
-  useEffect(() => {
-    void pollHealthVersion();
-    const onVisible = (): void => {
-      if (document.visibilityState === "visible") void pollHealthVersion();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    const id = window.setInterval(() => void pollHealthVersion(), 30 * 1000);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.clearInterval(id);
-    };
-  }, []);
-
   useEffect(() => {
     const close = connectWs(
       (msg: ServerMessage) => {
@@ -273,6 +248,10 @@ export default function App() {
                   ),
                 );
               }
+            }
+            if (ev.eventType === "plan_exported") {
+              setSelectedPlanRunId(ev.runId);
+              setMainTab("plan");
             }
           }
         } else if (msg.type === "task_queue_updated") {
@@ -402,7 +381,6 @@ export default function App() {
 
   const selectTask = useCallback(async (id: string) => {
     setSelectedId(id);
-    setMainPanel("chat");
     setEvents([]);
     setDetail(null);
     setStopping(false);
@@ -523,7 +501,6 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        if (payload.mode === "plan") setMainPanel("plan");
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
@@ -579,18 +556,29 @@ export default function App() {
     return "agent";
   }, [running, detail, events]);
 
-  const activeRunId = useMemo((): string | undefined => {
-    if (!running || !detail) return undefined;
-    return detail.runs.find((r) => r.status === "running")?.runId;
-  }, [running, detail]);
-
-  const planRuns = useMemo(() => {
-    if (!detail) return [];
-    return extractPlanRuns(events, detail.task, detail.runs);
+  const planRunCount = useMemo(() => {
+    const finished = new Set(
+      (detail?.runs ?? [])
+        .filter((r) => r.status === "finished")
+        .map((r) => r.runId),
+    );
+    let count = 0;
+    for (const ev of events) {
+      if (
+        ev.eventType === "user_message" &&
+        ev.payload.mode === "plan" &&
+        finished.has(ev.runId)
+      ) {
+        count += 1;
+      }
+    }
+    return count;
   }, [events, detail]);
 
-  const showPlanTab =
-    activeRunMode === "plan" || hasPlanContent(planRuns) || planRuns.length > 0;
+  const openPlanForRun = useCallback((runId: string) => {
+    setSelectedPlanRunId(runId);
+    setMainTab("plan");
+  }, []);
 
   return (
     <div className="app">
@@ -612,8 +600,6 @@ export default function App() {
           <span className="sep">·</span>
           <span className={`dot ${wsStatus === "connected" ? "ok" : "bad"}`} />
           ws: {wsStatus}
-          <span className="sep">·</span>
-          v{APP_VERSION}
         </div>
       </header>
       {(backendDown || wsStatus === "reconnecting") && (
@@ -657,40 +643,26 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              {showPlanTab && (
-                <div className="main-panel-tabs" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mainPanel === "chat"}
-                    className={`main-panel-tab${mainPanel === "chat" ? " active" : ""}`}
-                    onClick={() => setMainPanel("chat")}
-                  >
-                    对话
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mainPanel === "plan"}
-                    className={`main-panel-tab${mainPanel === "plan" ? " active" : ""}`}
-                    onClick={() => setMainPanel("plan")}
-                  >
-                    Plan 预览
-                    {activeRunMode === "plan" && (
-                      <span className="main-panel-tab-live" aria-hidden>
-                        ●
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-              {mainPanel === "plan" && showPlanTab ? (
-                <PlanPreview
-                  planRuns={planRuns}
-                  running={running}
-                  activeRunId={activeRunId}
-                />
-              ) : (
+              <div className="main-tabs">
+                <button
+                  type="button"
+                  className={`main-tab${mainTab === "timeline" ? " active" : ""}`}
+                  onClick={() => setMainTab("timeline")}
+                >
+                  Timeline
+                </button>
+                <button
+                  type="button"
+                  className={`main-tab${mainTab === "plan" ? " active" : ""}`}
+                  onClick={() => setMainTab("plan")}
+                >
+                  Plan
+                  {planRunCount > 0 && (
+                    <span className="main-tab-badge">{planRunCount}</span>
+                  )}
+                </button>
+              </div>
+              {mainTab === "timeline" ? (
                 <Timeline
                   events={events}
                   running={running}
@@ -701,9 +673,14 @@ export default function App() {
                   hasMore={hasMore}
                   loadingMore={loadingMore}
                   onLoadMore={() => void loadMore()}
-                  onOpenPlanPreview={
-                    showPlanTab ? () => setMainPanel("plan") : undefined
-                  }
+                  onPlanExportedClick={openPlanForRun}
+                />
+              ) : (
+                <PlanDocumentPanel
+                  taskId={selectedId}
+                  selectedRunId={selectedPlanRunId}
+                  onSelectRunId={setSelectedPlanRunId}
+                  onOpenSettings={() => setView("project-settings")}
                 />
               )}
               <ChatInput
@@ -730,35 +707,6 @@ export default function App() {
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} ✕
-        </div>
-      )}
-      {versionUpdate && (
-        <div className="update-modal-backdrop" role="presentation">
-          <div className="update-modal" role="dialog" aria-labelledby="update-modal-title">
-            <h2 id="update-modal-title" className="update-modal-title">
-              系统版本已更新
-            </h2>
-            <p className="update-modal-body">
-              当前页面版本为 <code>{versionUpdate.clientVersion}</code>，服务端已更新至{" "}
-              <code>{versionUpdate.serverVersion}</code>。请刷新页面以获取最新功能。
-            </p>
-            <div className="update-modal-actions">
-              <button
-                type="button"
-                className="update-modal-btn primary"
-                onClick={() => reloadForUpdate()}
-              >
-                立即更新
-              </button>
-              <button
-                type="button"
-                className="update-modal-btn"
-                onClick={() => dismissVersionUpdate(versionUpdate.serverVersion)}
-              >
-                暂不更新
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

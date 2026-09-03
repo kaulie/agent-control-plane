@@ -117,7 +117,8 @@ export type EventType =
   | "run_error"
   | "plan_exported"
   | "plan_question_batch"
-  | "plan_draft";
+  | "plan_draft"
+  | "agent_decision";
 
 export interface TokenUsage {
   inputTokens: number;

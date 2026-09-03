@@ -109,6 +109,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     "- Gateway may inject HTTP(S)_PROXY when `GIT_VIA_PROXY_SHELL=1` (Shell/`gh` then use the proxy).",
     "- When MCP is on (`GIT_VIA_PROXY_MCP=1`), prefer `git_with_proxy` / `run_with_proxy` for one-shot proxied fetch/pull/push/clone/`gh`.",
     "- Local-only git (status/diff/log/commit) can use normal Shell. Empty `GIT_VIA_PROXY_URL` disables all proxy features.",
+    "- Capability-path choices (e.g. MCP proxied vs Shell ambient/direct) are recorded on the timeline as `agent_decision` events — not only in your prose.",
     "",
     "## Your role",
     "- Your lifecycle is this task: you exist to solve problems for this task until it is completed or closed.",

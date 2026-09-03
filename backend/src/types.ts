@@ -186,3 +186,58 @@ export interface TaskStats {
   toolCalls: number;
   runCount: number;
 }
+
+/** Time-bucket granularity for token-usage series. */
+export type UsageGranularity = "hour" | "day" | "week";
+
+/** A finished run carrying usage, with the task row it belongs to. */
+export interface UsageRunSample {
+  runId: string;
+  taskId: string;
+  projectId: string;
+  provider: string;
+  /** Omitted when the run auto-resolved the provider default model. */
+  model?: string;
+  createdAt: string;
+  completedAt?: string;
+  usage: TokenUsage;
+}
+
+export interface UsageBucket {
+  /** Local wall-clock start "YYYY-MM-DDTHH:mm:00" (no timezone suffix). */
+  start: string;
+  /** Short display label, e.g. "09-03", "09-03 14:00", "09-01周". */
+  label: string;
+  /** Full label for tooltip. */
+  title: string;
+}
+
+/** One provider/model row aligned with `buckets`. */
+export interface UsageStatsRow {
+  provider: string;
+  /** Undefined when the model was auto-resolved (shown as （自动）). */
+  model?: string;
+  /** Display label, e.g. `cline / claude-...`. */
+  label: string;
+  runCount: number;
+  totalTokens: number;
+  /** Per-bucket total tokens (index-aligned with `buckets`). */
+  series: number[];
+}
+
+export interface TokenUsageSeries {
+  granularity: UsageGranularity;
+  /** Present when the series is filtered to a single project. */
+  projectId?: string;
+  /** First bucket start (local wall-clock). */
+  from: string;
+  /** One bucket past the last bucket (exclusive end, local wall-clock). */
+  to: string;
+  buckets: UsageBucket[];
+  /** One provider/model row per entry, sorted by totalTokens desc. */
+  rows: UsageStatsRow[];
+  /** Per-bucket total across all rows (index-aligned). */
+  bucketTotalTokens: number[];
+  totalTokens: number;
+  runCount: number;
+}

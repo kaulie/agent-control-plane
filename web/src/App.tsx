@@ -4,6 +4,7 @@ import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
+import UsageStatsPage from "./components/UsageStatsPage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import Timeline from "./components/Timeline";
 import PlanDocumentPanel from "./components/PlanDocumentPanel";
@@ -764,6 +765,14 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
+            title="Token 用量统计（按时间）"
+            onClick={() => setView("usage-stats")}
+          >
+            📈
+          </button>
+          <button
+            type="button"
+            className="icon-btn header-settings"
             title="全局设置"
             onClick={() => setView("global-settings")}
           >
@@ -800,6 +809,11 @@ export default function App() {
               projects.find((p) => p.projectId === selectedProjectId)?.name ??
               selectedProjectId
             }
+            onBack={() => setView("chat")}
+          />
+        ) : view === "usage-stats" ? (
+          <UsageStatsPage
+            defaultProjectId={selectedProjectId}
             onBack={() => setView("chat")}
           />
         ) : (

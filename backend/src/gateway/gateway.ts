@@ -10,6 +10,8 @@ import type {
   RunRecord,
   Task,
   TaskStats,
+  TokenUsageSeries,
+  UsageGranularity,
 } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
@@ -45,6 +47,7 @@ import {
   type TaskWorkflowView,
 } from "../workflows/index.js";
 import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
+import { buildTokenUsageSeries } from "../usage/series.js";
 import {
   collectDecisionEvents,
   type DecisionContext,
@@ -283,6 +286,24 @@ export class AgentGateway {
       stats: this.store.getTaskStats(taskId),
       workflow: buildWorkflowView(task.taskType, task.workflowState),
     };
+  }
+
+  getTokenUsageSeries(filter: {
+    projectId?: string;
+    granularity: UsageGranularity;
+    from?: string;
+    to?: string;
+  }): TokenUsageSeries {
+    return buildTokenUsageSeries(
+      this.store.listUsageRunSamples({
+        ...(filter.projectId ? { projectId: filter.projectId } : {}),
+      }),
+      {
+        granularity: filter.granularity,
+        ...(filter.from ? { from: filter.from } : {}),
+        ...(filter.to ? { to: filter.to } : {}),
+      },
+    );
   }
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {

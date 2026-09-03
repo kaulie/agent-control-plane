@@ -105,6 +105,14 @@ const gateway = new AgentGateway(
     agentWorkspace: config.agentWorkspaceRoot,
     canonicalDevRepo: config.canonicalDevRepo,
     dataDir: config.dataDir,
+    decisionContext: {
+      ambientProxyUrl: config.gitViaProxyUrl,
+      ambientShellProxy: Boolean(config.gitViaProxyUrl) && config.gitViaProxyShell,
+      mcpProxyAvailable:
+        Boolean(config.gitViaProxyUrl) &&
+        config.gitViaProxyMcp &&
+        assertMcpServerPresent(config.gitViaProxyServerPath),
+    },
   },
   publish,
 );

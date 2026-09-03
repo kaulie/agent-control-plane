@@ -35,6 +35,10 @@ import {
   type TaskWorkflowView,
 } from "../workflows/index.js";
 import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
+import {
+  collectDecisionEvents,
+  type DecisionContext,
+} from "../decisions/index.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -46,6 +50,11 @@ export interface GatewayConfig {
   /** Product source for system/ops tasks that must see the real tree. */
   canonicalDevRepo?: string;
   dataDir: string;
+  /**
+   * Capability snapshot for decision observers (proxy flags, etc.).
+   * Optional — when omitted, observers that need ambient context no-op safely.
+   */
+  decisionContext?: DecisionContext;
 }
 
 export interface SendMessageInput {
@@ -680,6 +689,22 @@ export class AgentGateway {
       this.publish({ type: "agent_event", event });
     };
 
+    const decisionCtx: DecisionContext = this.config.decisionContext ?? {
+      ambientProxyUrl: "",
+      ambientShellProxy: false,
+      mcpProxyAvailable: false,
+    };
+    const decisionSeen = new Set<string>();
+
+    const persistWithDecisions = (event: AgentEvent): void => {
+      persistAndPublish(event);
+      for (const decision of collectDecisionEvents(decisionCtx, event, {
+        seenKeys: decisionSeen,
+      })) {
+        persistAndPublish(decision);
+      }
+    };
+
     const publishEvent = (event: AgentEvent): void => {
       this.publishPlanSideEffects(
         taskId,
@@ -687,7 +712,7 @@ export class AgentGateway {
         agentId,
         mode,
         event,
-        persistAndPublish,
+        persistWithDecisions,
       );
     };
 

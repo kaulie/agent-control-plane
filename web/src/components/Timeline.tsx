@@ -20,6 +20,7 @@ const ICONS: Record<string, string> = {
   run_cancelled: "⏹",
   run_error: "❌",
   plan_exported: "📄",
+  agent_decision: "🧭",
 };
 
 const LABELS: Record<string, string> = {
@@ -39,6 +40,7 @@ const LABELS: Record<string, string> = {
   run_cancelled: "Stopped",
   run_error: "Error",
   plan_exported: "Plan exported",
+  agent_decision: "Decision",
 };
 
 type EventRole = "user" | "assistant" | "activity";
@@ -209,6 +211,17 @@ function buildRows(events: AgentEvent[]): Row[] {
       case "plan_exported":
         body = String(p.path ?? p.fileName ?? "exported");
         break;
+      case "agent_decision": {
+        const choice = String(p.choice ?? "");
+        const rationale = String(p.rationale ?? "");
+        body = choice || "decision";
+        const bits: string[] = [];
+        if (rationale) bits.push(rationale);
+        if (p.decisionId) bits.push(`id=${String(p.decisionId)}`);
+        if (p.source) bits.push(`source=${String(p.source)}`);
+        detail = bits.join(" · ");
+        break;
+      }
       default:
         body = truncate(JSON.stringify(p), 300);
     }

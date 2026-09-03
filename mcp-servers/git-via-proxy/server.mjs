@@ -77,6 +77,7 @@ function runCommand(bin, args, { cwd, timeoutMs = 120_000 } = {}) {
 
 function formatResult(bin, args, result) {
   const header = [
+    `meta: via=proxy url=${PROXY_URL}`,
     `proxy: ${PROXY_URL}`,
     `cmd: ${bin} ${args.map((a) => JSON.stringify(a)).join(" ")}`,
     `exit: ${result.code}${result.signal ? ` signal=${result.signal}` : ""}`,

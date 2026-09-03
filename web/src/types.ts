@@ -83,6 +83,22 @@ export interface AgentEvent {
   cost?: CostInfo;
 }
 
+export type AgentSuccessionReason = "mode_change" | "session_unusable";
+
+export interface AgentSuccession {
+  successionId: string;
+  taskId: string;
+  runId: string;
+  provider: string;
+  fromAgentId: string;
+  toAgentId: string;
+  reason: AgentSuccessionReason;
+  fromMode: string;
+  toMode: string;
+  seededMessages: number;
+  createdAt: string;
+}
+
 export interface RunRecord {
   runId: string;
   taskId: string;

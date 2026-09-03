@@ -69,7 +69,7 @@ export interface Task {
   provider: string;
   model?: string;
   createdBy?: string;
-  /** Bound SDK agent for this task (1 task = 1 agent). Set on first message. */
+  /** Current bound SDK agent for this task. Replaced on succession; history is in agent_successions. */
   agentId?: string;
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
@@ -118,7 +118,29 @@ export type EventType =
   | "plan_exported"
   | "plan_question_batch"
   | "plan_draft"
-  | "agent_decision";
+  | "agent_decision"
+  | "agent_succession";
+
+/** Why a task's bound agent id was replaced by a successor. */
+export type AgentSuccessionReason = "mode_change" | "session_unusable";
+
+/**
+ * Explicit lineage when a task gets a new SDK agent/session while inheriting
+ * prior conversation context (e.g. Cline plan→yolo rebuild).
+ */
+export interface AgentSuccession {
+  successionId: string;
+  taskId: string;
+  runId: string;
+  provider: string;
+  fromAgentId: string;
+  toAgentId: string;
+  reason: AgentSuccessionReason;
+  fromMode: string;
+  toMode: string;
+  seededMessages: number;
+  createdAt: string;
+}
 
 export interface TokenUsage {
   inputTokens: number;

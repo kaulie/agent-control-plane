@@ -5,8 +5,9 @@ import type {
   AgentResult,
   ClineCoreStartConfig,
   CoreSessionEvent,
+  MessageWithMetadata,
 } from "@cline/sdk";
-import type { AgentEvent, CostInfo, EventType, TokenUsage } from "../../types.js";
+import type { AgentEvent, AgentSuccessionReason, CostInfo, EventType, TokenUsage } from "../../types.js";
 import { newId } from "../../store/db.js";
 import { composePromptWithBootstrap } from "../../task-context.js";
 import { formatRunErrorMessage } from "../../run-errors.js";
@@ -41,12 +42,32 @@ type Emit = (
   cost?: CostInfo,
 ) => Promise<void>;
 
+/** In-memory resident Cline session for a Web Cursor task. */
+interface ResidentSession {
+  sessionId: string;
+  /** Cline mode the session was created / last run with (`plan` | `yolo`). */
+  mode: AgentMode;
+}
+
+interface SuccessionOpts {
+  fromAgentId: string;
+  fromMode: AgentMode;
+  reason: AgentSuccessionReason;
+  emit: Emit;
+}
+
 /**
  * AgentProvider implementation backed by the Cline SDK (`@cline/sdk`).
  *
  * One Cline session maps to one Web Cursor task (mirroring the cursor adapter):
  * the first message `start`s a session, follow-up messages `send` on the
  * resident session, and the opaque session id is persisted as `task.agentId`.
+ *
+ * Resident sessions are mode-sticky: `send({ mode })` does not flip plan-bound
+ * tools/system prompt into yolo. On mode change we rebuild like the Cline
+ * desktop host: seed `initialMessages` from `readLiveMessages`, mint a new
+ * session id, stop the old session, and emit `agent_succession` so lineage is
+ * explicit (`agent_successions` table + timeline).
  */
 export class ClineProvider implements AgentProvider {
   readonly name = "cline";
@@ -61,7 +82,7 @@ export class ClineProvider implements AgentProvider {
   private client: ClineCore | undefined;
   private clientPromise: Promise<ClineCore> | undefined;
   private active = new Map<string, ActiveHandle>();
-  private sessionsByTask = new Map<string, string>();
+  private sessionsByTask = new Map<string, ResidentSession>();
 
   constructor(config: ClineProviderConfig = {}) {
     this.providerId = (config.providerId ?? DEFAULT_PROVIDER_ID).trim() || DEFAULT_PROVIDER_ID;
@@ -196,15 +217,16 @@ export class ClineProvider implements AgentProvider {
     }
 
     const mode: AgentMode = input.mode === "plan" ? "plan" : "yolo";
-    const resident = Boolean(
-      input.agentId && this.sessionsByTask.get(input.taskId) === input.agentId,
-    );
+    const prior = this.sessionsByTask.get(input.taskId);
+    const sameSession = Boolean(input.agentId && prior?.sessionId === input.agentId);
+    const modeMismatch = Boolean(sameSession && prior && prior.mode !== mode);
+    const resident = Boolean(sameSession && prior && prior.mode === mode);
 
     const handle: ActiveHandle = {
       cancelled: false,
       taskId: input.taskId,
       runId: input.runId,
-      sessionId: resident ? input.agentId : newId("cls"),
+      sessionId: resident && input.agentId ? input.agentId : newId("cls"),
       modelCalls: 0,
       toolCalls: 0,
       seenToolCalls: new Set<string>(),
@@ -240,21 +262,38 @@ export class ClineProvider implements AgentProvider {
         try {
           const userImages = this.buildUserImages(input);
           result = await cline.send({
-            sessionId: input.agentId,
+            sessionId: handle.sessionId,
             prompt: input.prompt.text,
             mode,
             ...(userImages ? { userImages } : {}),
           });
         } catch (err) {
           if (!this.isUnusable(err)) throw err;
-          console.warn(`[cline] session ${input.agentId} unusable; recreating for task ${input.taskId}`);
-          this.sessionsByTask.delete(input.taskId);
-          result = await this.startFresh(cline, input, modelId, mode, handle);
+          console.warn(
+            `[cline] session ${handle.sessionId} unusable; succeeding for task ${input.taskId}`,
+          );
+          result = await this.succeedSession(cline, input, modelId, mode, handle, {
+            fromAgentId: handle.sessionId,
+            fromMode: mode,
+            reason: "session_unusable",
+            emit,
+          });
         }
+      } else if (modeMismatch && prior) {
+        console.warn(
+          `[cline] session ${prior.sessionId} mode ${prior.mode} → ${mode}; ` +
+            `succeeding with seeded history for task ${input.taskId}`,
+        );
+        result = await this.succeedSession(cline, input, modelId, mode, handle, {
+          fromAgentId: prior.sessionId,
+          fromMode: prior.mode,
+          reason: "mode_change",
+          emit,
+        });
       } else {
         result = await this.startFresh(cline, input, modelId, mode, handle);
       }
-      this.sessionsByTask.set(input.taskId, handle.sessionId);
+      this.sessionsByTask.set(input.taskId, { sessionId: handle.sessionId, mode });
 
       if (handle.cancelled) {
         const durationMs = Date.now() - startedAt;
@@ -363,22 +402,83 @@ export class ClineProvider implements AgentProvider {
     };
   }
 
+  /**
+   * Rebuild into a new session id, seeding conversation history from the prior
+   * session. Always mints a new id (never reuses) so succession is visible.
+   */
+  private async succeedSession(
+    cline: ClineCore,
+    input: RunInput,
+    modelId: string,
+    mode: AgentMode,
+    handle: ActiveHandle,
+    opts: SuccessionOpts,
+  ): Promise<AgentResult | undefined> {
+    this.sessionsByTask.delete(input.taskId);
+
+    let initialMessages: MessageWithMetadata[] = [];
+    try {
+      initialMessages = (await cline.readLiveMessages(opts.fromAgentId)) ?? [];
+    } catch (err) {
+      console.warn(
+        `[cline] readLiveMessages failed for ${opts.fromAgentId}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    const result = await this.startFresh(cline, input, modelId, mode, handle, {
+      initialMessages,
+      // History already contains the original bootstrap turn when present.
+      prependBootstrap: initialMessages.length === 0,
+    });
+
+    try {
+      await cline.stop(opts.fromAgentId);
+    } catch (err) {
+      console.warn(
+        `[cline] stop old session ${opts.fromAgentId} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    await opts.emit("agent_succession", {
+      provider: "cline",
+      fromAgentId: opts.fromAgentId,
+      toAgentId: handle.sessionId,
+      reason: opts.reason,
+      fromMode: opts.fromMode,
+      toMode: mode,
+      seededMessages: initialMessages.length,
+    });
+
+    return result;
+  }
+
   private async startFresh(
     cline: ClineCore,
     input: RunInput,
     modelId: string,
     mode: AgentMode,
     handle: ActiveHandle,
+    opts?: {
+      initialMessages?: MessageWithMetadata[];
+      prependBootstrap?: boolean;
+    },
   ): Promise<AgentResult | undefined> {
     const sessionId = newId("cls");
     handle.sessionId = sessionId;
     const config = this.buildConfig(input, modelId, mode, sessionId);
-    const promptText = composePromptWithBootstrap(input.bootstrapText, input.prompt.text);
+    const prependBootstrap = opts?.prependBootstrap !== false;
+    const promptText = prependBootstrap
+      ? composePromptWithBootstrap(input.bootstrapText, input.prompt.text)
+      : input.prompt.text;
     const userImages = this.buildUserImages(input);
+    const initialMessages = opts?.initialMessages;
     const startRes = await cline.start({
       prompt: promptText,
       interactive: true,
       ...(userImages ? { userImages } : {}),
+      ...(initialMessages?.length ? { initialMessages } : {}),
       config,
     });
     handle.sessionId = startRes.sessionId ?? sessionId;

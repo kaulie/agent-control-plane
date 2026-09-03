@@ -21,6 +21,7 @@ const ICONS: Record<string, string> = {
   run_error: "❌",
   plan_exported: "📄",
   agent_decision: "🧭",
+  agent_succession: "🔗",
 };
 
 const LABELS: Record<string, string> = {
@@ -41,6 +42,7 @@ const LABELS: Record<string, string> = {
   run_error: "Error",
   plan_exported: "Plan exported",
   agent_decision: "Decision",
+  agent_succession: "Agent succession",
 };
 
 type EventRole = "user" | "assistant" | "activity";
@@ -220,6 +222,24 @@ function buildRows(events: AgentEvent[]): Row[] {
         if (p.decisionId) bits.push(`id=${String(p.decisionId)}`);
         if (p.source) bits.push(`source=${String(p.source)}`);
         detail = bits.join(" · ");
+        break;
+      }
+      case "agent_succession": {
+        const fromId = String(p.fromAgentId ?? "");
+        const toId = String(p.toAgentId ?? "");
+        const fromMode = String(p.fromMode ?? "?");
+        const toMode = String(p.toMode ?? "?");
+        const seeded = p.seededMessages != null ? Number(p.seededMessages) : 0;
+        const reason = String(p.reason ?? "mode_change");
+        body = `${shortAgentId(fromId)} → ${shortAgentId(toId)} (${fromMode}→${toMode})`;
+        detail = [
+          reason,
+          Number.isFinite(seeded) ? `seeded ${seeded} msgs` : null,
+          fromId ? `from=${fromId}` : null,
+          toId ? `to=${toId}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
         break;
       }
       default:

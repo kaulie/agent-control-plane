@@ -4,6 +4,8 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import type {
   AgentEvent,
+  AgentSuccession,
+  AgentSuccessionReason,
   AppSettings,
   CostInfo,
   EventType,
@@ -187,6 +189,26 @@ export class Store {
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_successions (
+        succession_id    TEXT PRIMARY KEY,
+        task_id          TEXT NOT NULL,
+        run_id           TEXT NOT NULL,
+        provider         TEXT NOT NULL,
+        from_agent_id    TEXT NOT NULL,
+        to_agent_id      TEXT NOT NULL,
+        reason           TEXT NOT NULL,
+        from_mode        TEXT NOT NULL,
+        to_mode          TEXT NOT NULL,
+        seeded_messages  INTEGER NOT NULL DEFAULT 0,
+        created_at       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_successions_task
+        ON agent_successions(task_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_successions_to
+        ON agent_successions(to_agent_id);
+    `);
 
     this.db.exec(
       `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
@@ -663,6 +685,65 @@ export class Store {
     this.db
       .prepare(`UPDATE tasks SET agent_id = ? WHERE task_id = ?`)
       .run(agentId, taskId);
+  }
+
+  // ---- agent successions (explicit agent id lineage) ----
+
+  insertAgentSuccession(row: AgentSuccession): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_successions (
+           succession_id, task_id, run_id, provider,
+           from_agent_id, to_agent_id, reason, from_mode, to_mode,
+           seeded_messages, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.successionId,
+        row.taskId,
+        row.runId,
+        row.provider,
+        row.fromAgentId,
+        row.toAgentId,
+        row.reason,
+        row.fromMode,
+        row.toMode,
+        row.seededMessages,
+        row.createdAt,
+      );
+  }
+
+  listAgentSuccessions(taskId: string): AgentSuccession[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_successions WHERE task_id = ? ORDER BY created_at ASC`,
+      )
+      .all(taskId) as unknown as Array<{
+      succession_id: string;
+      task_id: string;
+      run_id: string;
+      provider: string;
+      from_agent_id: string;
+      to_agent_id: string;
+      reason: string;
+      from_mode: string;
+      to_mode: string;
+      seeded_messages: number;
+      created_at: string;
+    }>;
+    return rows.map((r) => ({
+      successionId: r.succession_id,
+      taskId: r.task_id,
+      runId: r.run_id,
+      provider: r.provider,
+      fromAgentId: r.from_agent_id,
+      toAgentId: r.to_agent_id,
+      reason: r.reason as AgentSuccessionReason,
+      fromMode: r.from_mode,
+      toMode: r.to_mode,
+      seededMessages: r.seeded_messages,
+      createdAt: r.created_at,
+    }));
   }
 
   updateTaskWorkflowState(taskId: string, workflowState: string): void {

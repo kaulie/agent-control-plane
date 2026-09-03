@@ -14,14 +14,33 @@ configured for **DeepSeek** via `DEEPSEEK_API_KEY`.
 
 ## Session mapping
 
-One Cline session = one Web Cursor task (`task.agentId` stores the opaque Cline
-session id):
+One Cline session = one Web Cursor task (`task.agentId` stores the **current**
+opaque Cline session id):
 
 - First message → `cline.start(...)` (new session; task bootstrap text is prepended).
-- Follow-up message → `cline.send(...)` on the resident session (full conversation memory).
-- After a process restart, sessions are not resident, so the next message recreates
-  the session and re-injects the bootstrap context (mirrors the cursor adapter's
-  resume-fail → recreate behaviour).
+- Follow-up message → `cline.send(...)` on the resident session when the product
+  mode matches the mode the session was created with.
+- Mode change (plan ↔ agent/yolo) → rebuild like the Cline desktop host:
+  `readLiveMessages` → `start` with `initialMessages` + new mode + a **new**
+  session id (never reused) → `stop` the old session. Conversation context is
+  seeded; write tools match the new mode.
+- Unusable resident session → same succession path (`reason: session_unusable`)
+  when live messages can be read.
+- After a process restart, in-memory residency is cleared, so the next message
+  recreates a session (bootstrap re-injected when there is no seed).
+
+### Agent succession (transparent lineage)
+
+When the session id changes with inherited history, the provider emits
+`agent_succession`. The gateway:
+
+1. Appends the event to the task timeline (visible in the UI).
+2. Inserts a row into `agent_successions` (`from_agent_id` → `to_agent_id`,
+   modes, `seeded_messages`, reason).
+
+`GET /api/tasks/:taskId/agent-successions` lists the chain. Historical
+`events.agent_id` / `runs.agent_id` are **not** rewritten; only
+`tasks.agent_id` points at the current session.
 
 ## Event mapping
 
@@ -45,3 +64,5 @@ are mirrored where the tool names overlap.
 - Cost: prefers the SDK-reported `totalCost` (USD → cents); falls back to the bundled
   DeepSeek pricing estimate (`config.ts`).
 - `mode: "agent"` maps to Cline `yolo` (autonomous); `mode: "plan"` maps to Cline `plan`.
+- Cline `send({ mode })` does **not** rebuild plan-bound tools; mode switches must
+  go through the succession path above (same as the VS Code `SdkModeCoordinator`).

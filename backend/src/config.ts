@@ -1,6 +1,11 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  envFlag,
+  resolveGitViaProxyServerPath,
+  resolveProxyUrl,
+} from "./git-via-proxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +27,8 @@ export interface Config {
   agentWorkspace: string;
   /** Product source used for deploy and special system tasks. */
   canonicalDevRepo: string;
+  /** Product package root (contains mcp-servers/, backend/, web/). */
+  productRoot: string;
   model: string | undefined;
   /** Which agent runtime adapter to use: "cursor" | "cline". */
   provider: string;
@@ -32,6 +39,17 @@ export interface Config {
   clineSystemPrompt: string | undefined;
   dataDir: string;
   webDistDir: string;
+  /**
+   * Local HTTP proxy for outbound git/gh (e.g. http://127.0.0.1:7897).
+   * Empty string disables all git-via-proxy features.
+   */
+  gitViaProxyUrl: string;
+  /** When true and URL set: inject HTTP(S)_PROXY into gateway process (Shell/gh). */
+  gitViaProxyShell: boolean;
+  /** When true and URL set: inject git-via-proxy MCP into Cursor agents. */
+  gitViaProxyMcp: boolean;
+  /** Absolute path to mcp-servers/git-via-proxy/server.mjs */
+  gitViaProxyServerPath: string;
 }
 
 function resolveFromBackend(...segments: string[]): string {
@@ -71,6 +89,13 @@ export function loadConfig(): Config {
       process.env.AGENT_WORKSPACE?.trim(),
   );
 
+  // backend/src (dev) or backend/dist (build) → product root is ../..
+  const productRoot = resolveFromBackend("..", "..");
+  const gitViaProxyUrl = resolveProxyUrl(process.env.GIT_VIA_PROXY_URL);
+  const gitViaProxyShell = envFlag(process.env.GIT_VIA_PROXY_SHELL, true);
+  const gitViaProxyMcp = envFlag(process.env.GIT_VIA_PROXY_MCP, true);
+  const gitViaProxyServerPath = resolveGitViaProxyServerPath(productRoot);
+
   return {
     appVersion: process.env.APP_VERSION?.trim() || "dev",
     port: Number(process.env.PORT || 4211),
@@ -79,6 +104,7 @@ export function loadConfig(): Config {
     agentWorkspaceRoot,
     agentWorkspace: agentWorkspaceRoot,
     canonicalDevRepo: CANONICAL_DEV_REPO,
+    productRoot,
     model: process.env.CURSOR_MODEL || undefined,
     provider: process.env.AGENT_PROVIDER?.trim() || "cursor",
     clineProviderId: process.env.CLINE_PROVIDER_ID?.trim() || "deepseek",
@@ -88,5 +114,9 @@ export function loadConfig(): Config {
     clineSystemPrompt: process.env.CLINE_SYSTEM_PROMPT?.trim() || undefined,
     dataDir: resolveFromBackend("data"),
     webDistDir: resolveFromBackend("..", "web", "dist"),
+    gitViaProxyUrl,
+    gitViaProxyShell,
+    gitViaProxyMcp,
+    gitViaProxyServerPath,
   };
 }

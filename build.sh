@@ -21,6 +21,9 @@ log "APP_VERSION=${HASH}"
 log "npm install"
 npm install
 
+log "npm install mcp-servers/git-via-proxy"
+npm install --omit=dev --prefix mcp-servers/git-via-proxy
+
 log "npm run build"
 export APP_VERSION="${HASH}"
 npm run build
@@ -28,6 +31,8 @@ npm run build
 [ -f backend/dist/index.js ] || die "缺少 backend/dist/index.js"
 [ -f web/dist/index.html ] || die "缺少 web/dist/index.html"
 [ -f scripts/restart.sh ] || die "缺少 scripts/restart.sh"
+[ -f mcp-servers/git-via-proxy/server.mjs ] || die "缺少 mcp-servers/git-via-proxy/server.mjs"
+[ -d mcp-servers/git-via-proxy/node_modules ] || die "缺少 mcp-servers/git-via-proxy/node_modules（先 npm install --prefix mcp-servers/git-via-proxy）"
 
 log "组装 outputs/"
 rm -rf outputs

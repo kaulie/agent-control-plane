@@ -5,6 +5,10 @@ import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.js";
+import {
+  applyShellProxyEnv,
+  assertMcpServerPresent,
+} from "./git-via-proxy.js";
 import { Store } from "./store/db.js";
 import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
@@ -29,12 +33,28 @@ if (!config.clineApiKey) {
   );
 }
 
+const proxyEnabled = Boolean(config.gitViaProxyUrl);
+if (proxyEnabled && config.gitViaProxyShell) {
+  applyShellProxyEnv(config.gitViaProxyUrl);
+}
+const mcpWanted = proxyEnabled && config.gitViaProxyMcp;
+if (mcpWanted && !assertMcpServerPresent(config.gitViaProxyServerPath)) {
+  console.warn(
+    `[startup] GIT_VIA_PROXY_MCP=1 but MCP server missing at ${config.gitViaProxyServerPath}\n` +
+      "          Run: npm install --omit=dev  (in mcp-servers/git-via-proxy)",
+  );
+}
+
 const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
 const providers = createProviderRegistry({
   defaultName: config.provider,
   apiKey: config.apiKey,
   model: config.model,
+  gitViaProxyUrl: config.gitViaProxyUrl,
+  gitViaProxyMcp:
+    mcpWanted && assertMcpServerPresent(config.gitViaProxyServerPath),
+  gitViaProxyServerPath: config.gitViaProxyServerPath,
   cline: {
     providerId: config.clineProviderId,
     model: config.clineModel,
@@ -105,6 +125,11 @@ for (const provider of providers.list()) {
 }
 app.log.info(`default agent provider: ${providers.defaultProviderName}`);
 app.log.info(`agent workspace root: ${config.agentWorkspaceRoot}`);
+app.log.info(
+  `git-via-proxy: url=${config.gitViaProxyUrl || "(off)"} shell=${config.gitViaProxyShell ? "on" : "off"} mcp=${
+    mcpWanted && assertMcpServerPresent(config.gitViaProxyServerPath) ? "on" : "off"
+  }`,
+);
 
 try {
   await app.listen({ port: config.port, host: config.host });

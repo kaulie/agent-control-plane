@@ -1,0 +1,13 @@
+{
+  "name": "git-via-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cursor MCP: run git and network commands via local HTTP proxy",
+  "bin": {
+    "git-via-proxy": "./server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  }
+}

@@ -89,8 +89,9 @@ export function loadConfig(): Config {
       process.env.AGENT_WORKSPACE?.trim(),
   );
 
-  // backend/src (dev) or backend/dist (build) → product root is ../..
-  const productRoot = resolveFromBackend("..", "..");
+  // resolveFromBackend already goes up one level from src|dist → backend/.
+  // One more ".." reaches the product root (contains mcp-servers/, web/, backend/).
+  const productRoot = resolveFromBackend("..");
   const gitViaProxyUrl = resolveProxyUrl(process.env.GIT_VIA_PROXY_URL);
   const gitViaProxyShell = envFlag(process.env.GIT_VIA_PROXY_SHELL, true);
   const gitViaProxyMcp = envFlag(process.env.GIT_VIA_PROXY_MCP, true);

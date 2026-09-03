@@ -186,12 +186,6 @@ export class ClineProvider implements AgentProvider {
   }
 
   async run(input: RunInput): Promise<RunResultData> {
-    if (input.prompt.images?.length) {
-      throw new Error(
-        `Provider "cline" does not support image input (${input.prompt.images.length} image(s) attached).`,
-      );
-    }
-
     const cline = await this.getClient();
     const modelId = input.model || (await this.resolveModel());
     if (!modelId) {
@@ -244,7 +238,13 @@ export class ClineProvider implements AgentProvider {
       let result: AgentResult | undefined;
       if (resident) {
         try {
-          result = await cline.send({ sessionId: input.agentId, prompt: input.prompt.text, mode });
+          const userImages = this.buildUserImages(input);
+          result = await cline.send({
+            sessionId: input.agentId,
+            prompt: input.prompt.text,
+            mode,
+            ...(userImages ? { userImages } : {}),
+          });
         } catch (err) {
           if (!this.isUnusable(err)) throw err;
           console.warn(`[cline] session ${input.agentId} unusable; recreating for task ${input.taskId}`);
@@ -330,6 +330,18 @@ export class ClineProvider implements AgentProvider {
 
   // ---- internals ----
 
+  /**
+   * Convert Web Cursor prompt images into the Cline SDK `userImages` format:
+   * `data:<mime>;base64,<data>`. The model behind the provider decides whether
+   * it can consume them — if it cannot, it throws and the gateway surfaces the
+   * error to the frontend (we intentionally do not pre-reject images here).
+   */
+  private buildUserImages(input: RunInput): string[] | undefined {
+    const images = input.prompt.images;
+    if (!images?.length) return undefined;
+    return images.map((img) => `data:${img.mimeType};base64,${img.data}`);
+  }
+
   private buildConfig(
     input: RunInput,
     modelId: string,
@@ -362,9 +374,11 @@ export class ClineProvider implements AgentProvider {
     handle.sessionId = sessionId;
     const config = this.buildConfig(input, modelId, mode, sessionId);
     const promptText = composePromptWithBootstrap(input.bootstrapText, input.prompt.text);
+    const userImages = this.buildUserImages(input);
     const startRes = await cline.start({
       prompt: promptText,
       interactive: true,
+      ...(userImages ? { userImages } : {}),
       config,
     });
     handle.sessionId = startRes.sessionId ?? sessionId;

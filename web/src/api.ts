@@ -11,6 +11,8 @@ import type {
   Task,
   TaskDetail,
   TokenUsage,
+  TokenUsageSeries,
+  UsageGranularity,
 } from "./types";
 
 const BASE = "/api";
@@ -96,6 +98,23 @@ export const api = {
     }).then((r) => j<Task>(r)),
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
+
+  getTokenUsageSeries: (params: {
+    projectId?: string;
+    granularity?: UsageGranularity;
+    from?: string;
+    to?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.projectId) q.set("projectId", params.projectId);
+    if (params.granularity) q.set("granularity", params.granularity);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    const s = q.toString();
+    return fetch(`${BASE}/stats/token-usage${s ? `?${s}` : ""}`).then(
+      (r) => j<TokenUsageSeries>(r),
+    );
+  },
 
   getEvents: (
     id: string,

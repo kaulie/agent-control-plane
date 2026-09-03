@@ -114,6 +114,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
+| GET | `/api/stats/token-usage` | 按 provider/model 粒度、按时间统计总 token 消耗量（`?granularity=hour\|day\|week&projectId=&from=&to=`；缺省按天） |
 | WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
 
 Each Task belongs to a Project (`projectId`). On first boot a default project

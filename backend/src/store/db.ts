@@ -16,6 +16,7 @@ import type {
   TaskStats,
   TaskStatus,
   TokenUsage,
+  UsageRunSample,
 } from "../types.js";
 import { parseSettings, patchSettings, serializeSettings } from "../settings.js";
 
@@ -1050,5 +1051,43 @@ export class Store {
       toolCalls,
       runCount: runs.length,
     };
+  }
+
+  /**
+   * Finished runs that carry a usage payload, joined with their task row.
+   * Used by the cross-task token-usage series endpoint.
+   */
+  listUsageRunSamples(filter?: { projectId?: string }): UsageRunSample[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.run_id, r.task_id, r.provider, r.model, r.created_at,
+                r.completed_at, r.usage_json, r.status, t.project_id
+         FROM runs r
+         JOIN tasks t ON t.task_id = r.task_id
+         WHERE r.usage_json IS NOT NULL
+           AND (?1 IS NULL OR t.project_id = ?1)
+         ORDER BY r.created_at ASC`,
+      )
+      .all(filter?.projectId?.trim() || null) as unknown as Array<{
+      run_id: string;
+      task_id: string;
+      provider: string;
+      model: string | null;
+      created_at: string;
+      completed_at: string | null;
+      usage_json: string;
+      status: string;
+      project_id: string;
+    }>;
+    return rows.map((r) => ({
+      runId: r.run_id,
+      taskId: r.task_id,
+      projectId: r.project_id,
+      provider: r.provider,
+      ...(r.model ? { model: r.model } : {}),
+      createdAt: r.created_at,
+      ...(r.completed_at ? { completedAt: r.completed_at } : {}),
+      usage: JSON.parse(r.usage_json) as TokenUsage,
+    }));
   }
 }

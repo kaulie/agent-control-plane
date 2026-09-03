@@ -1891,3 +1891,210 @@ body {
   color: var(--red);
   font-size: 13px;
 }
+/* ---- Token 用量统计页 ---- */
+.stats-page {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stats-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stats-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.stats-subtitle {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.stats-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.stats-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.stats-filter select {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  min-width: 150px;
+}
+
+.stats-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stats-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-width: 120px;
+}
+
+.stats-card-wide {
+  min-width: 240px;
+  flex: 1;
+}
+
+.stats-card-label {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.stats-card-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.stats-card-caption {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.stats-error {
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.stats-loading,
+.stats-empty {
+  color: var(--text-dim);
+  padding: 24px 8px;
+}
+
+.stats-scroll {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stats-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.stats-table th,
+.stats-table td {
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.stats-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-weight: 600;
+  text-align: center;
+}
+
+.stats-table td {
+  text-align: right;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.stats-table td.stats-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-table th:first-child,
+.stats-table td:first-child {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  z-index: 1;
+}
+
+.stats-table th:first-child {
+  z-index: 3;
+  background: var(--bg-2);
+}
+
+.stats-table td:first-child {
+  background: var(--bg-2);
+}
+
+.stats-head-agent {
+  min-width: 220px;
+}
+
+.stats-head-total,
+.stats-total-cell {
+  background: var(--bg-3);
+}
+
+.stats-total-cell {
+  font-weight: 700;
+}
+
+.stats-agent-cell {
+  min-width: 210px;
+}
+
+.stats-agent {
+  font-weight: 600;
+}
+
+.stats-agent-sub {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.stats-total-row td {
+  background: var(--bg-3);
+  font-weight: 700;
+  border-top: 1px solid var(--border);
+}
+
+.stats-total-row td:first-child {
+  background: var(--bg-3);
+}
+
+.stats-total-row-label {
+  color: var(--text);
+}
+

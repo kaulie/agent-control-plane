@@ -23,7 +23,6 @@ import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
 import { mergeSettings, resolvePlanExportDir, resolveRuntimeDefaults } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
-import { composePlanModePrompt } from "../plan-mode-guidance.js";
 import {
   formatPlanAnswerBatchForAgent,
   isPlanDraftText,
@@ -553,12 +552,10 @@ export class AgentGateway {
     }
 
     const runId = newId("run");
-    const mode =
-      task.workflowState === "plan"
-        ? "plan"
-        : input.mode === "plan"
-          ? "plan"
-          : "agent";
+    // Run mode is chosen by the user per message; the task workflow state no
+    // longer forces plan/agent. The provider maps `agent`/`plan` onto its own
+    // runtime mode (Cursor agent/plan, Cline yolo/plan).
+    const mode = input.mode === "plan" ? "plan" : "agent";
     const pending: PendingRun = {
       runId,
       text,
@@ -724,17 +721,15 @@ export class AgentGateway {
         effectiveRules,
       });
 
-      const promptText =
-        task.workflowState === "plan" || mode === "plan"
-          ? composePlanModePrompt(text)
-          : text;
-
+      // No plan-mode guidance is injected into the conversation: read-only
+      // restrictions come solely from the provider's own `mode` parameter on
+      // this run, so nothing lingers in long sessions when the user switches.
       const result = await this.providerFor(task).run({
         taskId,
         runId,
         agentId,
         prompt: {
-          text: promptText,
+          text,
           images: images.length ? images : undefined,
         },
         cwd: task.workspace,

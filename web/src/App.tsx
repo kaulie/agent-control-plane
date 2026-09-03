@@ -572,7 +572,7 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        if (payload.mode === "plan" || detail?.workflow.currentState === "plan") {
+        if (payload.mode === "plan") {
           setMainTab("plan");
         }
       } catch (e) {
@@ -580,7 +580,7 @@ export default function App() {
         void refreshDetail(selectedId);
       }
     },
-    [detail?.workflow.currentState, refreshDetail, selectedId],
+    [refreshDetail, selectedId],
   );
 
   const stopAgent = useCallback(async () => {
@@ -653,17 +653,9 @@ export default function App() {
     () => findPendingPlanQuestionBatch(events),
     [events],
   );
-
-  const selectedTask = useMemo(
-    () => tasks.find((t) => t.taskId === selectedId),
-    [tasks, selectedId],
-  );
-  // Prefer live detail when it matches selection; fall back to task list so
-  // ChatInput locks to Plan before detail finishes loading (avoids Agent flash).
-  const inPlanWorkflow =
-    (detail?.task.taskId === selectedId
-      ? detail.workflow.currentState
-      : selectedTask?.workflowState) === "plan";
+  // Boolean form for effects/UI so a freshly parsed batch object never causes
+  // an effect to re-fire just because the underlying events array changed.
+  const hasPendingPlanQuestions = pendingPlanQuestions != null;
 
   const transitionWorkflow = useCallback(
     async (toState: WorkflowState) => {
@@ -750,11 +742,13 @@ export default function App() {
     [refreshDetail, selectedId],
   );
 
+  // An unanswered plan question batch (only ever produced by a plan-mode run)
+  // surfaces on the Plan tab regardless of the task workflow stage.
   useEffect(() => {
-    if (pendingPlanQuestions && inPlanWorkflow) {
+    if (hasPendingPlanQuestions) {
       setMainTab("plan");
     }
-  }, [pendingPlanQuestions, inPlanWorkflow]);
+  }, [hasPendingPlanQuestions]);
 
   const openPlanForRun = useCallback((runId: string) => {
     setSelectedPlanRunId(runId);
@@ -857,7 +851,7 @@ export default function App() {
                   onClick={() => setMainTab("plan")}
                 >
                   Plan
-                  {(planRunCount > 0 || inPlanWorkflow) && (
+                  {(planRunCount > 0 || hasPendingPlanQuestions) && (
                     <span className="main-tab-badge">
                       {planRunCount > 0 ? planRunCount : "●"}
                     </span>
@@ -879,7 +873,7 @@ export default function App() {
                 />
               ) : (
                 <>
-                  {pendingPlanQuestions && inPlanWorkflow && (
+                  {pendingPlanQuestions && (
                     <PlanQuestionsWizard
                       batch={pendingPlanQuestions}
                       disabled={running}
@@ -894,19 +888,15 @@ export default function App() {
                   />
                 </>
               )}
-              {!(pendingPlanQuestions && inPlanWorkflow) && (
-                <ChatInput
-                  onSend={sendMessage}
-                  onStop={() => void stopAgent()}
-                  disabled={stopping}
-                  running={running}
-                  activeRunMode={inPlanWorkflow ? "plan" : activeRunMode}
-                  defaultMode={inPlanWorkflow ? "plan" : undefined}
-                  lockMode={inPlanWorkflow}
-                  queueLength={queueLength}
-                  stopping={stopping}
-                />
-              )}
+              <ChatInput
+                onSend={sendMessage}
+                onStop={() => void stopAgent()}
+                disabled={stopping}
+                running={running}
+                activeRunMode={activeRunMode}
+                queueLength={queueLength}
+                stopping={stopping}
+              />
             </>
           ) : (
             <div className="empty">

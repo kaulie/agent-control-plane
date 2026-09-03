@@ -22,6 +22,9 @@ export function createProvider(config: CreateProviderConfig = {}): AgentProvider
       return new CursorProvider({
         apiKey: config.apiKey,
         model: config.model,
+        gitViaProxyUrl: config.gitViaProxyUrl,
+        gitViaProxyMcp: config.gitViaProxyMcp,
+        gitViaProxyServerPath: config.gitViaProxyServerPath,
       });
     case "cline":
       return new ClineProvider(config.cline ?? {});

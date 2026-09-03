@@ -11,6 +11,10 @@ import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types
 export interface CursorProviderConfig {
   apiKey?: string;
   model?: string;
+  /** When set with mcpServerPath, inject git-via-proxy MCP into Agent.create. */
+  gitViaProxyUrl?: string;
+  gitViaProxyMcp?: boolean;
+  gitViaProxyServerPath?: string;
 }
 
 interface ActiveHandle {
@@ -166,6 +170,17 @@ export class CursorProvider implements AgentProvider {
     }
     if (input.agentName?.trim()) {
       options.name = input.agentName.trim();
+    }
+    const proxyUrl = this.config.gitViaProxyUrl?.trim();
+    const serverPath = this.config.gitViaProxyServerPath?.trim();
+    if (this.config.gitViaProxyMcp && proxyUrl && serverPath) {
+      options.mcpServers = {
+        "git-via-proxy": {
+          command: "node",
+          args: [serverPath],
+          env: { GIT_VIA_PROXY_URL: proxyUrl },
+        },
+      };
     }
     return options;
   }

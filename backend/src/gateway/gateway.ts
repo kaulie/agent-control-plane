@@ -676,6 +676,7 @@ export class AgentGateway {
     const taskId = task.taskId;
     const { runId, text, images, mode, selfCheck } = pending;
     let agentId = task.agentId ?? "";
+    const startedAt = Date.now();
 
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
@@ -814,6 +815,18 @@ export class AgentGateway {
         error: message,
       });
       this.store.updateTaskStatus(taskId, "error");
+      persistAndPublish({
+        eventId: newId("evt"),
+        taskId,
+        runId,
+        agentId,
+        timestamp: new Date().toISOString(),
+        eventType: "run_error",
+        payload: {
+          error: message,
+          durationMs: Date.now() - startedAt,
+        },
+      });
     } finally {
       if (this.activeRuns.get(taskId) === runId) {
         this.activeRuns.delete(taskId);

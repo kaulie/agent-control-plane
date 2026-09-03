@@ -18,6 +18,9 @@ export function formatRunErrorMessage(
   if (/already has active run/i.test(lower)) {
     return "Agent 正忙，请等待当前任务结束";
   }
+  if (/does not support image input/i.test(s)) {
+    return "当前 Agent 不支持图片输入，请改用支持多模态的 Agent 或仅发送文字";
+  }
 
   return s;
 }

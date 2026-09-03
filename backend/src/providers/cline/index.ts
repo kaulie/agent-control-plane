@@ -41,12 +41,24 @@ type Emit = (
   cost?: CostInfo,
 ) => Promise<void>;
 
+/** In-memory resident Cline session for a Web Cursor task. */
+interface ResidentSession {
+  sessionId: string;
+  /** Cline mode the session was created / last run with (`plan` | `yolo`). */
+  mode: AgentMode;
+}
+
 /**
  * AgentProvider implementation backed by the Cline SDK (`@cline/sdk`).
  *
  * One Cline session maps to one Web Cursor task (mirroring the cursor adapter):
  * the first message `start`s a session, follow-up messages `send` on the
  * resident session, and the opaque session id is persisted as `task.agentId`.
+ *
+ * Resident sessions are mode-sticky: `send({ mode })` does not reliably flip a
+ * plan session into yolo (or the reverse). When the product mode for a run
+ * differs from the resident session's mode, we `startFresh` so agent writes
+ * are not blocked by a leftover plan session.
  */
 export class ClineProvider implements AgentProvider {
   readonly name = "cline";
@@ -61,7 +73,7 @@ export class ClineProvider implements AgentProvider {
   private client: ClineCore | undefined;
   private clientPromise: Promise<ClineCore> | undefined;
   private active = new Map<string, ActiveHandle>();
-  private sessionsByTask = new Map<string, string>();
+  private sessionsByTask = new Map<string, ResidentSession>();
 
   constructor(config: ClineProviderConfig = {}) {
     this.providerId = (config.providerId ?? DEFAULT_PROVIDER_ID).trim() || DEFAULT_PROVIDER_ID;
@@ -196,15 +208,24 @@ export class ClineProvider implements AgentProvider {
     }
 
     const mode: AgentMode = input.mode === "plan" ? "plan" : "yolo";
+    const prior = this.sessionsByTask.get(input.taskId);
+    const sameSession = Boolean(input.agentId && prior?.sessionId === input.agentId);
+    if (sameSession && prior && prior.mode !== mode) {
+      console.warn(
+        `[cline] session ${prior.sessionId} mode ${prior.mode} → ${mode}; ` +
+          `recreating for task ${input.taskId} (send does not switch Cline mode)`,
+      );
+      this.sessionsByTask.delete(input.taskId);
+    }
     const resident = Boolean(
-      input.agentId && this.sessionsByTask.get(input.taskId) === input.agentId,
+      input.agentId && this.sessionsByTask.get(input.taskId)?.sessionId === input.agentId,
     );
 
     const handle: ActiveHandle = {
       cancelled: false,
       taskId: input.taskId,
       runId: input.runId,
-      sessionId: resident ? input.agentId : newId("cls"),
+      sessionId: resident && input.agentId ? input.agentId : newId("cls"),
       modelCalls: 0,
       toolCalls: 0,
       seenToolCalls: new Set<string>(),
@@ -240,21 +261,21 @@ export class ClineProvider implements AgentProvider {
         try {
           const userImages = this.buildUserImages(input);
           result = await cline.send({
-            sessionId: input.agentId,
+            sessionId: handle.sessionId,
             prompt: input.prompt.text,
             mode,
             ...(userImages ? { userImages } : {}),
           });
         } catch (err) {
           if (!this.isUnusable(err)) throw err;
-          console.warn(`[cline] session ${input.agentId} unusable; recreating for task ${input.taskId}`);
+          console.warn(`[cline] session ${handle.sessionId} unusable; recreating for task ${input.taskId}`);
           this.sessionsByTask.delete(input.taskId);
           result = await this.startFresh(cline, input, modelId, mode, handle);
         }
       } else {
         result = await this.startFresh(cline, input, modelId, mode, handle);
       }
-      this.sessionsByTask.set(input.taskId, handle.sessionId);
+      this.sessionsByTask.set(input.taskId, { sessionId: handle.sessionId, mode });
 
       if (handle.cancelled) {
         const durationMs = Date.now() - startedAt;

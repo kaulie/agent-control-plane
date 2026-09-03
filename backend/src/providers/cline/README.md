@@ -18,7 +18,11 @@ One Cline session = one Web Cursor task (`task.agentId` stores the opaque Cline
 session id):
 
 - First message → `cline.start(...)` (new session; task bootstrap text is prepended).
-- Follow-up message → `cline.send(...)` on the resident session (full conversation memory).
+- Follow-up message → `cline.send(...)` on the resident session (full conversation memory),
+  **only when the product mode matches the mode the session was created with**.
+- Mode change (plan ↔ agent/yolo) → `startFresh` a new session. Cline `send({ mode })`
+  does not reliably flip a plan-sticky resident session into yolo, so reusing it
+  would leave the agent write-blocked while the UI shows Agent mode.
 - After a process restart, sessions are not resident, so the next message recreates
   the session and re-injects the bootstrap context (mirrors the cursor adapter's
   resume-fail → recreate behaviour).

@@ -255,6 +255,17 @@ export async function registerRoutes(
     };
   });
 
+  app.get<{ Params: { taskId: string } }>(
+    "/api/tasks/:taskId/agent-successions",
+    async (req, reply) => {
+      const detail = gateway.getTaskDetail(req.params.taskId);
+      if (!detail) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      return { successions: gateway.listAgentSuccessions(req.params.taskId) };
+    },
+  );
+
   app.post<{
     Params: { taskId: string };
     Body: { toState?: string };

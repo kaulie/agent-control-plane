@@ -1,6 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentEvent, AppSettings, Project, ProjectSettingsView, RunRecord, Task, TaskStats } from "../types.js";
+import type {
+  AgentEvent,
+  AgentSuccession,
+  AgentSuccessionReason,
+  AppSettings,
+  Project,
+  ProjectSettingsView,
+  RunRecord,
+  Task,
+  TaskStats,
+} from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 import {
@@ -273,6 +283,10 @@ export class AgentGateway {
       stats: this.store.getTaskStats(taskId),
       workflow: buildWorkflowView(task.taskType, task.workflowState),
     };
+  }
+
+  listAgentSuccessions(taskId: string): AgentSuccession[] {
+    return this.store.listAgentSuccessions(taskId);
   }
 
   transitionTask(taskId: string, toState: string): Task {
@@ -589,6 +603,9 @@ export class AgentGateway {
 
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
+      if (event.eventType === "agent_succession") {
+        this.recordAgentSuccession(event);
+      }
       this.publish({ type: "agent_event", event });
     };
 
@@ -686,6 +703,9 @@ export class AgentGateway {
 
     const persistAndPublish = (event: AgentEvent): void => {
       this.store.appendEvent(event);
+      if (event.eventType === "agent_succession") {
+        this.recordAgentSuccession(event);
+      }
       this.publish({ type: "agent_event", event });
     };
 
@@ -858,6 +878,46 @@ export class AgentGateway {
         runId,
       });
       this.processNextPending(taskId);
+    }
+  }
+
+  /**
+   * Persist an explicit agent-id succession row when providers emit
+   * `agent_succession` (e.g. Cline plan↔yolo rebuild with seeded history).
+   */
+  private recordAgentSuccession(event: AgentEvent): void {
+    const p = event.payload;
+    const fromAgentId = typeof p.fromAgentId === "string" ? p.fromAgentId.trim() : "";
+    const toAgentId = typeof p.toAgentId === "string" ? p.toAgentId.trim() : "";
+    if (!fromAgentId || !toAgentId) {
+      console.warn("[gateway] agent_succession missing from/to agent id; skip table write");
+      return;
+    }
+    const reasonRaw = typeof p.reason === "string" ? p.reason.trim() : "";
+    const reason: AgentSuccessionReason =
+      reasonRaw === "session_unusable" ? "session_unusable" : "mode_change";
+    try {
+      this.store.insertAgentSuccession({
+        successionId: newId("asn"),
+        taskId: event.taskId,
+        runId: event.runId,
+        provider: typeof p.provider === "string" && p.provider.trim() ? p.provider.trim() : "unknown",
+        fromAgentId,
+        toAgentId,
+        reason,
+        fromMode: typeof p.fromMode === "string" ? p.fromMode : "",
+        toMode: typeof p.toMode === "string" ? p.toMode : "",
+        seededMessages:
+          typeof p.seededMessages === "number" && Number.isFinite(p.seededMessages)
+            ? Math.max(0, Math.floor(p.seededMessages))
+            : 0,
+        createdAt: event.timestamp,
+      });
+    } catch (err) {
+      console.warn(
+        "[gateway] insertAgentSuccession failed:",
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 

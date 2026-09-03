@@ -157,6 +157,11 @@ export const api = {
       body: JSON.stringify(body ?? {}),
     }).then((r) => j<{ task: Task; url: string; created: boolean }>(r)),
 
+  listAgentSuccessions: (taskId: string) =>
+    fetch(`${BASE}/tasks/${taskId}/agent-successions`).then((r) =>
+      j<{ successions: import("./types").AgentSuccession[] }>(r),
+    ),
+
   stopTask: (id: string) =>
     fetch(`${BASE}/tasks/${id}/stop`, {
       method: "POST",

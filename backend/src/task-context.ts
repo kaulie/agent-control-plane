@@ -1,4 +1,8 @@
 import type { AgentEvent, Project, RunRecord, Task } from "./types.js";
+import {
+  DEFAULT_AGENT_WORKSPACE_ROOT,
+  projectAgentWorkspaceRoot,
+} from "./config.js";
 
 const MAX_BOOTSTRAP_CHARS = 7500;
 const MAX_USER_MESSAGES = 20;
@@ -83,9 +87,10 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     `- createdAt: ${task.createdAt}`,
     "",
     "## Workspace isolation",
-    project?.workspaceRoot
-      ? `- This project uses file root \`${project.workspaceRoot}\`; this task's cwd is \`${task.workspace}\`.`
-      : `- workspace: ${task.workspace}`,
+    `- workspace: ${task.workspace}`,
+    project?.name
+      ? `- Project local root defaults to \`${projectAgentWorkspaceRoot(project.name, DEFAULT_AGENT_WORKSPACE_ROOT)}/\`; this task's cwd is \`${task.workspace}\`.`
+      : "",
     project?.gitRepoUrl
       ? [
           `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,

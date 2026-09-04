@@ -35,8 +35,6 @@ export interface ProjectSettingsView {
 export interface Project {
   projectId: string;
   name: string;
-  /** Per-project agent sandbox root; new tasks use `<workspaceRoot>/<taskId>/`. */
-  workspaceRoot?: string;
   /** Git remote/clone URL for this project (https, ssh, or local path). */
   gitRepoUrl?: string;
   createdAt: string;

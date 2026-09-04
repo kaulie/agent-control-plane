@@ -31,7 +31,11 @@ import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
 } from "../feedback.js";
-import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
+import {
+  CANONICAL_DEV_REPO,
+  DEFAULT_AGENT_WORKSPACE_ROOT,
+  projectAgentWorkspaceRoot,
+} from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
 import { mergeSettings, resolvePlanExportDir, resolveRuntimeDefaults } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
@@ -136,7 +140,7 @@ export class AgentGateway {
 
   createProject(
     name: string,
-    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string },
   ): Project {
     const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });
@@ -151,7 +155,6 @@ export class AgentGateway {
     projectId: string,
     input: {
       name?: string;
-      workspaceRoot?: string | null;
       gitRepoUrl?: string | null;
     },
   ): Project | undefined {
@@ -183,10 +186,11 @@ export class AgentGateway {
     if (!project) return undefined;
     const global = this.store.getGlobalSettings();
     const projectSettings = this.store.getProjectSettings(projectId) ?? {};
-    const cwd =
-      project.workspaceRoot?.trim() ||
-      this.config.canonicalDevRepo?.trim() ||
-      "";
+    const globalRoot =
+      this.config.agentWorkspaceRoot ||
+      this.config.agentWorkspace ||
+      DEFAULT_AGENT_WORKSPACE_ROOT;
+    const cwd = projectAgentWorkspaceRoot(project.name, globalRoot);
     return {
       global,
       project: projectSettings,
@@ -248,10 +252,10 @@ export class AgentGateway {
       this.config.agentWorkspaceRoot ||
       this.config.agentWorkspace ||
       DEFAULT_AGENT_WORKSPACE_ROOT;
-    const projectRoot = project.workspaceRoot?.trim();
+    // Default local root: /Users/gaolei/agent-workspace/{project-name}/
+    const projectRoot = projectAgentWorkspaceRoot(project.name, globalRoot);
     const workspace =
-      input.workspace?.trim() ||
-      path.join(projectRoot || globalRoot, taskId);
+      input.workspace?.trim() || path.join(projectRoot, taskId);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

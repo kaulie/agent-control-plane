@@ -445,17 +445,15 @@ export class Store {
 
   createProject(
     name: string,
-    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string },
   ): Project {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("project name is required");
     const now = new Date().toISOString();
-    const root = options?.workspaceRoot?.trim() || null;
     const gitRepoUrl = options?.gitRepoUrl?.trim() || null;
     const project: Project = {
       projectId: newId("project"),
       name: trimmed,
-      ...(root ? { workspaceRoot: root } : {}),
       ...(gitRepoUrl ? { gitRepoUrl } : {}),
       createdAt: now,
       updatedAt: now,
@@ -468,7 +466,7 @@ export class Store {
       .run(
         project.projectId,
         project.name,
-        root,
+        null,
         gitRepoUrl,
         project.createdAt,
         project.updatedAt,
@@ -484,7 +482,6 @@ export class Store {
     projectId: string,
     input: {
       name?: string;
-      workspaceRoot?: string | null;
       gitRepoUrl?: string | null;
     },
   ): Project | undefined {
@@ -501,18 +498,6 @@ export class Store {
       updates.push("name = ?");
       values.push(trimmed);
       next = { ...next, name: trimmed };
-    }
-
-    if (input.workspaceRoot !== undefined) {
-      const root = input.workspaceRoot?.trim() || null;
-      updates.push("workspace_root = ?");
-      values.push(root);
-      if (root) {
-        next = { ...next, workspaceRoot: root };
-      } else {
-        const { workspaceRoot: _removed, ...rest } = next;
-        next = rest;
-      }
     }
 
     if (input.gitRepoUrl !== undefined) {
@@ -583,12 +568,10 @@ export class Store {
   }
 
   private toProject(r: ProjectRow): Project {
-    const root = r.workspace_root?.trim();
     const gitRepoUrl = r.git_repo_url?.trim();
     return {
       projectId: r.project_id,
       name: r.name,
-      ...(root ? { workspaceRoot: root } : {}),
       ...(gitRepoUrl ? { gitRepoUrl } : {}),
       createdAt: r.created_at,
       updatedAt: r.updated_at,

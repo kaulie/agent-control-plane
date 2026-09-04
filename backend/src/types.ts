@@ -2,15 +2,6 @@ export type TaskStatus = "active" | "completed" | "error";
 
 export type TaskType = "general";
 
-export type WorkflowState =
-  | "plan"
-  | "coding"
-  | "pr"
-  | "ci"
-  | "test"
-  | "deploy"
-  | "done";
-
 export interface AgentRulesConfig {
   rules?: string;
 }
@@ -75,8 +66,6 @@ export interface Task {
   prUrl?: string;
   /** Task category; phase 1 only supports general. */
   taskType: TaskType;
-  /** Current step in the task workflow state machine. */
-  workflowState: WorkflowState;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";

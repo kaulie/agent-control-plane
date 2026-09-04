@@ -153,29 +153,6 @@ export const api = {
       }),
     }).then((r) => j<{ runId: string; queued?: boolean; queueLength?: number }>(r)),
 
-  transitionWorkflow: (id: string, toState: string) =>
-    fetch(`${BASE}/tasks/${id}/workflow/transition`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ toState }),
-    }).then((r) =>
-      j<{ task: Task; workflow: import("./workflows").TaskWorkflowView }>(r),
-    ),
-
-  updateTask: (id: string, body: { prUrl?: string | null }) =>
-    fetch(`${BASE}/tasks/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => j<Task>(r)),
-
-  createPullRequest: (id: string, body?: { title?: string; body?: string }) =>
-    fetch(`${BASE}/tasks/${id}/pull-request`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-    }).then((r) => j<{ task: Task; url: string; created: boolean }>(r)),
-
   listAgentSuccessions: (taskId: string) =>
     fetch(`${BASE}/tasks/${taskId}/agent-successions`).then((r) =>
       j<{ successions: import("./types").AgentSuccession[] }>(r),

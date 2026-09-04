@@ -50,7 +50,6 @@ export interface Task {
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
   taskType: "general";
-  workflowState: import("./workflows").WorkflowState;
 }
 
 export interface TokenUsage {
@@ -154,7 +153,6 @@ export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
-  workflow: import("./workflows").TaskWorkflowView;
 }
 
 export interface AuthStatus {

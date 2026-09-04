@@ -41,11 +41,6 @@ import {
   parsePlanQuestionBatch,
   type PlanAnswerBatch,
 } from "../plan-question-parser.js";
-import {
-  buildWorkflowView,
-  validateTransition,
-  type TaskWorkflowView,
-} from "../workflows/index.js";
 import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
 import { buildTokenUsageSeries } from "../usage/series.js";
 import {
@@ -74,7 +69,7 @@ export interface SendMessageInput {
   text?: string;
   images?: PromptImage[];
   mode?: "agent" | "plan";
-  /** Structured answers to a plan_question_batch (plan workflow). */
+  /** Structured answers to a plan_question_batch (plan mode). */
   planAnswerBatch?: PlanAnswerBatch;
   /** Startup self-check for a run that never received terminal feedback. */
   selfCheck?: { resumesRunId: string };
@@ -84,7 +79,6 @@ export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
-  workflow: TaskWorkflowView;
 }
 
 interface PendingRun {
@@ -284,7 +278,6 @@ export class AgentGateway {
       task,
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
-      workflow: buildWorkflowView(task.taskType, task.workflowState),
     };
   }
 
@@ -308,17 +301,6 @@ export class AgentGateway {
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {
     return this.store.listAgentSuccessions(taskId);
-  }
-
-  transitionTask(taskId: string, toState: string): Task {
-    const task = this.store.getTask(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
-    const check = validateTransition(task.taskType, task.workflowState, toState);
-    if (!check.ok) throw new Error(check.error);
-    this.store.updateTaskWorkflowState(taskId, check.toState);
-    const updated = this.store.getTask(taskId)!;
-    this.publish({ type: "task_updated", task: updated });
-    return updated;
   }
 
   updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
@@ -596,9 +578,9 @@ export class AgentGateway {
     }
 
     const runId = newId("run");
-    // Run mode is chosen by the user per message; the task workflow state no
-    // longer forces plan/agent. The provider maps `agent`/`plan` onto its own
-    // runtime mode (Cursor agent/plan, Cline yolo/plan).
+    // Run mode is chosen by the user per message; it is never forced by the
+    // task status. The provider maps `agent`/`plan` onto its own runtime mode
+    // (Cursor agent/plan, Cline yolo/plan).
     const mode = input.mode === "plan" ? "plan" : "agent";
     const pending: PendingRun = {
       runId,

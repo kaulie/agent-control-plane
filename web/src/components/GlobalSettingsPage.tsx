@@ -92,7 +92,7 @@ export default function GlobalSettingsPage({ onBack }: Props) {
         <div className="settings-body">
           <WorkspaceRootSection
             title="WorkspaceRoot"
-            description="系统级 Agent 工作区根目录。新建任务时 cwd 为 WorkspaceRoot/{project_name}。"
+            description="系统级 Agent 工作区根目录。新建任务时 cwd 为 WorkspaceRoot/{project_name}/{task_id}。"
             value={workspaceRoot}
             defaultRoot={DEFAULT_WORKSPACE_ROOT}
             onChange={setWorkspaceRoot}

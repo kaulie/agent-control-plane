@@ -31,7 +31,8 @@ export default function WorkspaceRootSection({
       <div className="settings-section-meta">
         Agent 初始目录为{" "}
         <code>
-          {(value.trim() || defaultRoot).replace(/\/$/, "")}/{"{project_name}"}
+          {(value.trim() || defaultRoot).replace(/\/$/, "")}
+          /{"{project_name}"}/{"{task_id}"}
         </code>
         ；留空则使用默认 {defaultRoot}
       </div>

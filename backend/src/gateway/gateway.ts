@@ -261,10 +261,13 @@ export class AgentGateway {
       undefined;
 
     const taskId = newId("task");
-    // cwd = WorkspaceRoot/{project_name}
+    // cwd = WorkspaceRoot/{project_name}/{task_id}
+    const projectRoot = projectAgentWorkspaceRoot(
+      project.name,
+      this.effectiveWorkspaceRoot(),
+    );
     const workspace =
-      input.workspace?.trim() ||
-      projectAgentWorkspaceRoot(project.name, this.effectiveWorkspaceRoot());
+      input.workspace?.trim() || path.join(projectRoot, taskId);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

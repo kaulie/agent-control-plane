@@ -16,8 +16,9 @@ export const CANONICAL_DEV_REPO = "/Users/gaolei/Projects/deepseek_web_cursor";
 export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 
 /**
- * Project-level local workspace passed to agents:
+ * Project-level local workspace:
  * `<agentWorkspaceRoot>/<project-name>/`.
+ * New tasks use `<projectRoot>/<taskId>/`.
  */
 export function projectAgentWorkspaceRoot(
   projectName: string,
@@ -37,7 +38,7 @@ export interface Config {
   port: number;
   host: string;
   apiKey: string | undefined;
-  /** Root directory; new agents use `<root>/<project-name>/` as cwd. */
+  /** Root directory; new tasks use `<root>/<project-name>/<taskId>/`. */
   agentWorkspaceRoot: string;
   /** @deprecated alias of agentWorkspaceRoot (logging / gateway ctor). */
   agentWorkspace: string;

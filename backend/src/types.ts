@@ -19,7 +19,7 @@ export interface RuntimeConfig {
   defaultModel?: string;
 }
 
-/** System-wide agent sandbox root; cwd = `<root>/<project-name>/`. */
+/** System-wide agent sandbox root; cwd = `<root>/<project-name>/<taskId>/`. */
 export interface WorkspaceConfig {
   /** Absolute path; empty/omit = `/Users/gaolei/agent-workspace`. */
   root?: string;

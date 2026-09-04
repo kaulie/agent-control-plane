@@ -11,13 +11,11 @@ import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
-import WorkflowStepper from "./components/WorkflowStepper";
 import PlanQuestionsWizard from "./components/PlanQuestionsWizard";
 import {
   findPendingPlanQuestionBatch,
   type PlanAnswerBatch,
 } from "./plan-questions";
-import type { WorkflowState } from "./workflows";
 import { APP_VERSION } from "./version";
 import {
   dismissVersionUpdate,
@@ -69,8 +67,6 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
-  const [workflowTransitioning, setWorkflowTransitioning] = useState(false);
-  const [creatingPr, setCreatingPr] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [createTaskDefaults, setCreateTaskDefaults] = useState<{
     provider?: string;
@@ -658,59 +654,6 @@ export default function App() {
   // an effect to re-fire just because the underlying events array changed.
   const hasPendingPlanQuestions = pendingPlanQuestions != null;
 
-  const transitionWorkflow = useCallback(
-    async (toState: WorkflowState) => {
-      if (!selectedId) return;
-      setWorkflowTransitioning(true);
-      setError(null);
-      try {
-        const res = await api.transitionWorkflow(selectedId, toState);
-        setDetail((prev) =>
-          prev
-            ? {
-                ...prev,
-                task: res.task,
-                workflow: res.workflow,
-              }
-            : prev,
-        );
-        setTasks((prev) =>
-          prev.map((t) => (t.taskId === res.task.taskId ? res.task : t)),
-        );
-        if (toState === "coding") setMainTab("timeline");
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setWorkflowTransitioning(false);
-      }
-    },
-    [selectedId],
-  );
-
-  const createPullRequest = useCallback(async () => {
-    if (!selectedId) return;
-    setCreatingPr(true);
-    setError(null);
-    try {
-      const res = await api.createPullRequest(selectedId);
-      setDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              task: res.task,
-            }
-          : prev,
-      );
-      setTasks((prev) =>
-        prev.map((t) => (t.taskId === res.task.taskId ? res.task : t)),
-      );
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setCreatingPr(false);
-    }
-  }, [selectedId]);
-
   const submitPlanAnswers = useCallback(
     async (batch: PlanAnswerBatch) => {
       if (!selectedId) return;
@@ -744,7 +687,7 @@ export default function App() {
   );
 
   // An unanswered plan question batch (only ever produced by a plan-mode run)
-  // surfaces on the Plan tab regardless of the task workflow stage.
+  // surfaces on the Plan tab.
   useEffect(() => {
     if (hasPendingPlanQuestions) {
       setMainTab("plan");
@@ -835,21 +778,6 @@ export default function App() {
         <main className="main">
           {selectedId && detail ? (
             <>
-              <WorkflowStepper
-                workflow={detail.workflow}
-                transitioning={workflowTransitioning}
-                onTransition={(to) => void transitionWorkflow(to)}
-                prUrl={detail.task.prUrl}
-                canCreatePr={Boolean(
-                  projects.find((p) => p.projectId === detail.task.projectId)
-                    ?.gitRepoUrl &&
-                    (detail.workflow.currentState === "coding" ||
-                      detail.workflow.currentState === "pr") &&
-                    !detail.task.prUrl,
-                )}
-                creatingPr={creatingPr}
-                onCreatePr={() => void createPullRequest()}
-              />
               <UsageBar task={detail.task} stats={detail.stats} />
               <div className="main-tabs">
                 <button

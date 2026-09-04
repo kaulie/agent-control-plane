@@ -105,7 +105,7 @@ export default function ChatInput({
   const [text, setText] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
-  // The mode is always user-chosen; it is never forced by the workflow state.
+  // The mode is always user-chosen; it is never forced by the task state.
   // Only the user's last selection is remembered (localStorage).
   const [mode, setMode] = useState<AgentMode>(loadStoredMode);
 

@@ -100,9 +100,6 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     task.prUrl
       ? `- **Existing pull request:** ${task.prUrl} (do not open a duplicate PR).`
       : "",
-    task.workflowState === "pr" || task.workflowState === "coding"
-      ? `- Current workflow is \`${task.workflowState}\`: treat GitHub PR as the coding delivery artifact when \`gitRepoUrl\` is set.`
-      : "",
     "- Do not edit other tasks' directories, and never edit `/Users/gaolei/runtime/**`.",
     "",
     "## Git / network proxy (explicit control)",

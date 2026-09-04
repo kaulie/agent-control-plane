@@ -252,10 +252,10 @@ export class AgentGateway {
       this.config.agentWorkspaceRoot ||
       this.config.agentWorkspace ||
       DEFAULT_AGENT_WORKSPACE_ROOT;
-    // Default local root: /Users/gaolei/agent-workspace/{project-name}/
-    const projectRoot = projectAgentWorkspaceRoot(project.name, globalRoot);
+    // Default local cwd: /Users/gaolei/agent-workspace/{project-name}/
     const workspace =
-      input.workspace?.trim() || path.join(projectRoot, taskId);
+      input.workspace?.trim() ||
+      projectAgentWorkspaceRoot(project.name, globalRoot);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

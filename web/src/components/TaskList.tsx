@@ -7,7 +7,6 @@ interface Props {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onRenameProject: () => void;
-  onSetWorkspaceRoot: () => void;
   onSetGitRepoUrl: () => void;
   onOpenProjectSettings: () => void;
   tasks: Task[];
@@ -22,7 +21,6 @@ export default function TaskList({
   onSelectProject,
   onCreateProject,
   onRenameProject,
-  onSetWorkspaceRoot,
   onSetGitRepoUrl,
   onOpenProjectSettings,
   tasks,
@@ -65,25 +63,6 @@ export default function TaskList({
           >
             ✎
           </button>
-        </div>
-        <div className="project-workspace">
-          <div className="project-workspace-label">文件主目录</div>
-          <div className="project-workspace-row">
-            <div
-              className="project-workspace-path"
-              title={selectedProject?.workspaceRoot ?? "使用系统默认目录"}
-            >
-              {selectedProject?.workspaceRoot ?? "（系统默认）"}
-            </div>
-            <button
-              className="icon-btn"
-              title="Set file root directory"
-              onClick={onSetWorkspaceRoot}
-              disabled={!selectedProjectId}
-            >
-              📁
-            </button>
-          </div>
         </div>
         <div className="project-workspace">
           <div className="project-workspace-label">Git 仓库地址</div>

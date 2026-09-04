@@ -50,7 +50,7 @@ export const api = {
 
   createProject: (
     name: string,
-    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string },
   ) =>
     fetch(`${BASE}/projects`, {
       method: "POST",
@@ -69,7 +69,6 @@ export const api = {
     projectId: string,
     body: {
       name?: string;
-      workspaceRoot?: string | null;
       gitRepoUrl?: string | null;
     },
   ) =>

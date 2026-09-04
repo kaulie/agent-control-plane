@@ -31,9 +31,18 @@ import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
 } from "../feedback.js";
-import { CANONICAL_DEV_REPO, DEFAULT_AGENT_WORKSPACE_ROOT } from "../config.js";
+import {
+  CANONICAL_DEV_REPO,
+  DEFAULT_AGENT_WORKSPACE_ROOT,
+  projectAgentWorkspaceRoot,
+} from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
-import { mergeSettings, resolvePlanExportDir, resolveRuntimeDefaults } from "../settings.js";
+import {
+  mergeSettings,
+  resolvePlanExportDir,
+  resolveRuntimeDefaults,
+  resolveWorkspaceRoot,
+} from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
 import {
   formatPlanAnswerBatchForAgent,
@@ -136,7 +145,7 @@ export class AgentGateway {
 
   createProject(
     name: string,
-    options?: { workspaceRoot?: string; gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string },
   ): Project {
     const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });
@@ -151,7 +160,6 @@ export class AgentGateway {
     projectId: string,
     input: {
       name?: string;
-      workspaceRoot?: string | null;
       gitRepoUrl?: string | null;
     },
   ): Project | undefined {
@@ -178,15 +186,24 @@ export class AgentGateway {
     return settings;
   }
 
+  /** Effective WorkspaceRoot from global settings, else env/default. */
+  private effectiveWorkspaceRoot(): string {
+    const fallback =
+      this.config.agentWorkspaceRoot ||
+      this.config.agentWorkspace ||
+      DEFAULT_AGENT_WORKSPACE_ROOT;
+    return resolveWorkspaceRoot(this.store.getGlobalSettings(), fallback);
+  }
+
   getProjectSettingsView(projectId: string): ProjectSettingsView | undefined {
     const project = this.store.getProject(projectId);
     if (!project) return undefined;
     const global = this.store.getGlobalSettings();
     const projectSettings = this.store.getProjectSettings(projectId) ?? {};
-    const cwd =
-      project.workspaceRoot?.trim() ||
-      this.config.canonicalDevRepo?.trim() ||
-      "";
+    const cwd = projectAgentWorkspaceRoot(
+      project.name,
+      this.effectiveWorkspaceRoot(),
+    );
     return {
       global,
       project: projectSettings,
@@ -244,14 +261,13 @@ export class AgentGateway {
       undefined;
 
     const taskId = newId("task");
-    const globalRoot =
-      this.config.agentWorkspaceRoot ||
-      this.config.agentWorkspace ||
-      DEFAULT_AGENT_WORKSPACE_ROOT;
-    const projectRoot = project.workspaceRoot?.trim();
+    // cwd = WorkspaceRoot/{project_name}/{task_id}
+    const projectRoot = projectAgentWorkspaceRoot(
+      project.name,
+      this.effectiveWorkspaceRoot(),
+    );
     const workspace =
-      input.workspace?.trim() ||
-      path.join(projectRoot || globalRoot, taskId);
+      input.workspace?.trim() || path.join(projectRoot, taskId);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

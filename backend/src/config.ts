@@ -12,8 +12,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Canonical Web Cursor source tree (deploy / product edits origin). */
 export const CANONICAL_DEV_REPO = "/Users/gaolei/Projects/deepseek_web_cursor";
 
-/** Per-task agent sandboxes live under this root (one directory per task). */
+/** Per-project agent sandboxes live under this root. */
 export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
+
+/**
+ * Project-level local workspace:
+ * `<agentWorkspaceRoot>/<project-name>/`.
+ * New tasks use `<projectRoot>/<taskId>/`.
+ */
+export function projectAgentWorkspaceRoot(
+  projectName: string,
+  root: string = DEFAULT_AGENT_WORKSPACE_ROOT,
+): string {
+  const safe =
+    projectName
+      .trim()
+      .replace(/[/\\:\0]+/g, "-")
+      .replace(/\s+/g, "-") || "project";
+  return path.join(root, safe);
+}
 
 export interface Config {
   /** Git short SHA baked into web build; exposed via /health and X-App-Version. */
@@ -21,7 +38,7 @@ export interface Config {
   port: number;
   host: string;
   apiKey: string | undefined;
-  /** Root directory; each new task gets `<root>/<taskId>/`. */
+  /** Root directory; new tasks use `<root>/<project-name>/<taskId>/`. */
   agentWorkspaceRoot: string;
   /** @deprecated alias of agentWorkspaceRoot (logging / gateway ctor). */
   agentWorkspace: string;

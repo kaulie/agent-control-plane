@@ -1,4 +1,5 @@
 import type { AppSettings } from "./types.js";
+import { DEFAULT_AGENT_WORKSPACE_ROOT } from "./config.js";
 
 const GLOBAL_RULES_HEADING = "# Global agent rules";
 const PROJECT_RULES_HEADING = "# Project agent rules";
@@ -49,6 +50,14 @@ export function patchSettings(
       delete next.runtime;
     }
   }
+  if (patch.workspace !== undefined) {
+    const root = patch.workspace.root?.trim() || "";
+    if (root) {
+      next.workspace = { root };
+    } else {
+      delete next.workspace;
+    }
+  }
   return next;
 }
 
@@ -95,6 +104,14 @@ export function resolveRuntimeDefaults(
   };
 }
 
+/** Global-only WorkspaceRoot; empty falls back to default/env. */
+export function resolveWorkspaceRoot(
+  global: AppSettings,
+  fallback: string = DEFAULT_AGENT_WORKSPACE_ROOT,
+): string {
+  return global.workspace?.root?.trim() || fallback;
+}
+
 export function mergeSettings(
   global: AppSettings,
   project: AppSettings,
@@ -107,6 +124,9 @@ export function mergeSettings(
   const runtime = resolveRuntimeDefaults(global, project);
   if (runtime.defaultProvider || runtime.defaultModel) {
     out.runtime = runtime;
+  }
+  if (global.workspace?.root?.trim()) {
+    out.workspace = { root: resolveWorkspaceRoot(global) };
   }
   return out;
 }

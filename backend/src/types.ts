@@ -19,10 +19,17 @@ export interface RuntimeConfig {
   defaultModel?: string;
 }
 
+/** System-wide agent sandbox root; cwd = `<root>/<project-name>/<taskId>/`. */
+export interface WorkspaceConfig {
+  /** Absolute path; empty/omit = `/Users/gaolei/agent-workspace`. */
+  root?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
+  workspace?: WorkspaceConfig;
 }
 
 export interface ProjectSettingsView {
@@ -35,8 +42,6 @@ export interface ProjectSettingsView {
 export interface Project {
   projectId: string;
   name: string;
-  /** Per-project agent sandbox root; new tasks use `<workspaceRoot>/<taskId>/`. */
-  workspaceRoot?: string;
   /** Git remote/clone URL for this project (https, ssh, or local path). */
   gitRepoUrl?: string;
   createdAt: string;

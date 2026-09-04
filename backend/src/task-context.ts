@@ -83,9 +83,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     `- createdAt: ${task.createdAt}`,
     "",
     "## Workspace isolation",
-    project?.workspaceRoot
-      ? `- This project uses file root \`${project.workspaceRoot}\`; this task's cwd is \`${task.workspace}\`.`
-      : `- workspace: ${task.workspace}`,
+    `- workspace: ${task.workspace}`,
     project?.gitRepoUrl
       ? [
           `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,

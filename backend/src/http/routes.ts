@@ -125,7 +125,7 @@ export async function registerRoutes(
   app.get("/api/projects", async () => gateway.listProjects());
 
   app.post<{
-    Body: { name?: string; workspaceRoot?: string; gitRepoUrl?: string };
+    Body: { name?: string; gitRepoUrl?: string };
   }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
@@ -133,9 +133,6 @@ export async function registerRoutes(
     }
     try {
       const project = gateway.createProject(name, {
-        ...(req.body?.workspaceRoot?.trim()
-          ? { workspaceRoot: req.body.workspaceRoot.trim() }
-          : {}),
         ...(req.body?.gitRepoUrl?.trim()
           ? { gitRepoUrl: req.body.gitRepoUrl.trim() }
           : {}),
@@ -153,23 +150,20 @@ export async function registerRoutes(
     Params: { projectId: string };
     Body: {
       name?: string;
-      workspaceRoot?: string | null;
       gitRepoUrl?: string | null;
     };
   }>("/api/projects/:projectId", async (req, reply) => {
       const name = req.body?.name?.trim();
       const hasName = name !== undefined && name.length > 0;
-      const hasWorkspaceRoot = req.body?.workspaceRoot !== undefined;
       const hasGitRepoUrl = req.body?.gitRepoUrl !== undefined;
-      if (!hasName && !hasWorkspaceRoot && !hasGitRepoUrl) {
+      if (!hasName && !hasGitRepoUrl) {
         return reply
           .code(400)
-          .send({ error: "name, workspaceRoot, or gitRepoUrl is required" });
+          .send({ error: "name or gitRepoUrl is required" });
       }
       try {
         const project = gateway.updateProject(req.params.projectId, {
           ...(hasName ? { name } : {}),
-          ...(hasWorkspaceRoot ? { workspaceRoot: req.body?.workspaceRoot } : {}),
           ...(hasGitRepoUrl ? { gitRepoUrl: req.body?.gitRepoUrl } : {}),
         });
         if (!project) {

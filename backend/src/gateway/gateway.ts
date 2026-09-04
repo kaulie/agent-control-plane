@@ -37,7 +37,12 @@ import {
   projectAgentWorkspaceRoot,
 } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
-import { mergeSettings, resolvePlanExportDir, resolveRuntimeDefaults } from "../settings.js";
+import {
+  mergeSettings,
+  resolvePlanExportDir,
+  resolveRuntimeDefaults,
+  resolveWorkspaceRoot,
+} from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
 import {
   formatPlanAnswerBatchForAgent,
@@ -181,16 +186,24 @@ export class AgentGateway {
     return settings;
   }
 
+  /** Effective WorkspaceRoot from global settings, else env/default. */
+  private effectiveWorkspaceRoot(): string {
+    const fallback =
+      this.config.agentWorkspaceRoot ||
+      this.config.agentWorkspace ||
+      DEFAULT_AGENT_WORKSPACE_ROOT;
+    return resolveWorkspaceRoot(this.store.getGlobalSettings(), fallback);
+  }
+
   getProjectSettingsView(projectId: string): ProjectSettingsView | undefined {
     const project = this.store.getProject(projectId);
     if (!project) return undefined;
     const global = this.store.getGlobalSettings();
     const projectSettings = this.store.getProjectSettings(projectId) ?? {};
-    const globalRoot =
-      this.config.agentWorkspaceRoot ||
-      this.config.agentWorkspace ||
-      DEFAULT_AGENT_WORKSPACE_ROOT;
-    const cwd = projectAgentWorkspaceRoot(project.name, globalRoot);
+    const cwd = projectAgentWorkspaceRoot(
+      project.name,
+      this.effectiveWorkspaceRoot(),
+    );
     return {
       global,
       project: projectSettings,
@@ -248,14 +261,10 @@ export class AgentGateway {
       undefined;
 
     const taskId = newId("task");
-    const globalRoot =
-      this.config.agentWorkspaceRoot ||
-      this.config.agentWorkspace ||
-      DEFAULT_AGENT_WORKSPACE_ROOT;
-    // Default local cwd: /Users/gaolei/agent-workspace/{project-name}/
+    // cwd = WorkspaceRoot/{project_name}
     const workspace =
       input.workspace?.trim() ||
-      projectAgentWorkspaceRoot(project.name, globalRoot);
+      projectAgentWorkspaceRoot(project.name, this.effectiveWorkspaceRoot());
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({

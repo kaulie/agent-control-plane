@@ -3,6 +3,9 @@ import { api } from "../api";
 import type { AppSettings } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
 import PlanExportSection from "./settings/PlanExportSection";
+import WorkspaceRootSection from "./settings/WorkspaceRootSection";
+
+const DEFAULT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 
 interface Props {
   onBack: () => void;
@@ -13,6 +16,8 @@ export default function GlobalSettingsPage({ onBack }: Props) {
   const [savedRules, setSavedRules] = useState("");
   const [exportDir, setExportDir] = useState("");
   const [savedExportDir, setSavedExportDir] = useState("");
+  const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const [savedWorkspaceRoot, setSavedWorkspaceRoot] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,10 +30,13 @@ export default function GlobalSettingsPage({ onBack }: Props) {
       const settings = await api.getGlobalSettings();
       const text = settings.agent?.rules ?? "";
       const dir = settings.plan?.exportDir ?? "";
+      const root = settings.workspace?.root ?? "";
       setRules(text);
       setSavedRules(text);
       setExportDir(dir);
       setSavedExportDir(dir);
+      setWorkspaceRoot(root);
+      setSavedWorkspaceRoot(root);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -48,10 +56,12 @@ export default function GlobalSettingsPage({ onBack }: Props) {
       const patch: AppSettings = {
         agent: { rules },
         plan: { exportDir: exportDir.trim() || undefined },
+        workspace: { root: workspaceRoot.trim() || undefined },
       };
       await api.updateGlobalSettings(patch);
       setSavedRules(rules);
       setSavedExportDir(exportDir);
+      setSavedWorkspaceRoot(workspaceRoot);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -60,7 +70,10 @@ export default function GlobalSettingsPage({ onBack }: Props) {
     }
   };
 
-  const dirty = rules !== savedRules || exportDir !== savedExportDir;
+  const dirty =
+    rules !== savedRules ||
+    exportDir !== savedExportDir ||
+    workspaceRoot !== savedWorkspaceRoot;
 
   return (
     <div className="settings-page">
@@ -77,6 +90,13 @@ export default function GlobalSettingsPage({ onBack }: Props) {
         <div className="settings-loading">加载中…</div>
       ) : (
         <div className="settings-body">
+          <WorkspaceRootSection
+            title="WorkspaceRoot"
+            description="系统级 Agent 工作区根目录。新建任务时 cwd 为 WorkspaceRoot/{project_name}。"
+            value={workspaceRoot}
+            defaultRoot={DEFAULT_WORKSPACE_ROOT}
+            onChange={setWorkspaceRoot}
+          />
           <AgentRulesSection
             title="Agent Rules"
             description="全局 Agent 行为约束（Markdown）。新建任务时与项目规则合并后注入 Agent。"

@@ -989,7 +989,7 @@ export class Store {
         outputTokens += run.usage.outputTokens || 0;
         cacheReadTokens += run.usage.cacheReadTokens || 0;
         cacheWriteTokens += run.usage.cacheWriteTokens || 0;
-        totalTokens += tokenVolume(run.usage);
+        totalTokens += tokenVolume(run.usage, run.provider);
       }
       if (run.cost) {
         if (typeof run.cost.chargedCents === "number") {

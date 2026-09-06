@@ -28,7 +28,10 @@ export function toTokenUsage(u: UsageLike): TokenUsage {
     outputTokens,
     cacheReadTokens,
     cacheWriteTokens,
-    totalTokens: tokenVolume({ inputTokens, outputTokens }),
+    totalTokens: tokenVolume(
+      { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+      "cline",
+    ),
     ...(typeof u.reasoningTokenCount === "number"
       ? { reasoningTokens: u.reasoningTokenCount }
       : {}),

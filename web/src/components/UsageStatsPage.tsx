@@ -188,16 +188,16 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
           </button>
           <h2 className="stats-title">Token 用量统计</h2>
           <span className="stats-subtitle">
-            provider / model 粒度 · 总量 = input + output
+            provider / model 粒度 · 分口径计量
           </span>
         </div>
       </div>
 
       <p className="stats-note">
-        口径说明：总 Token = input + output，与 DeepSeek 等官网的
-        <code>total_tokens</code>
-        一致。cache read/write 是 input 的拆分明细（已含在 input 内），不再累加进总量。
-        时区可在「本地时间 / UTC」间切换；对账 Cursor 官网用量时请选 UTC。
+        口径说明：总量按 provider 分别对齐官网 —
+        <code>cline</code> 为 input + output（DeepSeek：cache 已含在 input 内）；
+        <code>cursor</code> 为 input + output + cache read/write（四类互斥相加）。
+        下方明细便于与 Cursor 用量 hover 对账。时区可在「本地时间 / UTC」间切换。
       </p>
 
       <div className="stats-filters">
@@ -254,6 +254,30 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
         <div className="stats-card">
           <div className="stats-card-label">总 Token</div>
           <div className="stats-card-value">{fmtTok(data?.totalTokens)}</div>
+        </div>
+        <div className="stats-card">
+          <div className="stats-card-label">Input</div>
+          <div className="stats-card-value stats-card-value-sm">
+            {fmtTok(data?.inputTokens)}
+          </div>
+        </div>
+        <div className="stats-card">
+          <div className="stats-card-label">Output</div>
+          <div className="stats-card-value stats-card-value-sm">
+            {fmtTok(data?.outputTokens)}
+          </div>
+        </div>
+        <div className="stats-card">
+          <div className="stats-card-label">Cache Read</div>
+          <div className="stats-card-value stats-card-value-sm">
+            {fmtTok(data?.cacheReadTokens)}
+          </div>
+        </div>
+        <div className="stats-card">
+          <div className="stats-card-label">Cache Write</div>
+          <div className="stats-card-value stats-card-value-sm">
+            {fmtTok(data?.cacheWriteTokens)}
+          </div>
         </div>
         <div className="stats-card">
           <div className="stats-card-label">Agent（provider/model）</div>

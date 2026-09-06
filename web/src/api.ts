@@ -13,6 +13,7 @@ import type {
   TokenUsage,
   TokenUsageSeries,
   UsageGranularity,
+  UsageTimeZone,
 } from "./types";
 
 const BASE = "/api";
@@ -101,12 +102,14 @@ export const api = {
   getTokenUsageSeries: (params: {
     projectId?: string;
     granularity?: UsageGranularity;
+    timeZone?: UsageTimeZone;
     from?: string;
     to?: string;
   }) => {
     const q = new URLSearchParams();
     if (params.projectId) q.set("projectId", params.projectId);
     if (params.granularity) q.set("granularity", params.granularity);
+    if (params.timeZone) q.set("timeZone", params.timeZone);
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     const s = q.toString();

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings } from "../types.js";
-import { isUsageGranularity } from "../usage/series.js";
+import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import {
   resolveAttachmentPath,
   validateIncomingImages,
@@ -263,21 +263,25 @@ export async function registerRoutes(
 
   /**
    * Cross-task token-usage series grouped by provider/model.
-   * Query: ?granularity=hour|day|week&projectId=&from=&to=
+   * Query: ?granularity=hour|day|week&timeZone=local|utc&projectId=&from=&to=
    */
   app.get<{
     Querystring: {
       projectId?: string;
       granularity?: string;
+      timeZone?: string;
       from?: string;
       to?: string;
     };
   }>("/api/stats/token-usage", async (req) => {
     const granularityRaw = req.query.granularity?.trim();
     const granularity = isUsageGranularity(granularityRaw) ? granularityRaw : "day";
+    const timeZoneRaw = req.query.timeZone?.trim();
+    const timeZone = isUsageTimeZone(timeZoneRaw) ? timeZoneRaw : "local";
     return gateway.getTokenUsageSeries({
       ...(req.query.projectId?.trim() ? { projectId: req.query.projectId.trim() } : {}),
       granularity,
+      timeZone,
       ...(req.query.from?.trim() ? { from: req.query.from.trim() } : {}),
       ...(req.query.to?.trim() ? { to: req.query.to.trim() } : {}),
     });

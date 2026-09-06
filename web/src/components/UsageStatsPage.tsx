@@ -4,6 +4,7 @@ import type {
   Project,
   TokenUsageSeries,
   UsageGranularity,
+  UsageTimeZone,
 } from "../types";
 
 interface Props {
@@ -24,7 +25,14 @@ const GRANULARITY_LABEL: Record<UsageGranularity, string> = {
   week: "周",
 };
 
+const TIME_ZONE_LABEL: Record<UsageTimeZone, string> = {
+  local: "本地时间",
+  utc: "UTC",
+};
+
 const GRANULARITY_OPTIONS: UsageGranularity[] = ["day", "hour", "week"];
+const TIME_ZONE_OPTIONS: UsageTimeZone[] = ["local", "utc"];
+const TIME_ZONE_STORAGE_KEY = "usage-stats-timezone";
 
 const RANGES: Record<UsageGranularity, RangeOption[]> = {
   hour: [
@@ -49,6 +57,16 @@ function defaultRange(granularity: UsageGranularity): string {
   return granularity === "hour" ? "24h" : granularity === "day" ? "30d" : "12w";
 }
 
+function readStoredTimeZone(): UsageTimeZone {
+  try {
+    const v = localStorage.getItem(TIME_ZONE_STORAGE_KEY);
+    if (v === "utc" || v === "local") return v;
+  } catch {
+    /* ignore */
+  }
+  return "local";
+}
+
 function fmtTok(n: number | undefined | null): string {
   const v = Number(n) || 0;
   return v.toLocaleString("en-US");
@@ -71,6 +89,7 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [scope, setScope] = useState<string>("");
   const [granularity, setGranularity] = useState<UsageGranularity>("day");
+  const [timeZone, setTimeZone] = useState<UsageTimeZone>(() => readStoredTimeZone());
   const [rangeKey, setRangeKey] = useState<string>(defaultRange("day"));
   const [data, setData] = useState<TokenUsageSeries | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,6 +120,14 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
     };
   }, [defaultProjectId]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(TIME_ZONE_STORAGE_KEY, timeZone);
+    } catch {
+      /* ignore */
+    }
+  }, [timeZone]);
+
   const rangeMs = useMemo(() => {
     const option = RANGES[granularity].find((r) => r.key === rangeKey);
     return option?.ms;
@@ -115,6 +142,7 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
       .getTokenUsageSeries({
         ...(scope ? { projectId: scope } : {}),
         granularity,
+        timeZone,
         ...(from ? { from } : {}),
       })
       .then((res) => {
@@ -129,7 +157,7 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [scope, granularity, rangeMs]);
+  }, [scope, granularity, timeZone, rangeMs]);
 
   const changeGranularity = (next: UsageGranularity): void => {
     setGranularity(next);
@@ -147,8 +175,9 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
     if (!data || !data.buckets.length) return "";
     const first = data.buckets[0].title;
     const last = data.buckets[data.buckets.length - 1].title;
-    return `${first} ~ ${last}（按${GRANULARITY_LABEL[data.granularity]}）`;
-  }, [data]);
+    const tz = TIME_ZONE_LABEL[data.timeZone ?? timeZone];
+    return `${first} ~ ${last}（按${GRANULARITY_LABEL[data.granularity]} · ${tz}）`;
+  }, [data, timeZone]);
 
   return (
     <main className="stats-page">
@@ -167,7 +196,8 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
       <p className="stats-note">
         口径说明：总 Token = input + output，与 DeepSeek 等官网的
         <code>total_tokens</code>
-        一致。cache read/write 是 input 的拆分明细（已含在 input 内），不再累加进总量，避免与官网对账时重复计算。
+        一致。cache read/write 是 input 的拆分明细（已含在 input 内），不再累加进总量。
+        时区可在「本地时间 / UTC」间切换；对账 Cursor 官网用量时请选 UTC。
       </p>
 
       <div className="stats-filters">
@@ -191,6 +221,19 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
             {GRANULARITY_OPTIONS.map((g) => (
               <option key={g} value={g}>
                 {GRANULARITY_LABEL[g]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="stats-filter">
+          <span>时区</span>
+          <select
+            value={timeZone}
+            onChange={(e) => setTimeZone(e.target.value as UsageTimeZone)}
+          >
+            {TIME_ZONE_OPTIONS.map((tz) => (
+              <option key={tz} value={tz}>
+                {TIME_ZONE_LABEL[tz]}
               </option>
             ))}
           </select>
@@ -247,7 +290,7 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
               <tr>
                 <th className="stats-head-agent">Agent（provider / model）</th>
                 {data.buckets.map((b) => (
-                  <th key={b.start} title={b.title}>
+                  <th key={`${data.timeZone}:${b.start}`} title={b.title}>
                     {b.label}
                   </th>
                 ))}
@@ -255,7 +298,7 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((row, ri) => (
+              {data.rows.map((row) => (
                 <tr key={`${row.provider} / ${row.model ?? ""}`}>
                   <td className="stats-agent-cell">
                     <div className="stats-agent">{row.label}</div>

@@ -5,6 +5,7 @@ import type {
   UsageRunSample,
   UsageStatsRow,
 } from "../types.js";
+import { tokenVolume } from "./tokens.js";
 
 export interface SeriesFilter {
   granularity: UsageGranularity;
@@ -99,10 +100,12 @@ export function buildTokenUsageSeries(
   const granularity = filter.granularity;
 
   // Attribute each run's token usage to its completion time (fall back to start).
+  // Recompute volume from input+output so historical rows that double-counted
+  // cache into totalTokens still match provider dashboards.
   const points = samples
     .map((s) => {
       const t = new Date(s.completedAt ?? s.createdAt).getTime();
-      const tokens = Number(s.usage?.totalTokens) || 0;
+      const tokens = tokenVolume(s.usage);
       return { t, provider: s.provider, model: s.model, tokens };
     })
     .filter((p) => Number.isFinite(p.t));

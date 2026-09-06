@@ -1,5 +1,6 @@
 import type { AgentEvent as ClineAgentEvent } from "@cline/sdk";
 import type { EventType, TokenUsage } from "../../types.js";
+import { tokenVolume } from "../../usage/tokens.js";
 
 export interface MappedEvent {
   eventType: EventType;
@@ -21,16 +22,18 @@ export function toTokenUsage(u: UsageLike): TokenUsage {
   const outputTokens = u.outputTokens ?? 0;
   const cacheReadTokens = u.cacheReadTokens ?? 0;
   const cacheWriteTokens = u.cacheWriteTokens ?? 0;
-  return {
+  // inputTokens is the full prompt (cache included); cache_* are breakdown only.
+  const usage: TokenUsage = {
     inputTokens,
     outputTokens,
     cacheReadTokens,
     cacheWriteTokens,
-    totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
+    totalTokens: tokenVolume({ inputTokens, outputTokens }),
     ...(typeof u.reasoningTokenCount === "number"
       ? { reasoningTokens: u.reasoningTokenCount }
       : {}),
   };
+  return usage;
 }
 
 /** Map a Cline tool name to the unified, display-friendly event type. */

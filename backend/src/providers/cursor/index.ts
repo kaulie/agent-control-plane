@@ -3,6 +3,7 @@ import type { AgentOptions, Run, SDKAgent, SDKMessage, SDKUserMessage } from "@c
 import type { CostInfo, EventType, TokenUsage } from "../../types.js";
 import { mapSdkMessage } from "./mapper.js";
 import { buildCost, type SdkCostLike } from "../../usage/cost.js";
+import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
 import { composePromptWithBootstrap } from "../../task-context.js";
 import { formatRunErrorMessage } from "../../run-errors.js";
@@ -401,7 +402,8 @@ export class CursorProvider implements AgentProvider {
             toolCalls += 1;
           }
           for (const mapped of mapSdkMessage(msg as SDKMessage)) {
-            await emit(mapped.eventType, mapped.payload, mapped.usage);
+            const usage = mapped.usage ? normalizeTokenUsage(mapped.usage) : undefined;
+            await emit(mapped.eventType, mapped.payload, usage);
           }
         }
       } finally {
@@ -410,7 +412,7 @@ export class CursorProvider implements AgentProvider {
 
       const result = await run.wait();
       const durationMs = Date.now() - startedAt;
-      const usage = result.usage;
+      const usage = result.usage ? normalizeTokenUsage(result.usage) : undefined;
 
       if (handle.cancelled || result.status === "cancelled") {
         await emit("run_cancelled", {

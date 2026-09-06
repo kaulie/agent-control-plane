@@ -300,6 +300,7 @@ export class AgentGateway {
   getTokenUsageSeries(filter: {
     projectId?: string;
     granularity: UsageGranularity;
+    timeZone?: "local" | "utc";
     from?: string;
     to?: string;
   }): TokenUsageSeries {
@@ -309,6 +310,7 @@ export class AgentGateway {
       }),
       {
         granularity: filter.granularity,
+        ...(filter.timeZone ? { timeZone: filter.timeZone } : {}),
         ...(filter.from ? { from: filter.from } : {}),
         ...(filter.to ? { to: filter.to } : {}),
       },

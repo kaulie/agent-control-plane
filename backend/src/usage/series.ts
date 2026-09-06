@@ -4,11 +4,14 @@ import type {
   UsageGranularity,
   UsageRunSample,
   UsageStatsRow,
+  UsageTimeZone,
 } from "../types.js";
 import { tokenVolume } from "./tokens.js";
 
 export interface SeriesFilter {
   granularity: UsageGranularity;
+  /** Bucket calendar in local wall-clock or UTC. Default: local. */
+  timeZone?: UsageTimeZone;
   /**
    * ISO range. Bucket starts are floored to the granularity; points outside
    * the range are excluded. Omit either bound to span the available data.
@@ -18,68 +21,115 @@ export interface SeriesFilter {
 }
 
 const GRANULARITIES: UsageGranularity[] = ["hour", "day", "week"];
+const TIME_ZONES: UsageTimeZone[] = ["local", "utc"];
 
-function floorBucket(d: Date, granularity: UsageGranularity): Date {
-  const y = d.getFullYear();
-  const mo = d.getMonth();
-  const day = d.getDate();
-  const h = d.getHours();
-  if (granularity === "hour") return new Date(y, mo, day, h, 0, 0, 0);
-  if (granularity === "day") return new Date(y, mo, day, 0, 0, 0, 0);
-  // week starts on Monday 00:00 (local time)
-  const daysSinceMonday = (d.getDay() + 6) % 7;
-  return new Date(y, mo, day - daysSinceMonday, 0, 0, 0, 0);
+/** Calendar accessors for local or UTC bucketing. */
+interface TzCalendar {
+  mode: UsageTimeZone;
+  y(d: Date): number;
+  mo(d: Date): number;
+  day(d: Date): number;
+  h(d: Date): number;
+  /** Day of week: 0=Sunday … 6=Saturday. */
+  dow(d: Date): number;
+  /** Construct a Date at y-mo-day h:00:00 in this zone. `mo` is 0-based. */
+  at(y: number, mo: number, day: number, h?: number): Date;
 }
 
-/** Advance one bucket using calendar arithmetic (DST-safe). */
-function addBucket(d: Date, granularity: UsageGranularity): Date {
-  const y = d.getFullYear();
-  const mo = d.getMonth();
-  const day = d.getDate();
-  const h = d.getHours();
-  if (granularity === "hour") return new Date(y, mo, day, h + 1, 0, 0, 0);
-  if (granularity === "day") return new Date(y, mo, day + 1, 0, 0, 0, 0);
-  return new Date(y, mo, day + 7, 0, 0, 0, 0);
+function localCal(): TzCalendar {
+  return {
+    mode: "local",
+    y: (d) => d.getFullYear(),
+    mo: (d) => d.getMonth(),
+    day: (d) => d.getDate(),
+    h: (d) => d.getHours(),
+    dow: (d) => d.getDay(),
+    at: (y, mo, day, h = 0) => new Date(y, mo, day, h, 0, 0, 0),
+  };
+}
+
+function utcCal(): TzCalendar {
+  return {
+    mode: "utc",
+    y: (d) => d.getUTCFullYear(),
+    mo: (d) => d.getUTCMonth(),
+    day: (d) => d.getUTCDate(),
+    h: (d) => d.getUTCHours(),
+    dow: (d) => d.getUTCDay(),
+    at: (y, mo, day, h = 0) => new Date(Date.UTC(y, mo, day, h, 0, 0, 0)),
+  };
+}
+
+function calendarFor(tz: UsageTimeZone): TzCalendar {
+  return tz === "utc" ? utcCal() : localCal();
+}
+
+function floorBucket(d: Date, granularity: UsageGranularity, cal: TzCalendar): Date {
+  const y = cal.y(d);
+  const mo = cal.mo(d);
+  const day = cal.day(d);
+  const h = cal.h(d);
+  if (granularity === "hour") return cal.at(y, mo, day, h);
+  if (granularity === "day") return cal.at(y, mo, day, 0);
+  // week starts on Monday 00:00 in the selected zone
+  const daysSinceMonday = (cal.dow(d) + 6) % 7;
+  return cal.at(y, mo, day - daysSinceMonday, 0);
+}
+
+/** Advance one bucket using calendar arithmetic (DST-safe for local). */
+function addBucket(d: Date, granularity: UsageGranularity, cal: TzCalendar): Date {
+  const y = cal.y(d);
+  const mo = cal.mo(d);
+  const day = cal.day(d);
+  const h = cal.h(d);
+  if (granularity === "hour") return cal.at(y, mo, day, h + 1);
+  if (granularity === "day") return cal.at(y, mo, day + 1, 0);
+  return cal.at(y, mo, day + 7, 0);
 }
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Local wall-clock "YYYY-MM-DDTHH:mm:00" (used as bucket identity too). */
-function fmtStart(d: Date): string {
+/** Zone wall-clock "YYYY-MM-DDTHH:mm:00" (no offset suffix; see series.timeZone). */
+function fmtStart(d: Date, cal: TzCalendar): string {
   return (
-    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
-    `T${pad2(d.getHours())}:00:00`
+    `${cal.y(d)}-${pad2(cal.mo(d) + 1)}-${pad2(cal.day(d))}` +
+    `T${pad2(cal.h(d))}:00:00`
   );
 }
 
-function makeBucket(d: Date, granularity: UsageGranularity): UsageBucket {
-  const start = fmtStart(d);
-  const y = d.getFullYear();
-  const mo = pad2(d.getMonth() + 1);
-  const day = pad2(d.getDate());
-  const h = pad2(d.getHours());
+function makeBucket(
+  d: Date,
+  granularity: UsageGranularity,
+  cal: TzCalendar,
+): UsageBucket {
+  const start = fmtStart(d, cal);
+  const y = cal.y(d);
+  const mo = pad2(cal.mo(d) + 1);
+  const day = pad2(cal.day(d));
+  const h = pad2(cal.h(d));
+  const zoneHint = cal.mode === "utc" ? " UTC" : "";
   if (granularity === "hour") {
     return {
       start,
       label: `${mo}-${day} ${h}:00`,
-      title: `${y}-${mo}-${day} ${h}:00`,
+      title: `${y}-${mo}-${day} ${h}:00${zoneHint}`,
     };
   }
   if (granularity === "day") {
     return {
       start,
       label: `${mo}-${day}`,
-      title: `${y}-${mo}-${day}`,
+      title: `${y}-${mo}-${day}${zoneHint}`,
     };
   }
-  const end = new Date(y, d.getMonth(), d.getDate() + 7, 0, 0, 0, 0);
-  const endLabel = `${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`;
+  const end = addBucket(d, "week", cal);
+  const endLabel = `${pad2(cal.mo(end) + 1)}-${pad2(cal.day(end))}`;
   return {
     start,
     label: `${mo}-${day}周`,
-    title: `${y}-${mo}-${day}（周一） ~ ${end.getFullYear()}-${endLabel}（下周一）`,
+    title: `${y}-${mo}-${day}（周一） ~ ${cal.y(end)}-${endLabel}（下周一）${zoneHint}`,
   };
 }
 
@@ -93,11 +143,17 @@ export function isUsageGranularity(value: string | undefined): value is UsageGra
   return GRANULARITIES.includes(value as UsageGranularity);
 }
 
+export function isUsageTimeZone(value: string | undefined): value is UsageTimeZone {
+  return TIME_ZONES.includes(value as UsageTimeZone);
+}
+
 export function buildTokenUsageSeries(
   samples: UsageRunSample[],
   filter: SeriesFilter,
 ): TokenUsageSeries {
   const granularity = filter.granularity;
+  const timeZone: UsageTimeZone = filter.timeZone === "utc" ? "utc" : "local";
+  const cal = calendarFor(timeZone);
 
   // Attribute each run's token usage to its completion time (fall back to start).
   // Recompute volume from input+output so historical rows that double-counted
@@ -112,6 +168,7 @@ export function buildTokenUsageSeries(
 
   const empty: TokenUsageSeries = {
     granularity,
+    timeZone,
     from: "",
     to: "",
     buckets: [],
@@ -129,28 +186,36 @@ export function buildTokenUsageSeries(
   const firstStart = floorBucket(
     new Date(fromBoundary ?? minT),
     granularity,
+    cal,
   ).getTime();
-  const lastStart = floorBucket(new Date(toBoundary ?? maxT), granularity).getTime();
+  const lastStart = floorBucket(
+    new Date(toBoundary ?? maxT),
+    granularity,
+    cal,
+  ).getTime();
   const first = Math.min(firstStart, lastStart);
   const last = Math.max(firstStart, lastStart);
 
   // Build a continuous bucket list over [first, last].
   const buckets: UsageBucket[] = [];
+  const bucketDates: Date[] = [];
   const startToIndex = new Map<string, number>();
   for (
     let cur = new Date(first);
     cur.getTime() <= last;
-    cur = addBucket(cur, granularity)
+    cur = addBucket(cur, granularity, cal)
   ) {
-    const key = fmtStart(cur);
+    const key = fmtStart(cur, cal);
     startToIndex.set(key, buckets.length);
-    buckets.push(makeBucket(cur, granularity));
+    bucketDates.push(cur);
+    buckets.push(makeBucket(cur, granularity, cal));
   }
   if (!buckets.length) return empty;
 
   const endTime = addBucket(
-    new Date(buckets[buckets.length - 1].start),
+    bucketDates[bucketDates.length - 1]!,
     granularity,
+    cal,
   ).getTime();
 
   // Aggregate per provider/model, dropping points outside the bucket range.
@@ -163,7 +228,7 @@ export function buildTokenUsageSeries(
   let runCount = 0;
   for (const p of points) {
     if (p.t < first || p.t >= endTime) continue;
-    const key = fmtStart(floorBucket(new Date(p.t), granularity));
+    const key = fmtStart(floorBucket(new Date(p.t), granularity, cal), cal);
     const idx = startToIndex.get(key);
     if (idx === undefined) continue;
     const groupKey = `${p.provider}\u0000${p.model ?? ""}`;
@@ -200,16 +265,18 @@ export function buildTokenUsageSeries(
   const rowByKey = new Map(rows.map((r) => [`${r.provider}\u0000${r.model ?? ""}`, r]));
   for (const p of points) {
     if (p.t < first || p.t >= endTime) continue;
-    const key = fmtStart(floorBucket(new Date(p.t), granularity));
+    const key = fmtStart(floorBucket(new Date(p.t), granularity, cal), cal);
     if (!startToIndex.has(key)) continue;
     const row = rowByKey.get(`${p.provider}\u0000${p.model ?? ""}`);
     if (row) row.runCount += 1;
   }
 
+  const lastBucketDate = bucketDates[bucketDates.length - 1]!;
   return {
     granularity,
-    from: buckets.length ? buckets[0].start : "",
-    to: fmtStart(addBucket(new Date(buckets[buckets.length - 1].start), granularity)),
+    timeZone,
+    from: buckets.length ? buckets[0]!.start : "",
+    to: fmtStart(addBucket(lastBucketDate, granularity, cal), cal),
     buckets,
     rows,
     bucketTotalTokens: bucketTotals,
@@ -217,5 +284,3 @@ export function buildTokenUsageSeries(
     runCount,
   };
 }
-
-

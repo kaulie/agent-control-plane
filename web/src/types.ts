@@ -180,12 +180,18 @@ export interface ModelInfo {
 
 export type UsageGranularity = "hour" | "day" | "week";
 
+/** Calendar used when flooring runs into hour/day/week buckets. */
+export type UsageTimeZone = "local" | "utc";
+
 export interface UsageBucket {
-  /** Local wall-clock start "YYYY-MM-DDTHH:mm:00" (no timezone suffix). */
+  /**
+   * Wall-clock start "YYYY-MM-DDTHH:mm:00" in the series `timeZone`
+   * (no offset suffix).
+   */
   start: string;
   /** Short display label, e.g. "09-03", "09-03 14:00", "09-01周". */
   label: string;
-  /** Full label for tooltip. */
+  /** Full label for tooltip (includes UTC marker when applicable). */
   title: string;
 }
 
@@ -203,11 +209,13 @@ export interface UsageStatsRow {
 
 export interface TokenUsageSeries {
   granularity: UsageGranularity;
+  /** Calendar used for bucket boundaries. */
+  timeZone: UsageTimeZone;
   /** Present when the series is filtered to a single project. */
   projectId?: string;
-  /** First bucket start (local wall-clock). */
+  /** First bucket start (wall-clock in `timeZone`). */
   from: string;
-  /** One bucket past the last bucket (exclusive end, local wall-clock). */
+  /** One bucket past the last bucket (exclusive end, wall-clock in `timeZone`). */
   to: string;
   buckets: UsageBucket[];
   rows: UsageStatsRow[];

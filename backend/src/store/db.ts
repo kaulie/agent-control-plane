@@ -19,6 +19,7 @@ import type {
   UsageRunSample,
 } from "../types.js";
 import { parseSettings, patchSettings, serializeSettings } from "../settings.js";
+import { tokenVolume } from "../usage/tokens.js";
 
 export const DEFAULT_PROJECT_ID = "project-default";
 export const DEFAULT_PROJECT_NAME = "Default";
@@ -988,7 +989,7 @@ export class Store {
         outputTokens += run.usage.outputTokens || 0;
         cacheReadTokens += run.usage.cacheReadTokens || 0;
         cacheWriteTokens += run.usage.cacheWriteTokens || 0;
-        totalTokens += run.usage.totalTokens || 0;
+        totalTokens += tokenVolume(run.usage);
       }
       if (run.cost) {
         if (typeof run.cost.chargedCents === "number") {

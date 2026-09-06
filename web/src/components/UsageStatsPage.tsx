@@ -159,10 +159,16 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
           </button>
           <h2 className="stats-title">Token 用量统计</h2>
           <span className="stats-subtitle">
-            provider / model 粒度 · 仅统计总 token
+            provider / model 粒度 · 总量 = input + output
           </span>
         </div>
       </div>
+
+      <p className="stats-note">
+        口径说明：总 Token = input + output，与 DeepSeek 等官网的
+        <code>total_tokens</code>
+        一致。cache read/write 是 input 的拆分明细（已含在 input 内），不再累加进总量，避免与官网对账时重复计算。
+      </p>
 
       <div className="stats-filters">
         <label className="stats-filter">

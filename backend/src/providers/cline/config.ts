@@ -1,5 +1,5 @@
 import type { CostInfo, TokenUsage } from "../../types.js";
-import { uncachedInputTokens } from "../../usage/tokens.js";
+import { billableInputTokens } from "../../usage/tokens.js";
 
 /**
  * Configuration for the Cline provider (agent runtime adapter).
@@ -56,7 +56,7 @@ export const DEEPSEEK_PRICING: PricingPerMTok = {
 export function estimateCostCents(usage: TokenUsage): number {
   // inputTokens already includes cache; price the uncached remainder separately.
   const usd =
-    (uncachedInputTokens(usage) / 1e6) * DEEPSEEK_PRICING.input +
+    (billableInputTokens(usage, "cline") / 1e6) * DEEPSEEK_PRICING.input +
     ((usage.outputTokens || 0) / 1e6) * DEEPSEEK_PRICING.output +
     ((usage.cacheReadTokens || 0) / 1e6) * DEEPSEEK_PRICING.cacheRead +
     ((usage.cacheWriteTokens || 0) / 1e6) * DEEPSEEK_PRICING.cacheWrite;

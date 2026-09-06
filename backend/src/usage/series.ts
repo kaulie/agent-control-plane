@@ -156,13 +156,22 @@ export function buildTokenUsageSeries(
   const cal = calendarFor(timeZone);
 
   // Attribute each run's token usage to its completion time (fall back to start).
-  // Recompute volume from input+output so historical rows that double-counted
-  // cache into totalTokens still match provider dashboards.
+  // Recompute volume with the provider's mode so historical totalTokens
+  // (which mixed Cursor/Cline conventions) still match each dashboard.
   const points = samples
     .map((s) => {
       const t = new Date(s.completedAt ?? s.createdAt).getTime();
-      const tokens = tokenVolume(s.usage);
-      return { t, provider: s.provider, model: s.model, tokens };
+      const tokens = tokenVolume(s.usage, s.provider);
+      return {
+        t,
+        provider: s.provider,
+        model: s.model,
+        tokens,
+        inputTokens: Number(s.usage?.inputTokens) || 0,
+        outputTokens: Number(s.usage?.outputTokens) || 0,
+        cacheReadTokens: Number(s.usage?.cacheReadTokens) || 0,
+        cacheWriteTokens: Number(s.usage?.cacheWriteTokens) || 0,
+      };
     })
     .filter((p) => Number.isFinite(p.t));
 
@@ -175,6 +184,10 @@ export function buildTokenUsageSeries(
     rows: [],
     bucketTotalTokens: [],
     totalTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     runCount: 0,
   };
   if (!points.length) return empty;
@@ -225,6 +238,10 @@ export function buildTokenUsageSeries(
   >();
   const bucketTotals = new Array<number>(buckets.length).fill(0);
   let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let runCount = 0;
   for (const p of points) {
     if (p.t < first || p.t >= endTime) continue;
@@ -244,6 +261,10 @@ export function buildTokenUsageSeries(
     group.series[idx] += p.tokens;
     bucketTotals[idx] += p.tokens;
     totalTokens += p.tokens;
+    inputTokens += p.inputTokens;
+    outputTokens += p.outputTokens;
+    cacheReadTokens += p.cacheReadTokens;
+    cacheWriteTokens += p.cacheWriteTokens;
     runCount += 1;
   }
 
@@ -281,6 +302,10 @@ export function buildTokenUsageSeries(
     rows,
     bucketTotalTokens: bucketTotals,
     totalTokens,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
     runCount,
   };
 }

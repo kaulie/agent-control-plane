@@ -1880,6 +1880,10 @@ body {
   font-weight: 700;
 }
 
+.stats-card-value-sm {
+  font-size: 16px;
+}
+
 .stats-card-caption {
   color: var(--text);
   font-size: 12px;

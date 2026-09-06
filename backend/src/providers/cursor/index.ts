@@ -402,7 +402,9 @@ export class CursorProvider implements AgentProvider {
             toolCalls += 1;
           }
           for (const mapped of mapSdkMessage(msg as SDKMessage)) {
-            const usage = mapped.usage ? normalizeTokenUsage(mapped.usage) : undefined;
+            const usage = mapped.usage
+              ? normalizeTokenUsage(mapped.usage, "cursor")
+              : undefined;
             await emit(mapped.eventType, mapped.payload, usage);
           }
         }
@@ -412,7 +414,9 @@ export class CursorProvider implements AgentProvider {
 
       const result = await run.wait();
       const durationMs = Date.now() - startedAt;
-      const usage = result.usage ? normalizeTokenUsage(result.usage) : undefined;
+      const usage = result.usage
+        ? normalizeTokenUsage(result.usage, "cursor")
+        : undefined;
 
       if (handle.cancelled || result.status === "cancelled") {
         await emit("run_cancelled", {
@@ -438,7 +442,7 @@ export class CursorProvider implements AgentProvider {
       } catch (err) {
         console.warn("[cursor] getUsage failed:", err instanceof Error ? err.message : err);
       }
-      const cost = buildCost(usage, modelId, sdkCost);
+      const cost = buildCost(usage, modelId, sdkCost, "cursor");
 
       const status: RunResultData["status"] =
         result.status === "error" ? "error" : "finished";

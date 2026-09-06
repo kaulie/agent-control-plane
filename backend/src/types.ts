@@ -241,5 +241,10 @@ export interface TokenUsageSeries {
   /** Per-bucket total across all rows (index-aligned). */
   bucketTotalTokens: number[];
   totalTokens: number;
+  /** Raw field sums for the same window (dashboard hover 明细). */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   runCount: number;
 }

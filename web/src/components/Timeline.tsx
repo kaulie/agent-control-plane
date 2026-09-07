@@ -385,6 +385,22 @@ function RunningBanner({ running, queueLength }: { running: boolean; queueLength
   );
 }
 
+/** Queued user messages pinned below the scroll area so activity above cannot bury them. */
+function QueuedMessagesDock({ rows }: { rows: Row[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="timeline-queued-dock" aria-live="polite">
+      <div className="timeline-queued-dock-label">
+        {rows.length === 1 ? "下一条消息排队中" : `${rows.length} 条消息排队中`}
+        <span className="timeline-queued-dock-hint">当前任务结束后发送</span>
+      </div>
+      {rows.map((row) => (
+        <EventCard key={row.key} row={row} collapsed={false} />
+      ))}
+    </div>
+  );
+}
+
 function activitySummary(r: Row): string {
   const bits = [r.body, r.detail].filter(Boolean).join(" · ");
   return bits ? truncate(bits.replace(/\s+/g, " "), 120) : "";
@@ -640,7 +656,21 @@ export default function Timeline({
       ),
     [events, queuedSet],
   );
-  const items = useMemo(() => groupConsecutiveRows(rows), [rows]);
+  // Keep queued user messages out of the scrolling stream so later activity
+  // from the active run cannot push them out of view.
+  const { streamRows, queuedRows } = useMemo(() => {
+    const stream: Row[] = [];
+    const queued: Row[] = [];
+    for (const row of rows) {
+      if (row.type === "user_message" && row.queued) {
+        queued.push(row);
+      } else {
+        stream.push(row);
+      }
+    }
+    return { streamRows: stream, queuedRows: queued };
+  }, [rows]);
+  const items = useMemo(() => groupConsecutiveRows(streamRows), [streamRows]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const stickToBottomRef = useRef(true);
@@ -712,63 +742,66 @@ export default function Timeline({
         />
         <span>自动折叠执行细节</span>
       </label>
-      <div className="timeline" ref={scrollerRef}>
-        {hasMore && (
-          <button
-            type="button"
-            className="load-more-btn"
-            onClick={onLoadMore}
-            disabled={loadingMore}
-          >
-            {loadingMore ? "Loading…" : "Load earlier events"}
-          </button>
-        )}
-        {items.map((item) => {
-          if (item.kind === "group") {
+      <div className="timeline-scroll-area">
+        <div className="timeline" ref={scrollerRef}>
+          {hasMore && (
+            <button
+              type="button"
+              className="load-more-btn"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading…" : "Load earlier events"}
+            </button>
+          )}
+          {items.map((item) => {
+            if (item.kind === "group") {
+              return (
+                <EventGroup
+                  key={item.key}
+                  groupKey={item.key}
+                  rows={item.rows}
+                  expanded={Boolean(expandedGroups[item.key])}
+                  onToggleGroup={() => toggleGroup(item.key)}
+                  autoFold={autoFold}
+                  expandedItems={expanded}
+                  onToggleItem={toggleExpanded}
+                />
+              );
+            }
+            const r = item.row;
+            const foldable = r.role === "activity";
+            const collapsed = Boolean(autoFold && foldable && !expanded[r.key]);
             return (
-              <EventGroup
-                key={item.key}
-                groupKey={item.key}
-                rows={item.rows}
-                expanded={Boolean(expandedGroups[item.key])}
-                onToggleGroup={() => toggleGroup(item.key)}
-                autoFold={autoFold}
-                expandedItems={expanded}
-                onToggleItem={toggleExpanded}
+              <EventCard
+                key={r.key}
+                row={r}
+                collapsed={collapsed}
+                onToggle={
+                  foldable && autoFold ? () => toggleExpanded(r.key) : undefined
+                }
+                onPlanExportedClick={onPlanExportedClick}
               />
             );
-          }
-          const r = item.row;
-          const foldable = r.role === "activity";
-          const collapsed = Boolean(autoFold && foldable && !expanded[r.key]);
-          return (
-            <EventCard
-              key={r.key}
-              row={r}
-              collapsed={collapsed}
-              onToggle={
-                foldable && autoFold ? () => toggleExpanded(r.key) : undefined
-              }
-              onPlanExportedClick={onPlanExportedClick}
-            />
-          );
-        })}
-        <RunningBanner running={running} queueLength={queueLength} />
-        {!running && rows.length === 0 && (
-          <div className="timeline-empty">No activity yet — send a message below.</div>
+          })}
+          <RunningBanner running={running} queueLength={queueLength} />
+          {!running && rows.length === 0 && (
+            <div className="timeline-empty">No activity yet — send a message below.</div>
+          )}
+        </div>
+        {showJump && (
+          <button
+            type="button"
+            className="scroll-bottom-btn"
+            aria-label="Scroll to bottom"
+            title="Scroll to bottom"
+            onClick={() => scrollToBottom(true)}
+          >
+            ↓
+          </button>
         )}
       </div>
-      {showJump && (
-        <button
-          type="button"
-          className="scroll-bottom-btn"
-          aria-label="Scroll to bottom"
-          title="Scroll to bottom"
-          onClick={() => scrollToBottom(true)}
-        >
-          ↓
-        </button>
-      )}
+      <QueuedMessagesDock rows={queuedRows} />
     </div>
   );
 }

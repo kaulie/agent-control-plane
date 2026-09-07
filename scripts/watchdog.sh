@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# 看门狗：监控 runtime 进程，崩溃后自动拉起（崩溃分析由后端在启动时自动发起）。
-# 用法：nohup ./scripts/watchdog.sh > /tmp/web-cursor-watchdog.log 2>&1 &
+# Legacy runtime-bundled watchdog.
+# Prefer the independent deployment-side ops watchdog:
+#   /Users/gaolei/deployment/web-cursor/ops/watchdog.sh
+#   (install via: bash ops/install.sh from the repo)
+#
+# This script remains for emergency use from a live runtime tree only.
 set -euo pipefail
+
+echo "[watchdog] DEPRECATED: use /Users/gaolei/deployment/web-cursor/ops/watchdog.sh" >&2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-/Users/gaolei/runtime/web-cursor}"
@@ -11,7 +17,7 @@ PORT="${PORT:-4211}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 INTERVAL="${INTERVAL:-10}"
 
-echo "[watchdog] 启动（每 ${INTERVAL}s 检查一次 ${HEALTH_URL}）"
+echo "[watchdog] 启动（每 ${INTERVAL}s 检查一次 ${HEALTH_URL}）— legacy runtime copy"
 
 while true; do
   if [ -f "${PAUSED_FLAG}" ]; then

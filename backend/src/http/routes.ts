@@ -9,12 +9,13 @@ import {
   validateIncomingImages,
   type IncomingImage,
 } from "../attachments.js";
+import type { DeployQueue } from "../ops/deploy-queue.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
   providers: ProviderRegistry,
-  opts: { dataDir: string; appVersion: string },
+  opts: { dataDir: string; appVersion: string; deployQueue: DeployQueue },
 ): Promise<void> {
   app.get("/health", async (_req, reply) => {
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -27,6 +28,56 @@ export async function registerRoutes(
       time: new Date().toISOString(),
     };
   });
+
+  /**
+   * Async deploy: enqueue for the independent deploy-agent.
+   * Never runs deploy.sh in-process (avoids killing this gateway mid-request).
+   */
+  app.post<{
+    Body: { deployment?: string; hash?: string; taskId?: string; requestId?: string };
+  }>("/api/ops/deploy", async (req, reply) => {
+    const raw = req.body?.deployment?.trim() || req.body?.hash?.trim() || "";
+    if (!raw) {
+      return reply.code(400).send({ error: "deployment or hash is required" });
+    }
+    try {
+      const status = opts.deployQueue.enqueue({
+        deployment: raw,
+        ...(req.body?.taskId?.trim() ? { taskId: req.body.taskId.trim() } : {}),
+        ...(req.body?.requestId?.trim()
+          ? { requestId: req.body.requestId.trim() }
+          : {}),
+      });
+      return reply.code(202).send({
+        ...status,
+        message:
+          "deploy queued for independent deploy-agent; poll GET /api/ops/deploy/:requestId",
+      });
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get<{ Params: { requestId: string } }>(
+    "/api/ops/deploy/:requestId",
+    async (req, reply) => {
+      const status = opts.deployQueue.getStatus(req.params.requestId);
+      if (!status) {
+        return reply.code(404).send({ error: "deploy request not found" });
+      }
+      return {
+        ...status,
+        runtimeVersion: opts.deployQueue.runtimeVersion(),
+      };
+    },
+  );
+
+  app.get("/api/ops/runtime", async () => ({
+    version: opts.deployQueue.runtimeVersion() ?? null,
+    appVersion: opts.appVersion,
+  }));
 
   app.get("/api/auth", async () => {
     const results = await Promise.all(

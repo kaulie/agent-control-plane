@@ -8,13 +8,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Store } from "../dist/store/db.js";
 import { AgentGateway } from "../dist/gateway/gateway.js";
+import { ProviderRegistry } from "../dist/providers/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-queue-test-"));
 
 /** @type {import("../dist/providers/types.js").AgentProvider} */
 const provider = {
-  name: "mock",
+  name: "cursor",
   async verifyAuth() {
     return { ok: true, detail: "mock" };
   },
@@ -50,9 +51,10 @@ function sleep(ms) {
 
 const store = new Store(dataDir);
 const events = [];
+const registry = new ProviderRegistry("cursor", [provider]);
 const gateway = new AgentGateway(
   store,
-  provider,
+  registry,
   { agentWorkspaceRoot: dataDir, dataDir },
   (msg) => events.push(msg),
 );
@@ -77,6 +79,29 @@ if (!r3.queued || r3.queueLength !== 2) {
   process.exit(1);
 }
 
+const cancelRes = gateway.cancelQueuedRun(task.taskId, r2.runId);
+if (cancelRes.queueLength !== 1) {
+  console.error("FAIL: cancelQueuedRun should leave one pending", cancelRes);
+  process.exit(1);
+}
+const afterCancel = store.listRuns(task.taskId);
+const cancelled = afterCancel.find((r) => r.runId === r2.runId);
+if (!cancelled || cancelled.status !== "cancelled") {
+  console.error("FAIL: cancelled run should be status=cancelled", cancelled);
+  process.exit(1);
+}
+if (gateway.getQueueLength(task.taskId) !== 1) {
+  console.error("FAIL: in-memory queue length after cancel");
+  process.exit(1);
+}
+try {
+  gateway.cancelQueuedRun(task.taskId, r1.runId);
+  console.error("FAIL: cancelling active/non-queued run should throw");
+  process.exit(1);
+} catch {
+  /* expected */
+}
+
 await sleep(1500);
 
 const runs = store.listRuns(task.taskId);
@@ -84,12 +109,17 @@ const finished = runs.filter((r) => r.status === "finished");
 const queued = runs.filter((r) => r.status === "queued");
 const running = runs.filter((r) => r.status === "running");
 
-if (finished.length !== 3) {
-  console.error("FAIL: expected 3 finished runs", runs.map((r) => r.status));
+if (finished.length !== 2) {
+  console.error("FAIL: expected 2 finished runs (1 cancelled)", runs.map((r) => r.status));
   process.exit(1);
 }
 if (queued.length || running.length) {
   console.error("FAIL: leftover queued/running runs", runs.map((r) => r.status));
+  process.exit(1);
+}
+const cancelledFinal = runs.filter((r) => r.status === "cancelled");
+if (cancelledFinal.length !== 1 || cancelledFinal[0].runId !== r2.runId) {
+  console.error("FAIL: expected exactly the cancelled queued run", cancelledFinal);
   process.exit(1);
 }
 if (gateway.getQueueLength(task.taskId) !== 0) {
@@ -105,13 +135,27 @@ if (userMsgs.length !== 3) {
   process.exit(1);
 }
 
-console.log("PASS: message queue works");
+const cancelEv = store
+  .listEvents(task.taskId, { limit: 50 })
+  .events.find(
+    (e) =>
+      e.eventType === "run_cancelled" &&
+      e.runId === r2.runId &&
+      e.payload?.reason === "user_cancel_queued",
+  );
+if (!cancelEv) {
+  console.error("FAIL: missing run_cancelled for queued cancel");
+  process.exit(1);
+}
+
+console.log("PASS: message queue + cancel-queued works");
 console.log(
   JSON.stringify({
     run1: r1,
     run2: r2,
     run3: r3,
     finishedRuns: finished.length,
+    cancelledRuns: cancelledFinal.length,
     userMessages: userMsgs.length,
   }),
 );

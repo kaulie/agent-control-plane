@@ -165,6 +165,14 @@ export const api = {
       method: "POST",
     }).then((r) => j<{ runId: string; stopped: boolean }>(r)),
 
+  cancelQueuedRun: (taskId: string, runId: string) =>
+    fetch(
+      `${BASE}/tasks/${taskId}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST" },
+    ).then((r) =>
+      j<{ runId: string; queueLength: number; cancelled: boolean }>(r),
+    ),
+
   listPlans: (taskId: string) =>
     fetch(`${BASE}/tasks/${taskId}/plans`).then((r) =>
       j<{ plans: PlanDocumentSummary[] }>(r),

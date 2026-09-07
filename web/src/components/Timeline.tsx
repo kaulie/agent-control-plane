@@ -386,7 +386,15 @@ function RunningBanner({ running, queueLength }: { running: boolean; queueLength
 }
 
 /** Queued user messages pinned below the scroll area so activity above cannot bury them. */
-function QueuedMessagesDock({ rows }: { rows: Row[] }) {
+function QueuedMessagesDock({
+  rows,
+  cancellingRunId,
+  onCancel,
+}: {
+  rows: Row[];
+  cancellingRunId?: string | null;
+  onCancel?: (runId: string) => void;
+}) {
   if (rows.length === 0) return null;
   return (
     <div className="timeline-queued-dock" aria-live="polite">
@@ -396,6 +404,16 @@ function QueuedMessagesDock({ rows }: { rows: Row[] }) {
       </div>
       {rows.map((row) => (
         <div key={row.key} className="timeline-queued-item">
+          <div className="timeline-queued-item-actions">
+            <button
+              type="button"
+              className="timeline-queued-cancel"
+              disabled={!onCancel || cancellingRunId === row.runId}
+              onClick={() => onCancel?.(row.runId)}
+            >
+              {cancellingRunId === row.runId ? "取消中…" : "取消"}
+            </button>
+          </div>
           <EventCard row={row} collapsed={false} />
         </div>
       ))}
@@ -638,6 +656,8 @@ export default function Timeline({
   loadingMore,
   onLoadMore,
   onPlanExportedClick,
+  onCancelQueued,
+  cancellingQueuedRunId = null,
 }: {
   events: AgentEvent[];
   running: boolean;
@@ -647,6 +667,8 @@ export default function Timeline({
   loadingMore: boolean;
   onLoadMore: () => void;
   onPlanExportedClick?: (runId: string) => void;
+  onCancelQueued?: (runId: string) => void;
+  cancellingQueuedRunId?: string | null;
 }) {
   const queuedSet = useMemo(() => new Set(queuedRunIds), [queuedRunIds]);
   const rows = useMemo(
@@ -803,7 +825,11 @@ export default function Timeline({
           </button>
         )}
       </div>
-      <QueuedMessagesDock rows={queuedRows} />
+      <QueuedMessagesDock
+        rows={queuedRows}
+        cancellingRunId={cancellingQueuedRunId}
+        onCancel={onCancelQueued}
+      />
     </div>
   );
 }

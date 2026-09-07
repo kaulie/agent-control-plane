@@ -986,4 +986,61 @@ export class AgentGateway {
     }
     return { runId };
   }
+
+  /**
+   * Drop a queued (not yet started) run. Does not touch the active provider run.
+   */
+  cancelQueuedRun(
+    taskId: string,
+    runId: string,
+  ): { runId: string; queueLength: number } {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
+    const run = this.store.listRuns(taskId).find((r) => r.runId === runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    if (run.taskId !== taskId) throw new Error(`Run ${runId} not found`);
+    if (run.status !== "queued") {
+      throw new Error("Only queued runs can be cancelled this way");
+    }
+
+    const list = this.pendingRuns.get(taskId) ?? [];
+    const next = list.filter((p) => p.runId !== runId);
+    if (next.length === list.length) {
+      // DB says queued but memory lost it (e.g. race) — still finalize DB.
+    }
+    if (next.length) this.pendingRuns.set(taskId, next);
+    else this.pendingRuns.delete(taskId);
+
+    const now = new Date().toISOString();
+    this.store.updateRun(runId, {
+      status: "cancelled",
+      completedAt: now,
+      error: "cancelled (queued message removed)",
+    });
+
+    const event: AgentEvent = {
+      eventId: newId("evt"),
+      taskId,
+      runId,
+      agentId: run.agentId ?? task.agentId ?? "",
+      timestamp: now,
+      eventType: "run_cancelled",
+      payload: {
+        reason: "user_cancel_queued",
+        message: "已取消排队消息，不会再发送。",
+      },
+    };
+    this.store.appendEvent(event);
+    this.publish({ type: "agent_event", event });
+    this.publishQueueUpdate(taskId);
+    this.publish({
+      type: "task_updated",
+      task: this.store.getTask(taskId),
+      stats: this.store.getTaskStats(taskId),
+      runId,
+    });
+
+    return { runId, queueLength: this.getQueueLength(taskId) };
+  }
 }

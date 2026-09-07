@@ -45,13 +45,15 @@ NEW_PID=$!
 echo "${NEW_PID}" > "${PID_FILE}"
 echo "[start] 新进程 PID=${NEW_PID} APP_VERSION=${APP_VERSION}"
 
-for _ in $(seq 1 30); do
+# Align with ops deploy grace window (DEPLOY_MAX_SEC, default 120).
+START_MAX_SEC="${START_MAX_SEC:-120}"
+for _ in $(seq 1 "${START_MAX_SEC}"); do
   if curl -s -m 2 "${HEALTH_URL}" >/dev/null 2>&1; then
     echo "[start] 启动成功: ${HEALTH_URL}"
     exit 0
   fi
   sleep 1
 done
-echo "[start][错误] 健康检查未通过（30 秒超时），最近日志：" >&2
+echo "[start][错误] 健康检查未通过（${START_MAX_SEC} 秒超时），最近日志：" >&2
 tail -20 "${LOG_FILE}" >&2
 exit 1

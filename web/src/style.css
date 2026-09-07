@@ -1173,13 +1173,13 @@ body {
   padding: 10px 16px 12px;
   border-top: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
   background: color-mix(in srgb, var(--amber) 8%, var(--bg-2));
-  max-height: 40%;
-  overflow-y: auto;
+  /* No inner scroll — each queued message is a full-width row. */
 }
 
 .timeline-queued-dock-label {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -1192,8 +1192,18 @@ body {
   color: var(--text-dim);
 }
 
+.timeline-queued-item {
+  width: 100%;
+  display: block;
+}
+
 .timeline-queued-dock .event-user {
-  opacity: 0.92;
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+  box-sizing: border-box;
+  opacity: 0.95;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 25%, transparent);
 }
 

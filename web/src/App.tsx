@@ -52,9 +52,10 @@ function mergeEventsBySeq(prev: AgentEvent[], incoming: AgentEvent[]): AgentEven
   for (const e of prev) byId.set(e.eventId, e);
   for (const e of incoming) byId.set(e.eventId, e);
   return [...byId.values()].sort((a, b) => {
-    const sa = a.seq ?? 0;
-    const sb = b.seq ?? 0;
-    if (sa !== sb) return sa - sb;
+    const sa = a.seq;
+    const sb = b.seq;
+    // Missing seq must NOT collapse to 0 — that pinned live WS events above history.
+    if (sa != null && sb != null && sa !== sb) return sa - sb;
     return a.timestamp.localeCompare(b.timestamp);
   });
 }
@@ -269,6 +270,9 @@ export default function App() {
         if (msg.type === "agent_event") {
           const ev = msg.event as AgentEvent;
           if (ev.taskId === selectedRef.current) {
+            if (typeof ev.seq === "number" && ev.seq > (lastSeqRef.current ?? 0)) {
+              lastSeqRef.current = ev.seq;
+            }
             setEvents((prev) =>
               prev.some((p) => p.eventId === ev.eventId)
                 ? prev

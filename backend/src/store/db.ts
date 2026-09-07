@@ -879,7 +879,7 @@ export class Store {
   // ---- events ----
 
   appendEvent(event: AgentEvent): void {
-    this.db
+    const result = this.db
       .prepare(
         `INSERT INTO events (event_id, task_id, run_id, agent_id, timestamp, event_type, payload, usage, cost)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -895,6 +895,9 @@ export class Store {
         event.usage ? JSON.stringify(event.usage) : null,
         event.cost ? JSON.stringify(event.cost) : null,
       );
+    // Attach AUTOINCREMENT seq before WS publish — without it the UI treats
+    // live events as seq=0 and sorts them above historically loaded rows.
+    event.seq = Number(result.lastInsertRowid);
   }
 
   listEvents(

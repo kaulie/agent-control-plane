@@ -4,7 +4,7 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, readRuntimeVersion } from "./config.js";
 import {
   applyShellProxyEnv,
   assertMcpServerPresent,
@@ -18,6 +18,10 @@ import { DeployQueue } from "./ops/deploy-queue.js";
 
 const config = loadConfig();
 const deployQueue = new DeployQueue(config.deployHome);
+/** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
+function advertisedVersion(): string {
+  return readRuntimeVersion(config.productRoot) ?? config.appVersion;
+}
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
 
@@ -80,7 +84,7 @@ if (interrupted.finalized.length) {
 const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 
 app.addHook("onSend", async (_req, reply, payload) => {
-  reply.header("X-App-Version", config.appVersion);
+  reply.header("X-App-Version", advertisedVersion());
   return payload;
 });
 
@@ -120,7 +124,8 @@ const gateway = new AgentGateway(
 
 await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
-  appVersion: config.appVersion,
+  appVersion: advertisedVersion(),
+  resolveAppVersion: advertisedVersion,
   deployQueue,
 });
 app.log.info(`deploy home (async ops): ${config.deployHome}`);

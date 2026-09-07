@@ -890,7 +890,7 @@ export default function App() {
               <button
                 type="button"
                 className="update-modal-btn primary"
-                onClick={() => reloadForUpdate()}
+                onClick={() => reloadForUpdate(versionUpdate.serverVersion)}
               >
                 立即更新
               </button>

@@ -15,16 +15,27 @@ export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
   providers: ProviderRegistry,
-  opts: { dataDir: string; appVersion: string; deployQueue: DeployQueue },
+  opts: {
+    dataDir: string;
+    appVersion: string;
+    /** Live version for /health (disk VERSION preferred). */
+    resolveAppVersion?: () => string;
+    deployQueue: DeployQueue;
+  },
 ): Promise<void> {
+  const version = (): string =>
+    opts.resolveAppVersion?.() ?? opts.appVersion;
+
   app.get("/health", async (_req, reply) => {
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+    const v = version();
+    reply.header("X-App-Version", v);
     return {
       ok: true,
       service: "web-cursor-agent-gateway",
       provider: providers.defaultProviderName,
       providers: providers.names(),
-      version: opts.appVersion,
+      version: v,
       time: new Date().toISOString(),
     };
   });
@@ -76,7 +87,7 @@ export async function registerRoutes(
 
   app.get("/api/ops/runtime", async () => ({
     version: opts.deployQueue.runtimeVersion() ?? null,
-    appVersion: opts.appVersion,
+    appVersion: version(),
   }));
 
   app.get("/api/auth", async () => {

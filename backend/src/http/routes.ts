@@ -473,6 +473,32 @@ export async function registerRoutes(
     },
   );
 
+  app.post<{ Params: { taskId: string; runId: string } }>(
+    "/api/tasks/:taskId/runs/:runId/cancel",
+    async (req, reply) => {
+      const detail = gateway.getTaskDetail(req.params.taskId);
+      if (!detail) {
+        return reply.code(404).send({ error: "task not found" });
+      }
+      try {
+        const result = gateway.cancelQueuedRun(
+          req.params.taskId,
+          req.params.runId,
+        );
+        return { ...result, cancelled: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("not found")) {
+          return reply.code(404).send({ error: msg });
+        }
+        if (msg.includes("Only queued")) {
+          return reply.code(409).send({ error: msg });
+        }
+        return reply.code(400).send({ error: msg });
+      }
+    },
+  );
+
   app.get<{ Params: { taskId: string } }>(
     "/api/tasks/:taskId/plans",
     async (req, reply) => {

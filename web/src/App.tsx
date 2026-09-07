@@ -74,6 +74,9 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [queueLength, setQueueLength] = useState(0);
   const [stopping, setStopping] = useState(false);
+  const [cancellingQueuedRunId, setCancellingQueuedRunId] = useState<
+    string | null
+  >(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,6 +204,7 @@ export default function App() {
     setRunning(false);
     setQueueLength(0);
     setStopping(false);
+    setCancellingQueuedRunId(null);
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
@@ -593,6 +597,24 @@ export default function App() {
     }
   }, [selectedId, running, stopping]);
 
+  const cancelQueued = useCallback(
+    async (runId: string) => {
+      if (!selectedId || cancellingQueuedRunId) return;
+      setCancellingQueuedRunId(runId);
+      setError(null);
+      try {
+        const res = await api.cancelQueuedRun(selectedId, runId);
+        setQueueLength(res.queueLength);
+        await refreshDetail(selectedId);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setCancellingQueuedRunId(null);
+      }
+    },
+    [selectedId, cancellingQueuedRunId, refreshDetail],
+  );
+
   const loadMore = useCallback(async () => {
     if (!selectedId || loadingMore || !hasMore) return;
     const oldest = events[0]?.seq;
@@ -808,6 +830,8 @@ export default function App() {
                   loadingMore={loadingMore}
                   onLoadMore={() => void loadMore()}
                   onPlanExportedClick={openPlanForRun}
+                  onCancelQueued={(runId) => void cancelQueued(runId)}
+                  cancellingQueuedRunId={cancellingQueuedRunId}
                 />
               ) : (
                 <>

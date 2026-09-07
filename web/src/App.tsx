@@ -44,6 +44,21 @@ function storeProjectId(id: string): void {
   }
 }
 
+
+/** Merge + sort by seq so incremental polls never scramble the timeline. */
+function mergeEventsBySeq(prev: AgentEvent[], incoming: AgentEvent[]): AgentEvent[] {
+  if (incoming.length === 0) return prev;
+  const byId = new Map<string, AgentEvent>();
+  for (const e of prev) byId.set(e.eventId, e);
+  for (const e of incoming) byId.set(e.eventId, e);
+  return [...byId.values()].sort((a, b) => {
+    const sa = a.seq ?? 0;
+    const sb = b.seq ?? 0;
+    if (sa !== sb) return sa - sb;
+    return a.timestamp.localeCompare(b.timestamp);
+  });
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -77,7 +92,8 @@ export default function App() {
   selectedRef.current = selectedId;
   const selectedProjectRef = useRef(selectedProjectId);
   selectedProjectRef.current = selectedProjectId;
-  const lastSeqRef = useRef(0);
+  /** null = initial page not loaded yet; never poll with after=0 (that pulls full history). */
+  const lastSeqRef = useRef<number | null>(null);
   const pollFailRef = useRef(0);
   const wasUnreachableRef = useRef(false);
   const [gracePolls, setGracePolls] = useState(0);
@@ -157,16 +173,7 @@ export default function App() {
       ]);
       lastSeqRef.current = latest.nextSeq;
       setHasMore(latest.hasMore);
-      setEvents((prev) => {
-        const byId = new Map(prev.map((e) => [e.eventId, e]));
-        for (const e of latest.events) byId.set(e.eventId, e);
-        return [...byId.values()].sort((a, b) => {
-          const sa = a.seq ?? 0;
-          const sb = b.seq ?? 0;
-          if (sa !== sb) return sa - sb;
-          return a.timestamp.localeCompare(b.timestamp);
-        });
-      });
+      setEvents((prev) => mergeEventsBySeq(prev, latest.events));
       applyInterruptNotice(latest.events);
       setDetail(detailRes);
       applyRunState(detailRes);
@@ -201,7 +208,7 @@ export default function App() {
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
-    lastSeqRef.current = 0;
+    lastSeqRef.current = null;
   }, []);
 
   const selectProject = useCallback(
@@ -265,7 +272,7 @@ export default function App() {
             setEvents((prev) =>
               prev.some((p) => p.eventId === ev.eventId)
                 ? prev
-                : [...prev, ev],
+                : mergeEventsBySeq(prev, [ev]),
             );
             if (
               ev.eventType === "run_completed" ||
@@ -373,8 +380,14 @@ export default function App() {
           return;
         }
 
+        const after = lastSeqRef.current;
+        if (after == null) {
+          // Initial selectTask load still in flight — avoid after=0 full-history pull.
+          return;
+        }
+
         const [evRes, detailRes] = await Promise.all([
-          api.getEvents(selectedId, { after: lastSeqRef.current }),
+          api.getEvents(selectedId, { after }),
           api.getTask(selectedId),
         ]);
 
@@ -385,7 +398,7 @@ export default function App() {
           const ids = new Set(prev.map((p) => p.eventId));
           const fresh = evRes.events.filter((e) => !ids.has(e.eventId));
           if (fresh.length) applyInterruptNotice(fresh);
-          return fresh.length ? [...prev, ...fresh] : prev;
+          return fresh.length ? mergeEventsBySeq(prev, fresh) : prev;
         });
         lastSeqRef.current = evRes.nextSeq;
         setGracePolls((n) => (n > 0 ? n - 1 : 0));
@@ -423,6 +436,7 @@ export default function App() {
     setStopping(false);
     setInterruptNotice(null);
     setGracePolls(0);
+    lastSeqRef.current = null;
     // Keep needsResync if we are mid-outage; otherwise a fresh select is enough.
     if (wasUnreachableRef.current) {
       setNeedsResync(true);
@@ -582,11 +596,7 @@ export default function App() {
     setLoadingMore(true);
     try {
       const r = await api.getEvents(selectedId, { before: oldest, limit: 100 });
-      setEvents((prev) => {
-        const ids = new Set(prev.map((p) => p.eventId));
-        const fresh = r.events.filter((e) => !ids.has(e.eventId));
-        return [...fresh, ...prev];
-      });
+      setEvents((prev) => mergeEventsBySeq(prev, r.events));
       setHasMore(r.hasMore);
     } catch (e) {
       setError(String(e));

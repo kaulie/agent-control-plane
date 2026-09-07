@@ -904,13 +904,19 @@ export class Store {
     const limit = opts.limit ?? 100;
 
     if (opts.after != null) {
-      // 增量：只拉 seq > after 的新事件（时间正序）
+      // 增量：只拉 seq > after 的新事件（时间正序）。必须带 LIMIT，
+      // 避免 after=0 时把整段历史一次性打给前端把时间线拼乱。
+      const incLimit = Math.min(Math.max(limit, 1), 2000);
       const rows = this.db
         .prepare(
-          `SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq ASC`,
+          `SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
         )
-        .all(taskId, opts.after) as unknown as EventRow[];
-      return { events: rows.map((r) => this.toEvent(r)), hasMore: false };
+        .all(taskId, opts.after, incLimit) as unknown as EventRow[];
+      const events = rows.map((r) => this.toEvent(r));
+      const maxSeq = this.maxEventSeq(taskId);
+      const last = events.length ? (events[events.length - 1].seq ?? 0) : opts.after;
+      const hasMore = events.length >= incLimit && last < maxSeq;
+      return { events, hasMore };
     }
 
     let rows: EventRow[];

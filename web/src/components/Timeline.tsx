@@ -395,7 +395,9 @@ function QueuedMessagesDock({ rows }: { rows: Row[] }) {
         <span className="timeline-queued-dock-hint">当前任务结束后发送</span>
       </div>
       {rows.map((row) => (
-        <EventCard key={row.key} row={row} collapsed={false} />
+        <div key={row.key} className="timeline-queued-item">
+          <EventCard row={row} collapsed={false} />
+        </div>
       ))}
     </div>
   );

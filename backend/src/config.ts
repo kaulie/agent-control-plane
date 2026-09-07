@@ -74,6 +74,18 @@ export interface Config {
   deployHome: string;
 }
 
+/** Deployed VERSION file next to web/backend (authoritative after rsync). */
+export function readRuntimeVersion(productRoot: string): string | null {
+  try {
+    const p = path.join(productRoot, "VERSION");
+    if (!fs.existsSync(p)) return null;
+    const v = fs.readFileSync(p, "utf8").trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveFromBackend(...segments: string[]): string {
   return path.resolve(__dirname, "..", ...segments);
 }

@@ -1,6 +1,9 @@
 import { APP_VERSION } from "./version";
 
 const DISMISS_KEY_PREFIX = "web-cursor:dismiss-update:";
+const RELOAD_ATTEMPT_KEY = "web-cursor:reload-attempt";
+/** After a reload for version V, suppress re-prompting V for this long. */
+const RELOAD_SUPPRESS_MS = 60_000;
 
 export type VersionUpdate = {
   clientVersion: string;
@@ -8,6 +11,8 @@ export type VersionUpdate = {
 };
 
 type Listener = (update: VersionUpdate | null) => void;
+
+type ReloadAttempt = { serverVersion: string; at: number };
 
 let pending: VersionUpdate | null = null;
 const listeners = new Set<Listener>();
@@ -17,6 +22,23 @@ function isDismissed(serverVersion: string): boolean {
     return sessionStorage.getItem(`${DISMISS_KEY_PREFIX}${serverVersion}`) === "1";
   } catch {
     return false;
+  }
+}
+
+function readReloadAttempt(): ReloadAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(RELOAD_ATTEMPT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ReloadAttempt;
+    if (
+      typeof parsed?.serverVersion !== "string" ||
+      typeof parsed?.at !== "number"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
@@ -32,9 +54,26 @@ export function checkServerVersion(serverVersion: string | null | undefined): vo
       pending = null;
       emit();
     }
+    try {
+      sessionStorage.removeItem(RELOAD_ATTEMPT_KEY);
+    } catch {
+      /* ignore */
+    }
     return;
   }
   if (isDismissed(sv)) return;
+
+  // Stop the update-modal loop: reload already ran for this server version but
+  // assets/health still disagree (stale cache or mid-deploy split brain).
+  const attempt = readReloadAttempt();
+  if (
+    attempt &&
+    attempt.serverVersion === sv &&
+    Date.now() - attempt.at < RELOAD_SUPPRESS_MS
+  ) {
+    dismissVersionUpdate(sv);
+    return;
+  }
 
   const next: VersionUpdate = { clientVersion: APP_VERSION, serverVersion: sv };
   if (
@@ -66,7 +105,18 @@ export function dismissVersionUpdate(serverVersion: string): void {
 }
 
 /** Hard navigation so HTML/JS are not served from a soft-reload / bfcache path. */
-export function reloadForUpdate(): void {
+export function reloadForUpdate(serverVersion?: string): void {
+  const sv = (serverVersion ?? pending?.serverVersion)?.trim();
+  if (sv) {
+    try {
+      sessionStorage.setItem(
+        RELOAD_ATTEMPT_KEY,
+        JSON.stringify({ serverVersion: sv, at: Date.now() } satisfies ReloadAttempt),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("_v", Date.now().toString());
   window.location.replace(url.toString());

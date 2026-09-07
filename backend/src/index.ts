@@ -14,9 +14,10 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
+import { DeployQueue } from "./ops/deploy-queue.js";
 
 const config = loadConfig();
-
+const deployQueue = new DeployQueue(config.deployHome);
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
 
@@ -120,7 +121,9 @@ const gateway = new AgentGateway(
 await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
   appVersion: config.appVersion,
+  deployQueue,
 });
+app.log.info(`deploy home (async ops): ${config.deployHome}`);
 
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
 fs.writeFileSync(runningFlag, String(process.pid));

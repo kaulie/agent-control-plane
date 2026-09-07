@@ -1,0 +1,46 @@
+# Independent ops daemons (deployment domain)
+
+These processes live under `/Users/gaolei/deployment/web-cursor/ops/` and must
+**not** run from `runtime/`. They survive gateway restarts.
+
+| Daemon | Role |
+|---|---|
+| `watchdog.sh` | Health-check `:4211`; call runtime `scripts/start.sh` if down |
+| `deploy-agent.sh` | Watch `deploy-requests/*.json` and run `bin/deploy.sh` |
+
+## Install / start
+
+From a checkout of this repo (or after merge, from a release tree):
+
+```bash
+DEPLOY_HOME=/Users/gaolei/deployment/web-cursor bash ops/install.sh
+```
+
+That copies scripts into `deployment/web-cursor/ops/` and starts both daemons.
+
+## Request a deploy (no self-kill)
+
+Prefer the gateway API (returns immediately):
+
+```bash
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+  -H 'content-type: application/json' \
+  -d '{"deployment":"deployment-<hash>"}'
+```
+
+Or drop a JSON file:
+
+```bash
+cat > /Users/gaolei/deployment/web-cursor/deploy-requests/deploy-req-demo.json <<'EOF'
+{"requestId":"deploy-req-demo","deployment":"deployment-<hash>"}
+EOF
+```
+
+Poll status:
+
+```bash
+curl -sS http://127.0.0.1:4211/api/ops/deploy/deploy-req-demo
+# or: cat /Users/gaolei/deployment/web-cursor/deploy-status/deploy-req-demo.json
+```
+
+**Agents must not** run `bin/deploy.sh` synchronously inside a task shell — that kills the gateway mid-command.

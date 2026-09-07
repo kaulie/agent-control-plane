@@ -34,26 +34,32 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
 
 ## 部署动作约束（重要）
 
-**上线一律：`bin/release.sh` → `bin/deploy.sh deployment-<hash>`**，不要手工操作。
+**上线：`bin/release.sh` → 异步 `POST /api/ops/deploy`（或手工 `bin/deploy.sh`）**。
 
-1. **禁止**对 runtime 手改文件或 ad-hoc `cp`/`rsync`；代码同步只允许 `bin/deploy.sh`。
-2. **禁止**覆盖 runtime 的 `backend/.env`、`backend/data/`。
-3. **禁止**手改 `deployment-<hash>/` 快照。
-4. 部署顺序：校验快照已构建 → rsync → restart → `curl /health` 必须 200。
-5. 重启必须确认新进程存活；禁止只 kill 不启动。
+1. **禁止**在 gateway/agent 进程内**同步**执行 `bin/deploy.sh` / `restart.sh`（会杀掉正在跑命令的自己）。
+2. **禁止**对 runtime 手改文件或 ad-hoc `cp`/`rsync`；代码同步只允许 `bin/deploy.sh`（由独立 deploy-agent 调用）。
+3. **禁止**覆盖 runtime 的 `backend/.env`、`backend/data/`。
+4. **禁止**手改 `deployment-<hash>/` 快照。
+5. 部署顺序：校验快照已构建 → 投递部署请求 → deploy-agent rsync → restart → `curl /health` 必须 200；核对 `GET /api/ops/runtime` 的 version。
+6. 探活与换版均由 **deployment 侧 ops 守护进程**完成（`ops/watchdog.sh` / `ops/deploy-agent.sh`），不依赖 runtime 内常驻脚本。
 
 ## 运维脚本
 
 ### 上线域（独立于 app 仓库）
 
-路径：`/Users/gaolei/deployment/web-cursor/bin/`
+路径：`/Users/gaolei/deployment/web-cursor/bin/` 与 `.../ops/`
 
 | 脚本 | 用法 | 作用 |
 |---|---|---|
-| `release.sh` | `bin/release.sh [ref]` | 从 GitHub 冻结 `deployment-<hash>` 并在快照内构建 |
-| `deploy.sh` | `bin/deploy.sh deployment-<hash>` | rsync 快照 → runtime，然后重启（不构建） |
+| `bin/release.sh` | `bin/release.sh [ref]` | 从 GitHub 冻结 `deployment-<hash>` 并在快照内构建 |
+| `bin/deploy.sh` | `bin/deploy.sh deployment-<hash>` | rsync 快照 → runtime，然后重启（不构建）；由 deploy-agent 调用 |
+| `ops/install.sh` | `bash ops/install.sh`（仓库内） | 安装并启动独立 watchdog + deploy-agent |
+| `ops/watchdog.sh` | 由 `start-ops.sh` 拉起 | 探活并拉起 runtime（不在 runtime 进程树内） |
+| `ops/deploy-agent.sh` | 由 `start-ops.sh` 拉起 | 消费 `deploy-requests/*.json` 并执行 `bin/deploy.sh` |
 
-环境变量：`GIT_REPO_URL`（默认项目 GitHub）、`DEPLOYMENT_ROOT`、`RUNTIME_DIR`、`PORT`、`APP_VERSION`。
+异步上线 API：`POST /api/ops/deploy` → `GET /api/ops/deploy/:requestId`。
+
+环境变量：`GIT_REPO_URL`、`DEPLOY_HOME`、`RUNTIME_DIR`、`PORT`、`APP_VERSION`。
 
 ### 运行时启停（随发版包进入 runtime）
 

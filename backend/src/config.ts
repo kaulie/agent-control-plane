@@ -67,6 +67,11 @@ export interface Config {
   gitViaProxyMcp: boolean;
   /** Absolute path to mcp-servers/git-via-proxy/server.mjs */
   gitViaProxyServerPath: string;
+  /**
+   * Deployment home for async deploy-agent inbox/outbox
+   * (default /Users/gaolei/deployment/web-cursor).
+   */
+  deployHome: string;
 }
 
 function resolveFromBackend(...segments: string[]): string {
@@ -136,5 +141,8 @@ export function loadConfig(): Config {
     gitViaProxyShell,
     gitViaProxyMcp,
     gitViaProxyServerPath,
+    deployHome:
+      process.env.DEPLOY_HOME?.trim() ||
+      "/Users/gaolei/deployment/web-cursor",
   };
 }

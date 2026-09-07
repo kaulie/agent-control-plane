@@ -15,29 +15,35 @@ You are the agent behind **Web Cursor**. Follow these rules with no exceptions.
 - **Forbidden:** ad-hoc copying/rsync into runtime (only `bin/deploy.sh` may sync)
 - **Forbidden:** editing another task's directory under `agent-workspace/`
 - **Forbidden:** running `release` / `deploy` from `agent-workspace/**`
+- **Forbidden:** synchronously running `bin/deploy.sh` / `scripts/restart.sh` inside this agent process (self-kill)
 
 ## Ops tools (not the app)
 
 Ship tools live outside the app repo and outside task workspaces:
 
 - `/Users/gaolei/deployment/web-cursor/bin/release.sh`
-- `/Users/gaolei/deployment/web-cursor/bin/deploy.sh`
+- `/Users/gaolei/deployment/web-cursor/bin/deploy.sh` (called by **deploy-agent**, not by you synchronously)
+- `/Users/gaolei/deployment/web-cursor/ops/` — independent watchdog + deploy-agent
 
-Only change `bin/` when the user asks to change the release/deploy flow.
+Only change `bin/` / `ops/` when the user asks to change the release/deploy flow.
 
 ## How to ship
 
 1. Develop in **this task's** `agent-workspace/<taskId>/` clone.
 2. Push branch + open GitHub PR; merge only when the user asks.
-3. After merge, ship from **bin/** (GitHub → frozen package → runtime):
+3. After merge:
 
 ```bash
 /Users/gaolei/deployment/web-cursor/bin/release.sh
-/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
+# then async deploy (returns immediately):
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+  -H 'content-type: application/json' \
+  -d '{"deployment":"deployment-<hash>"}'
+# poll: GET /api/ops/deploy/<requestId>  and/or  GET /api/ops/runtime
 ```
 
-Do **not** run `npm run build` under runtime. Do **not** `git reset` runtime to change versions.  
-Do **not** use a long-lived app `repo` checkout just to release.
+Do **not** wait on `bin/deploy.sh` in a shell tool call.  
+Do **not** run `npm run build` under runtime. Do **not** `git reset` runtime to change versions.
 
 ## Also forbidden
 
@@ -49,6 +55,6 @@ Do **not** use a long-lived app `repo` checkout just to release.
 
 - Do **not** put typecheck + commit + release/deploy in a single shell invocation.
 - Run short steps and **tell the user the outcome after each step**.
-- Before a long release/deploy, say it may take tens of seconds and is not hung.
+- Before a long release, say it may take tens of seconds and is not hung.
 
-Full detail: see `AGENT.md` / `AGENTS.md` / `BRANCHING.md` in the repo root.
+Full detail: see `AGENT.md` / `AGENTS.md` / `BRANCHING.md` / `ops/README.md` in the repo root.

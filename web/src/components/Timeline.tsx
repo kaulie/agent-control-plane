@@ -147,6 +147,12 @@ function buildRows(events: AgentEvent[]): Row[] {
           body = formatRunErrorMessage(
             String(p.message ?? statusRaw),
           );
+        } else if (statusRaw.toLowerCase() === "retrying") {
+          body = "自动重试";
+          detail = p.message ? String(p.message) : "";
+        } else if (statusRaw.toLowerCase() === "working") {
+          body = "仍在执行";
+          detail = p.message ? String(p.message) : "";
         } else {
           body = statusRaw;
           detail = p.message ? String(p.message) : "";
@@ -209,6 +215,12 @@ function buildRows(events: AgentEvent[]): Row[] {
         break;
       case "run_error":
         body = formatRunErrorMessage(String(p.error ?? "error"));
+        if (typeof p.rawError === "string" && p.rawError.trim()) {
+          const bits = [`原始错误: ${p.rawError.trim()}`];
+          if (typeof p.silentMs === "number") bits.push(`静默 ${Math.round(p.silentMs / 1000)}s`);
+          if (typeof p.kind === "string") bits.push(`kind=${p.kind}`);
+          detail = bits.join(" · ");
+        }
         break;
       case "plan_exported":
         body = String(p.path ?? p.fileName ?? "exported");

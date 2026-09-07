@@ -6,7 +6,7 @@ import { buildCost, type SdkCostLike } from "../../usage/cost.js";
 import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
 import { composePromptWithBootstrap } from "../../task-context.js";
-import { formatRunErrorMessage } from "../../run-errors.js";
+import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 
 export interface CursorProviderConfig {
@@ -307,6 +307,9 @@ export class CursorProvider implements AgentProvider {
     const startedAt = Date.now();
     let modelCalls = 0;
     let toolCalls = 0;
+    let prependBootstrap = obtained.created;
+    let attempt = 0;
+    const maxAttempts = 2;
 
     const emit = async (
       eventType: EventType,
@@ -354,119 +357,248 @@ export class CursorProvider implements AgentProvider {
     }
 
     try {
-      const sent = await this.sendPrompt(
-        agent,
-        input,
-        options,
-        obtained.created,
-      );
-      agent = sent.agent;
-      handle.agent = agent;
-      const run = sent.run;
-      handle.run = run;
+      while (attempt < maxAttempts) {
+        attempt += 1;
+        const attemptModelCallsBefore = modelCalls;
+        const attemptToolCallsBefore = toolCalls;
+        const attemptStartedAt = Date.now();
+        let lastActivityAt = attemptStartedAt;
+        let streamMessages = 0;
 
-      if (handle.cancelled) {
+        const sent = await this.sendPrompt(agent, input, options, prependBootstrap);
+        agent = sent.agent;
+        handle.agent = agent;
+        const run = sent.run;
+        handle.run = run;
+        // Follow-up attempts should not re-inject bootstrap into the same session.
+        prependBootstrap = false;
+
+        if (handle.cancelled) {
+          try {
+            await run.cancel();
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+
+        const seenStarted = new Set<string>();
+        const HEARTBEAT_MS = 15_000;
+        const heartbeat = setInterval(() => {
+          if (handle.cancelled) return;
+          const silentFor = Date.now() - lastActivityAt;
+          if (silentFor < HEARTBEAT_MS) return;
+          const elapsedMs = Date.now() - startedAt;
+          void emit("status", {
+            status: "working",
+            message: `仍在执行中（可能在跑长命令），已运行 ${Math.round(elapsedMs / 1000)} 秒`,
+            elapsedMs,
+            silentMs: silentFor,
+            attempt,
+          });
+        }, HEARTBEAT_MS);
+
+        let streamError: unknown;
         try {
-          await run.cancel();
-        } catch {
-          /* ignore */
+          for await (const msg of run.stream()) {
+            if (handle.cancelled) break;
+            lastActivityAt = Date.now();
+            streamMessages += 1;
+            if (msg.type === "usage") modelCalls += 1;
+            if (msg.type === "tool_call" && msg.status === "running") {
+              const callId = msg.call_id;
+              // The SDK can re-notify the same tool call as its args stream in;
+              // emit a single "tool_call_started" per call and count it once.
+              if (callId && seenStarted.has(callId)) continue;
+              if (callId) seenStarted.add(callId);
+              toolCalls += 1;
+            }
+            for (const mapped of mapSdkMessage(msg as SDKMessage)) {
+              const usage = mapped.usage
+                ? normalizeTokenUsage(mapped.usage, "cursor")
+                : undefined;
+              await emit(mapped.eventType, mapped.payload, usage);
+            }
+          }
+        } catch (err) {
+          streamError = err;
+        } finally {
+          clearInterval(heartbeat);
         }
-      }
 
-      const seenStarted = new Set<string>();
-      let lastActivityAt = Date.now();
-      const HEARTBEAT_MS = 15_000;
-      const heartbeat = setInterval(() => {
-        if (handle.cancelled) return;
-        const silentFor = Date.now() - lastActivityAt;
-        if (silentFor < HEARTBEAT_MS) return;
-        const elapsedMs = Date.now() - startedAt;
-        void emit("status", {
-          status: "working",
-          message: `仍在执行中（可能在跑长命令），已运行 ${Math.round(elapsedMs / 1000)} 秒`,
-          elapsedMs,
-        });
-      }, HEARTBEAT_MS);
+        const silentMs = Date.now() - lastActivityAt;
+        const attemptToolCalls = toolCalls - attemptToolCallsBefore;
+        const attemptModelCalls = modelCalls - attemptModelCallsBefore;
 
-      try {
-        for await (const msg of run.stream()) {
+        if (streamError) {
           if (handle.cancelled) break;
-          lastActivityAt = Date.now();
-          if (msg.type === "usage") modelCalls += 1;
-          if (msg.type === "tool_call" && msg.status === "running") {
-            const callId = msg.call_id;
-            // The SDK can re-notify the same tool call as its args stream in;
-            // emit a single "tool_call_started" per call and count it once.
-            if (callId && seenStarted.has(callId)) continue;
-            if (callId) seenStarted.add(callId);
-            toolCalls += 1;
+          const raw = streamError instanceof Error ? streamError.message : String(streamError);
+          const retryable =
+            attempt < maxAttempts &&
+            isRetryableSilentAbort(raw, {
+              toolCalls: attemptToolCalls,
+              modelCalls: attemptModelCalls,
+            });
+          if (retryable) {
+            console.warn(
+              `[cursor] silent abort on attempt ${attempt} (silentMs=${silentMs}, streamMessages=${streamMessages}); retrying`,
+            );
+            await emit("status", {
+              status: "retrying",
+              message: "首次调用无响应后连接被取消，正在自动重试…",
+              attempt,
+              silentMs,
+              rawError: raw,
+              streamMessages,
+            });
+            try {
+              await run.cancel();
+            } catch {
+              /* ignore */
+            }
+            handle.run = undefined;
+            continue;
           }
-          for (const mapped of mapSdkMessage(msg as SDKMessage)) {
-            const usage = mapped.usage
-              ? normalizeTokenUsage(mapped.usage, "cursor")
-              : undefined;
-            await emit(mapped.eventType, mapped.payload, usage);
-          }
+
+          const classified = classifyRunError(raw);
+          const durationMs = Date.now() - startedAt;
+          await emit("run_error", {
+            error: classified.message,
+            rawError: raw,
+            kind: classified.kind,
+            durationMs,
+            modelCalls,
+            toolCalls,
+            silentMs,
+            streamMessages,
+            attempt,
+          });
+          return {
+            status: "error",
+            error: classified.message,
+            durationMs,
+            modelCalls,
+            toolCalls,
+            agentId: agent.agentId,
+          };
         }
-      } finally {
-        clearInterval(heartbeat);
-      }
 
-      const result = await run.wait();
-      const durationMs = Date.now() - startedAt;
-      const usage = result.usage
-        ? normalizeTokenUsage(result.usage, "cursor")
-        : undefined;
+        const result = await run.wait();
+        const durationMs = Date.now() - startedAt;
+        const usage = result.usage
+          ? normalizeTokenUsage(result.usage, "cursor")
+          : undefined;
 
-      if (handle.cancelled || result.status === "cancelled") {
-        await emit("run_cancelled", {
-          durationMs,
-          modelCalls,
-          toolCalls,
-          reason: handle.cancelled ? "user_stop" : "sdk_cancelled",
-        });
-        return {
-          status: "cancelled",
-          durationMs,
-          modelCalls,
-          toolCalls,
+        if (handle.cancelled || result.status === "cancelled") {
+          await emit("run_cancelled", {
+            durationMs,
+            modelCalls,
+            toolCalls,
+            reason: handle.cancelled ? "user_stop" : "sdk_cancelled",
+          });
+          return {
+            status: "cancelled",
+            durationMs,
+            modelCalls,
+            toolCalls,
+            usage,
+            agentId: agent.agentId,
+          };
+        }
+
+        if (result.status === "error") {
+          const raw = result.error?.message ?? "unknown error";
+          const retryable =
+            attempt < maxAttempts &&
+            isRetryableSilentAbort(raw, {
+              toolCalls: attemptToolCalls,
+              modelCalls: attemptModelCalls,
+            });
+          if (retryable) {
+            console.warn(
+              `[cursor] silent error status on attempt ${attempt} (silentMs=${silentMs}); retrying: ${raw}`,
+            );
+            await emit("status", {
+              status: "retrying",
+              message: "首次调用无响应后连接被取消，正在自动重试…",
+              attempt,
+              silentMs,
+              rawError: raw,
+              streamMessages,
+            });
+            handle.run = undefined;
+            continue;
+          }
+          const classified = classifyRunError(raw);
+          await emit("run_error", {
+            status: "error",
+            error: classified.message,
+            rawError: raw,
+            kind: classified.kind,
+            durationMs,
+            modelCalls,
+            toolCalls,
+            silentMs,
+            streamMessages,
+            attempt,
+          });
+          return {
+            status: "error",
+            error: classified.message,
+            durationMs,
+            usage,
+            modelCalls,
+            toolCalls,
+            agentId: agent.agentId,
+          };
+        }
+
+        let sdkCost: SdkCostLike | undefined;
+        try {
+          const agentUsage = await agent.getUsage();
+          if (agentUsage?.cost) sdkCost = agentUsage.cost;
+        } catch (err) {
+          console.warn("[cursor] getUsage failed:", err instanceof Error ? err.message : err);
+        }
+        const cost = buildCost(usage, modelId, sdkCost, "cursor");
+
+        await emit(
+          "run_completed",
+          {
+            status: "finished",
+            result: result.result,
+            durationMs,
+            modelCalls,
+            toolCalls,
+            ...(attempt > 1 ? { resumedAfterSilentAbort: true, attempt } : {}),
+          },
           usage,
+          cost,
+        );
+
+        return {
+          status: "finished",
+          result: result.result,
+          durationMs,
+          usage,
+          cost,
+          modelCalls,
+          toolCalls,
           agentId: agent.agentId,
         };
       }
 
-      let sdkCost: SdkCostLike | undefined;
-      try {
-        const agentUsage = await agent.getUsage();
-        if (agentUsage?.cost) sdkCost = agentUsage.cost;
-      } catch (err) {
-        console.warn("[cursor] getUsage failed:", err instanceof Error ? err.message : err);
-      }
-      const cost = buildCost(usage, modelId, sdkCost, "cursor");
-
-      const status: RunResultData["status"] =
-        result.status === "error" ? "error" : "finished";
-      await emit(
-        status === "error" ? "run_error" : "run_completed",
-        {
-          status,
-          result: result.result,
-          error: result.error?.message,
-          durationMs,
-          modelCalls,
-          toolCalls,
-        },
-        usage,
-        cost,
-      );
-
-      return {
-        status,
-        result: result.result,
-        error: result.error?.message,
+      // Cancelled during attempt loop.
+      const durationMs = Date.now() - startedAt;
+      await emit("run_cancelled", {
         durationMs,
-        usage,
-        cost,
+        modelCalls,
+        toolCalls,
+        reason: "user_stop",
+      });
+      return {
+        status: "cancelled",
+        durationMs,
         modelCalls,
         toolCalls,
         agentId: agent.agentId,
@@ -488,13 +620,19 @@ export class CursorProvider implements AgentProvider {
           agentId: agent.agentId,
         };
       }
-      const message = formatRunErrorMessage(
-        err instanceof Error ? err.message : String(err),
-      );
-      await emit("run_error", { error: message, durationMs, modelCalls, toolCalls });
+      const raw = err instanceof Error ? err.message : String(err);
+      const classified = classifyRunError(raw);
+      await emit("run_error", {
+        error: classified.message,
+        rawError: raw,
+        kind: classified.kind,
+        durationMs,
+        modelCalls,
+        toolCalls,
+      });
       return {
         status: "error",
-        error: message,
+        error: classified.message,
         durationMs,
         modelCalls,
         toolCalls,

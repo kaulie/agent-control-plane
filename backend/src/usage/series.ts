@@ -156,8 +156,9 @@ export function buildTokenUsageSeries(
   const cal = calendarFor(timeZone);
 
   // Attribute each run's token usage to its completion time (fall back to start).
-  // Recompute volume with the provider's mode so historical totalTokens
-  // (which mixed Cursor/Cline conventions) still match each dashboard.
+  // Recompute volume so historical stored totalTokens (some Cursor rows were
+  // rewritten with a disjoint sum that double-counted cache) still match the
+  // inclusive dashboard口径.
   const points = samples
     .map((s) => {
       const t = new Date(s.completedAt ?? s.createdAt).getTime();

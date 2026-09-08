@@ -194,10 +194,10 @@ export default function UsageStatsPage({ defaultProjectId, onBack }: Props) {
       </div>
 
       <p className="stats-note">
-        口径说明：总量按 provider 分别对齐官网 —
-        <code>cline</code> 为 input + output（DeepSeek：cache 已含在 input 内）；
-        <code>cursor</code> 为 input + output + cache read/write（四类互斥相加）。
-        下方明细便于与 Cursor 用量 hover 对账。时区可在「本地时间 / UTC」间切换。
+        口径说明：总量 = input + output（Cursor / Cline 的 input 均已含 cache 分解；再加
+        cache read/write 会双计）。明细里的 cache 便于和 Cursor 用量表
+        Input(w/o Cache Write) / Cache Read / Output 三列对账（Input(w/o) ≈ input −
+        cache）。时区可在「本地时间 / UTC」间切换。
       </p>
 
       <div className="stats-filters">

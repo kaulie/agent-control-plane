@@ -506,7 +506,14 @@ export class AgentGateway {
       console.warn(
         `[memory-guard] rss ${rssMb}MB; cancelling oldest active run task=${taskId} run=${runId}`,
       );
-      void this.providerFor(task).cancel(runId);
+      void this.providerFor(task)
+        .cancel(runId)
+        .catch((err) => {
+          console.warn(
+            "[memory-guard] cancel failed:",
+            err instanceof Error ? err.message : err,
+          );
+        });
 
       const event: AgentEvent = {
         eventId: newId("evt"),

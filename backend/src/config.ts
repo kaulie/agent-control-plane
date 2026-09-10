@@ -72,6 +72,13 @@ export interface Config {
    * (default /Users/gaolei/deployment/web-cursor).
    */
   deployHome: string;
+  /** Global cap on concurrent agent runs across all tasks/providers. */
+  maxConcurrentRuns: number;
+  /**
+   * Gateway RSS limit in MiB. When exceeded and a run is active, the oldest
+   * active run is cancelled to shed memory pressure. 0 disables auto-shed.
+   */
+  agentRssLimitMb: number;
 }
 
 /** Deployed VERSION file next to web/backend (authoritative after rsync). */
@@ -156,5 +163,13 @@ export function loadConfig(): Config {
     deployHome:
       process.env.DEPLOY_HOME?.trim() ||
       "/Users/gaolei/deployment/web-cursor",
+    maxConcurrentRuns: Math.max(
+      1,
+      Number(process.env.AGENT_MAX_CONCURRENT_RUNS || 2),
+    ),
+    agentRssLimitMb: Math.max(
+      0,
+      Number(process.env.AGENT_RSS_LIMIT_MB || 2048),
+    ),
   };
 }

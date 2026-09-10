@@ -72,6 +72,10 @@ export interface GatewayConfig {
    * Optional — when omitted, observers that need ambient context no-op safely.
    */
   decisionContext?: DecisionContext;
+  /** Global cap on concurrent agent runs across all tasks/providers. */
+  maxConcurrentRuns?: number;
+  /** Gateway RSS limit in MiB; 0 disables memory-triggered run shedding. */
+  agentRssLimitMb?: number;
 }
 
 export interface SendMessageInput {
@@ -116,13 +120,22 @@ export class AgentGateway {
   private activeRuns = new Map<string, string>();
   /** Per-task FIFO of runs waiting while another run is active. */
   private pendingRuns = new Map<string, PendingRun[]>();
+  /** Global running count (all providers). */
+  private runningCount = 0;
+  private readonly maxConcurrentRuns: number;
+  private readonly agentRssLimitMb: number;
+  private memoryTimer: NodeJS.Timeout | undefined;
+  private rssAboveLimit = false;
 
   constructor(
     private store: Store,
     private providers: ProviderRegistry,
     private config: GatewayConfig,
     private publish: Publish,
-  ) {}
+  ) {
+    this.maxConcurrentRuns = Math.max(1, config.maxConcurrentRuns ?? 2);
+    this.agentRssLimitMb = Math.max(0, config.agentRssLimitMb ?? 2048);
+  }
 
   /** Resolve the live adapter for a task (falls back to registry default). */
   providerFor(task: Task): AgentProvider {
@@ -434,13 +447,94 @@ export class AgentGateway {
       list.push(pending);
       this.pendingRuns.set(run.taskId, list);
     }
-    const taskIds = [...new Set(queued.map((r) => r.taskId))];
-    let started = 0;
-    for (const taskId of taskIds) {
-      if (this.activeRuns.has(taskId)) continue;
-      if (this.processNextPending(taskId)) started += 1;
+    return this.drainGlobalQueue();
+  }
+
+  /** Start periodic background guards (memory pressure). */
+  startRuntimeGuards(): void {
+    if (this.memoryTimer) return;
+    this.memoryTimer = setInterval(() => this.checkMemoryPressure(), 15_000);
+    this.memoryTimer.unref?.();
+    console.warn(
+      `[memory-guard] started maxConcurrentRuns=${this.maxConcurrentRuns} rssLimitMb=${
+        this.agentRssLimitMb || "off"
+      }`,
+    );
+  }
+
+  stopRuntimeGuards(): void {
+    if (this.memoryTimer) {
+      clearInterval(this.memoryTimer);
+      this.memoryTimer = undefined;
     }
-    return started;
+  }
+
+  private checkMemoryPressure(): void {
+    const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    if (this.agentRssLimitMb <= 0) return;
+
+    if (rssMb <= this.agentRssLimitMb) {
+      if (this.rssAboveLimit) {
+        this.rssAboveLimit = false;
+        console.warn(
+          `[memory-guard] rss ${rssMb}MB back below limit ${this.agentRssLimitMb}MB`,
+        );
+      }
+      return;
+    }
+
+    if (!this.rssAboveLimit) {
+      this.rssAboveLimit = true;
+      console.warn(
+        `[memory-guard] rss ${rssMb}MB exceeds limit ${this.agentRssLimitMb}MB`,
+      );
+    }
+    this.shedOldestRun(rssMb);
+  }
+
+  private shedOldestRun(rssMb: number): void {
+    if (this.activeRuns.size === 0) return;
+    const first = this.activeRuns.entries().next().value as
+      | [string, string]
+      | undefined;
+    if (!first) return;
+    const [taskId, runId] = first;
+
+    try {
+      const task = this.store.getTask(taskId);
+      if (!task) return;
+      console.warn(
+        `[memory-guard] rss ${rssMb}MB; cancelling oldest active run task=${taskId} run=${runId}`,
+      );
+      void this.providerFor(task)
+        .cancel(runId)
+        .catch((err) => {
+          console.warn(
+            "[memory-guard] cancel failed:",
+            err instanceof Error ? err.message : err,
+          );
+        });
+
+      const event: AgentEvent = {
+        eventId: newId("evt"),
+        taskId,
+        runId,
+        agentId: task.agentId ?? "",
+        timestamp: new Date().toISOString(),
+        eventType: "status",
+        payload: {
+          status: "memory_pressure",
+          message: `内存压力（RSS ${rssMb}MB）触发，已请求取消当前 run。`,
+        },
+      };
+      this.store.appendEvent(event);
+      this.publish({ type: "agent_event", event });
+    } catch (err) {
+      console.warn(
+        "[memory-guard] failed to cancel oldest run:",
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   private pendingFromRun(run: RunRecord): PendingRun | undefined {
@@ -508,26 +602,41 @@ export class AgentGateway {
 
   /** Returns true if a run was started. */
   private processNextPending(taskId: string): boolean {
-    if (this.activeRuns.has(taskId)) return false;
+    if (
+      this.activeRuns.has(taskId) ||
+      this.runningCount >= this.maxConcurrentRuns
+    ) {
+      return false;
+    }
     const list = this.pendingRuns.get(taskId);
     if (!list?.length) return false;
+
+    const task = this.store.getTask(taskId);
+    if (!task) return false;
 
     const next = list.shift()!;
     if (!list.length) this.pendingRuns.delete(taskId);
     else this.pendingRuns.set(taskId, list);
 
+    this.runningCount += 1;
     this.store.updateRun(next.runId, { status: "running" });
     this.activeRuns.set(taskId, next.runId);
     this.store.updateTaskStatus(taskId, "active");
     this.publishQueueUpdate(taskId);
 
-    const task = this.store.getTask(taskId);
-    if (!task) {
-      this.activeRuns.delete(taskId);
-      return false;
-    }
     void this.executeRun(task, next);
     return true;
+  }
+
+  /** Start queued runs while global capacity remains. */
+  private drainGlobalQueue(): number {
+    let started = 0;
+    const taskIds = [...this.pendingRuns.keys()];
+    for (const taskId of taskIds) {
+      if (this.runningCount >= this.maxConcurrentRuns) break;
+      if (this.processNextPending(taskId)) started += 1;
+    }
+    return started;
   }
 
   private persistUserMessage(
@@ -611,7 +720,9 @@ export class AgentGateway {
     };
 
     const agentId = task.agentId ?? "";
-    const isQueued = this.activeRuns.has(taskId);
+    const isQueued =
+      this.activeRuns.has(taskId) ||
+      this.runningCount >= this.maxConcurrentRuns;
 
     this.store.createRun({
       runId,
@@ -654,6 +765,7 @@ export class AgentGateway {
       };
     }
 
+    this.runningCount += 1;
     this.activeRuns.set(taskId, runId);
     this.store.updateTaskStatus(taskId, "active");
     void this.executeRun(task, pending);
@@ -892,13 +1004,14 @@ export class AgentGateway {
       if (this.activeRuns.get(taskId) === runId) {
         this.activeRuns.delete(taskId);
       }
+      this.runningCount = Math.max(0, this.runningCount - 1);
       this.publish({
         type: "task_updated",
         task: this.store.getTask(taskId),
         stats: this.store.getTaskStats(taskId),
         runId,
       });
-      this.processNextPending(taskId);
+      this.drainGlobalQueue();
     }
   }
 

@@ -25,6 +25,44 @@ function advertisedVersion(): string {
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
 
+const crashReportDir = path.join(config.dataDir, "crash-reports");
+function writeCrashReport(kind: string, err: unknown): void {
+  try {
+    fs.mkdirSync(crashReportDir, { recursive: true });
+    const file = path.join(
+      crashReportDir,
+      `crash-${kind}-${Date.now()}-${process.pid}.json`,
+    );
+    const body = {
+      kind,
+      pid: process.pid,
+      appVersion: config.appVersion,
+      timestamp: new Date().toISOString(),
+      rssBytes: process.memoryUsage().rss,
+      error:
+        err instanceof Error
+          ? { message: err.message, stack: err.stack ?? "" }
+          : String(err),
+    };
+    fs.writeFileSync(file, JSON.stringify(body, null, 2));
+    console.error(`[fatal] ${kind} 报告已写入 ${file}`);
+  } catch (reportErr) {
+    console.error("[fatal] 写入崩溃报告失败:", reportErr);
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  writeCrashReport("uncaughtException", err);
+  console.error("[fatal] uncaughtException:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  writeCrashReport("unhandledRejection", reason);
+  console.error("[fatal] unhandledRejection:", reason);
+  process.exit(1);
+});
+
 if (!config.apiKey) {
   console.warn(
     "[startup] CURSOR_API_KEY is not set. Cursor-backed tasks will fail until it is set.\n" +
@@ -118,6 +156,8 @@ const gateway = new AgentGateway(
         config.gitViaProxyMcp &&
         assertMcpServerPresent(config.gitViaProxyServerPath),
     },
+    maxConcurrentRuns: config.maxConcurrentRuns,
+    agentRssLimitMb: config.agentRssLimitMb,
   },
   publish,
 );
@@ -150,6 +190,7 @@ app.log.info(
 try {
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`Agent Gateway listening on http://${config.host}:${config.port}`);
+  gateway.startRuntimeGuards();
 
   // Push terminal events for runs that died with the previous process so
   // reconnecting UIs leave "running" and show a clear stop reason.
@@ -199,6 +240,7 @@ const shutdown = (): void => {
   } catch {
     /* ignore */
   }
+  gateway.stopRuntimeGuards();
   providers.dispose();
   store.close();
   app.close().then(() => process.exit(0));

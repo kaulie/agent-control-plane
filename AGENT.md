@@ -47,20 +47,20 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
 
 ### 上线域（独立于 app 仓库）
 
-路径：`/Users/gaolei/deployment/web-cursor/bin/` 与 `.../ops/`
+路径：源码在 [`agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment)；本机安装目录 `/Users/gaolei/deployment/web-cursor/bin/` 与 `.../ops/`
 
 | 脚本 | 用法 | 作用 |
 |---|---|---|
 | `bin/release.sh` | `bin/release.sh [ref]` | 从 GitHub 冻结 `deployment-<hash>` 并在快照内构建 |
 | `bin/deploy.sh` | `bin/deploy.sh deployment-<hash>` | rsync 快照 → runtime，然后重启（不构建）；由 deploy-agent 调用 |
-| `ops/install.sh` | `bash ops/install.sh`（仓库内） | 安装并启动独立 watchdog + deploy-agent |
+| `./install.sh`（deployment 仓库） | `DEPLOY_HOME=... ./install.sh` | 安装 bin/ops 并启动独立 watchdog + deploy-agent |
 | `ops/watchdog.sh` | 由 `start-ops.sh` 拉起 | 探活并拉起 runtime（不在 runtime 进程树内） |
 | `ops/deploy-agent.sh` | 由 `start-ops.sh` 拉起 | 消费 `deploy-requests/*.json`；部署前写 `watchdog-pause-until`（默认 120s），超时杀 `deploy.sh` |
 | `ops/watchdog-pause-until` | deploy-agent 写入 | 时间戳暂停信号；到期后若仍不健康由 watchdog 拉起 |
 
-异步上线 API：`POST /api/ops/deploy` → `GET /api/ops/deploy/:requestId`。
+异步上线 API：`POST /api/ops/deploy` → `GET /api/ops/restart-status` / `GET /api/ops/deploy/:requestId`。
 
-环境变量：`GIT_REPO_URL`、`DEPLOY_HOME`、`RUNTIME_DIR`、`PORT`、`APP_VERSION`。
+环境变量：`GIT_REPO_URL`、`DEPLOY_HOME`、`RUNTIME_DIR`、`PORT`、`APP_VERSION`、`GRACEFUL_RESTART`、`DEPLOY_GRACEFUL_WAIT_MS`。
 
 ### 运行时启停（随发版包进入 runtime）
 

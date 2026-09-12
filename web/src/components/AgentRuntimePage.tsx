@@ -6,7 +6,15 @@ interface Props {
   onBack: () => void;
 }
 
-const POLL_MS = 5_000;
+const AUTO_KEY = "agent-runtime-auto-refresh";
+const INTERVAL_KEY = "agent-runtime-refresh-ms";
+
+const INTERVAL_OPTIONS: Array<{ ms: number; label: string }> = [
+  { ms: 5_000, label: "5 秒" },
+  { ms: 15_000, label: "15 秒" },
+  { ms: 30_000, label: "30 秒" },
+  { ms: 60_000, label: "1 分钟" },
+];
 
 const CHART = {
   width: 720,
@@ -16,6 +24,27 @@ const CHART = {
   padT: 16,
   padB: 36,
 };
+
+function readAutoRefresh(): boolean {
+  try {
+    const v = localStorage.getItem(AUTO_KEY);
+    if (v === "0" || v === "false") return false;
+    if (v === "1" || v === "true") return true;
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+function readIntervalMs(): number {
+  try {
+    const n = Number(localStorage.getItem(INTERVAL_KEY));
+    if (INTERVAL_OPTIONS.some((o) => o.ms === n)) return n;
+  } catch {
+    /* ignore */
+  }
+  return 5_000;
+}
 
 function formatClock(iso: string): string {
   const d = new Date(iso);
@@ -58,6 +87,24 @@ export function AgentRuntimePage({ onBack }: Props) {
   const [data, setData] = useState<AgentRuntimeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
+  const [intervalMs, setIntervalMs] = useState(readIntervalMs);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUTO_KEY, autoRefresh ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [autoRefresh]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INTERVAL_KEY, String(intervalMs));
+    } catch {
+      /* ignore */
+    }
+  }, [intervalMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,12 +127,14 @@ export function AgentRuntimePage({ onBack }: Props) {
     };
 
     load();
-    timer = setInterval(load, POLL_MS);
+    if (autoRefresh) {
+      timer = setInterval(load, intervalMs);
+    }
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, []);
+  }, [autoRefresh, intervalMs]);
 
   const maxY = useMemo(() => {
     const cap = data?.maxConcurrentRuns ?? 1;
@@ -104,6 +153,12 @@ export function AgentRuntimePage({ onBack }: Props) {
     return ticks;
   }, [maxY]);
 
+  const intervalLabel =
+    INTERVAL_OPTIONS.find((o) => o.ms === intervalMs)?.label ?? "5 秒";
+  const subtitle = autoRefresh
+    ? `全局并发 · 自动刷新 ${intervalLabel}`
+    : "全局并发 · 自动刷新已关闭";
+
   const { width, height, padL, padR, padT, padB } = CHART;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
@@ -111,6 +166,18 @@ export function AgentRuntimePage({ onBack }: Props) {
   const series = data?.series ?? [];
   const firstT = series[0]?.t;
   const lastT = series[series.length - 1]?.t;
+
+  const refreshNow = (): void => {
+    setLoading(true);
+    api
+      .getAgentRuntime()
+      .then((res) => {
+        setData(res);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  };
 
   return (
     <main className="stats-page">
@@ -120,8 +187,36 @@ export function AgentRuntimePage({ onBack }: Props) {
             ←
           </button>
           <h2 className="stats-title">Agent 运行状态</h2>
-          <span className="stats-subtitle">全局并发 · 每 5 秒刷新</span>
+          <span className="stats-subtitle">{subtitle}</span>
         </div>
+      </div>
+
+      <div className="runtime-refresh-bar" role="group" aria-label="刷新控制">
+        <label className="runtime-refresh-toggle">
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
+          />
+          <span>自动刷新</span>
+        </label>
+        <label className={`stats-filter runtime-refresh-interval${autoRefresh ? "" : " is-disabled"}`}>
+          <span>刷新周期</span>
+          <select
+            value={intervalMs}
+            disabled={!autoRefresh}
+            onChange={(e) => setIntervalMs(Number(e.target.value))}
+          >
+            {INTERVAL_OPTIONS.map((o) => (
+              <option key={o.ms} value={o.ms}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="runtime-refresh-now" onClick={refreshNow}>
+          立即刷新
+        </button>
       </div>
 
       <p className="stats-note">

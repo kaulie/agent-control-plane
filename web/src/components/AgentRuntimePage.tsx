@@ -370,7 +370,19 @@ export function AgentRuntimePage({ onBack }: Props) {
               <ul className="runtime-active-list">
                 {data.activeRuns.map((r) => (
                   <li key={r.runId}>
+                    <span className="runtime-active-project">
+                      {r.projectName?.trim() || r.projectId || "未命名项目"}
+                    </span>
+                    <span className="runtime-active-sep">·</span>
                     <code>{r.taskId}</code>
+                    {r.taskTitle?.trim() ? (
+                      <>
+                        <span className="runtime-active-sep">·</span>
+                        <span className="runtime-active-title-text">
+                          {r.taskTitle.trim()}
+                        </span>
+                      </>
+                    ) : null}
                     <span className="runtime-active-sep">·</span>
                     <code>{r.runId}</code>
                   </li>

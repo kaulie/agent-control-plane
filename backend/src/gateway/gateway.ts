@@ -125,7 +125,13 @@ export interface AgentRuntimeStatus {
   runningCount: number;
   maxConcurrentRuns: number;
   queuedCount: number;
-  activeRuns: Array<{ taskId: string; runId: string }>;
+  activeRuns: Array<{
+    taskId: string;
+    runId: string;
+    projectId?: string;
+    projectName?: string;
+    taskTitle?: string;
+  }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
   /** Requested chart window in ms (series is clipped to this look-back). */
@@ -139,7 +145,7 @@ export interface RestartStatus {
   runningCount: number;
   maxConcurrentRuns: number;
   queuedCount: number;
-  activeRuns: Array<{ taskId: string; runId: string }>;
+  activeRuns: AgentRuntimeStatus["activeRuns"];
   message: string;
 }
 
@@ -493,10 +499,19 @@ export class AgentGateway {
     for (const list of this.pendingRuns.values()) {
       queuedCount += list.length;
     }
-    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => ({
-      taskId,
-      runId,
-    }));
+    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => {
+      const task = this.store.getTask(taskId);
+      const project = task?.projectId
+        ? this.store.getProject(task.projectId)
+        : undefined;
+      return {
+        taskId,
+        runId,
+        ...(task?.projectId ? { projectId: task.projectId } : {}),
+        ...(project?.name ? { projectName: project.name } : {}),
+        ...(task?.title ? { taskTitle: task.title } : {}),
+      };
+    });
     const resolvedWindow = this.resolveWindowMs(windowMs);
     const cutoff = Date.now() - resolvedWindow;
     const series = this.concurrencySeries.filter((s) => {

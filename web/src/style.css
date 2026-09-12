@@ -2236,6 +2236,15 @@ body {
   line-height: 1.7;
 }
 
+.runtime-active-project {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.runtime-active-title-text {
+  color: var(--text);
+}
+
 .runtime-active-sep {
   margin: 0 6px;
 }

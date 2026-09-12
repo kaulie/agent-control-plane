@@ -350,6 +350,77 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * Persist project deployment settings and push graceful URLs to the
+   * independent deployment service contract (PUT /api/services/:serviceId).
+   */
+  app.post<{
+    Params: { projectId: string };
+    Body: {
+      gracefulRestart?: boolean;
+      restartNotifyUrl?: string;
+      restartPollUrl?: string;
+      serviceId?: string;
+    };
+  }>("/api/projects/:projectId/deployment/register", async (req, reply) => {
+    try {
+      const project = gateway.getProject(req.params.projectId);
+      if (!project) {
+        return reply.code(404).send({ error: "project not found" });
+      }
+
+      const gracefulRestart = req.body?.gracefulRestart === true;
+      const deploymentPatch = gracefulRestart
+        ? {
+            gracefulRestart: true as const,
+            restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
+            restartPollUrl: req.body?.restartPollUrl?.trim() || "",
+          }
+        : { gracefulRestart: false as const };
+
+      const view = gateway.updateProjectSettings(req.params.projectId, {
+        deployment: deploymentPatch,
+      });
+      if (!view) {
+        return reply.code(404).send({ error: "project not found" });
+      }
+
+      const serviceId =
+        req.body?.serviceId?.trim() || project.name.trim() || project.projectId;
+      const service = await opts.deployQueue.registerServiceGraceful({
+        serviceId,
+        gracefulRestart,
+        ...(gracefulRestart
+          ? {
+              restartNotifyUrl: String(
+                (deploymentPatch as { restartNotifyUrl?: string })
+                  .restartNotifyUrl ?? "",
+              ),
+              restartPollUrl: String(
+                (deploymentPatch as { restartPollUrl?: string }).restartPollUrl ??
+                  "",
+              ),
+              gracefulRestartMaxWaitMs: opts.deployQueue.maxWaitMs,
+            }
+          : {}),
+      });
+
+      return {
+        ok: true,
+        serviceId,
+        settings: view,
+        service,
+        message: gracefulRestart
+          ? `已登记到部署服务 ${serviceId}（graceful）`
+          : `已登记到部署服务 ${serviceId}（直接重启，已清空 notify/poll）`,
+      };
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ---- projects ----
 
   app.get("/api/projects", async () => gateway.listProjects());

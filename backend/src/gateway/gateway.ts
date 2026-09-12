@@ -110,6 +110,21 @@ export interface SendMessageResult {
   queueLength: number;
 }
 
+export interface ConcurrencySample {
+  /** ISO timestamp when the sample was taken. */
+  t: string;
+  runningCount: number;
+}
+
+export interface AgentRuntimeStatus {
+  runningCount: number;
+  maxConcurrentRuns: number;
+  queuedCount: number;
+  activeRuns: Array<{ taskId: string; runId: string }>;
+  series: ConcurrencySample[];
+  sampleIntervalMs: number;
+}
+
 /**
  * Orchestrates the core loop required by the spec:
  *   Task -> Agent Run -> Event Stream -> Usage -> Cost -> Result
@@ -125,7 +140,13 @@ export class AgentGateway {
   private readonly maxConcurrentRuns: number;
   private readonly agentRssLimitMb: number;
   private memoryTimer: NodeJS.Timeout | undefined;
+  private concurrencySampleTimer: NodeJS.Timeout | undefined;
   private rssAboveLimit = false;
+  /** In-memory ring buffer of runningCount samples (survives until process restart). */
+  private readonly concurrencySeries: ConcurrencySample[] = [];
+  private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 5_000;
+  /** ~30 minutes at 5s interval. */
+  private static readonly CONCURRENCY_SERIES_MAX = 360;
 
   constructor(
     private store: Store,
@@ -436,6 +457,26 @@ export class AgentGateway {
     return this.pendingRuns.get(taskId)?.length ?? 0;
   }
 
+  /** Live concurrency + recent in-memory series for the ops monitor page. */
+  getAgentRuntimeStatus(): AgentRuntimeStatus {
+    let queuedCount = 0;
+    for (const list of this.pendingRuns.values()) {
+      queuedCount += list.length;
+    }
+    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => ({
+      taskId,
+      runId,
+    }));
+    return {
+      runningCount: this.runningCount,
+      maxConcurrentRuns: this.maxConcurrentRuns,
+      queuedCount,
+      activeRuns,
+      series: this.concurrencySeries.slice(),
+      sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
+    };
+  }
+
   /** Rebuild in-memory queues from DB and start draining where idle. */
   recoverQueuedRuns(): number {
     const queued = this.store.listAllQueuedRuns();
@@ -450,22 +491,52 @@ export class AgentGateway {
     return this.drainGlobalQueue();
   }
 
-  /** Start periodic background guards (memory pressure). */
+  /** Start periodic background guards (memory pressure + concurrency sampling). */
   startRuntimeGuards(): void {
-    if (this.memoryTimer) return;
-    this.memoryTimer = setInterval(() => this.checkMemoryPressure(), 15_000);
-    this.memoryTimer.unref?.();
-    console.warn(
-      `[memory-guard] started maxConcurrentRuns=${this.maxConcurrentRuns} rssLimitMb=${
-        this.agentRssLimitMb || "off"
-      }`,
-    );
+    if (!this.memoryTimer) {
+      this.memoryTimer = setInterval(() => this.checkMemoryPressure(), 15_000);
+      this.memoryTimer.unref?.();
+      console.warn(
+        `[memory-guard] started maxConcurrentRuns=${this.maxConcurrentRuns} rssLimitMb=${
+          this.agentRssLimitMb || "off"
+        }`,
+      );
+    }
+    this.startConcurrencySampler();
   }
 
   stopRuntimeGuards(): void {
     if (this.memoryTimer) {
       clearInterval(this.memoryTimer);
       this.memoryTimer = undefined;
+    }
+    this.stopConcurrencySampler();
+  }
+
+  private startConcurrencySampler(): void {
+    if (this.concurrencySampleTimer) return;
+    this.recordConcurrencySample();
+    this.concurrencySampleTimer = setInterval(
+      () => this.recordConcurrencySample(),
+      AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
+    );
+    this.concurrencySampleTimer.unref?.();
+  }
+
+  private stopConcurrencySampler(): void {
+    if (this.concurrencySampleTimer) {
+      clearInterval(this.concurrencySampleTimer);
+      this.concurrencySampleTimer = undefined;
+    }
+  }
+
+  private recordConcurrencySample(): void {
+    this.concurrencySeries.push({
+      t: new Date().toISOString(),
+      runningCount: this.runningCount,
+    });
+    while (this.concurrencySeries.length > AgentGateway.CONCURRENCY_SERIES_MAX) {
+      this.concurrencySeries.shift();
     }
   }
 

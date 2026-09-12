@@ -40,7 +40,26 @@ export interface ProjectSettingsView {
   cwdRules?: string;
 }
 
-export type AppView = "chat" | "global-settings" | "project-settings" | "usage-stats";
+export type AppView =
+  | "chat"
+  | "global-settings"
+  | "project-settings"
+  | "usage-stats"
+  | "agent-runtime";
+
+export interface ConcurrencySample {
+  t: string;
+  runningCount: number;
+}
+
+export interface AgentRuntimeStatus {
+  runningCount: number;
+  maxConcurrentRuns: number;
+  queuedCount: number;
+  activeRuns: Array<{ taskId: string; runId: string }>;
+  series: ConcurrencySample[];
+  sampleIntervalMs: number;
+}
 
 export interface Task {
   taskId: string;

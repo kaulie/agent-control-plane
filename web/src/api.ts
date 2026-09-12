@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AgentRuntimeStatus,
   AppSettings,
   AuthStatus,
   ModelInfo,
@@ -117,6 +118,9 @@ export const api = {
       (r) => j<TokenUsageSeries>(r),
     );
   },
+
+  getAgentRuntime: () =>
+    fetch(`${BASE}/ops/agent-runtime`).then((r) => j<AgentRuntimeStatus>(r)),
 
   getEvents: (
     id: string,

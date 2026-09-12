@@ -2092,3 +2092,108 @@ body {
   color: var(--text);
 }
 
+/* ---- Agent 运行状态监控 ---- */
+.runtime-cap {
+  font-size: 0.55em;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.runtime-chart-wrap {
+  max-width: 760px;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.runtime-chart-label {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.runtime-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.runtime-chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.runtime-chart-cap {
+  stroke: var(--red, #c45c5c);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.runtime-chart-line {
+  stroke: var(--accent, #5b8def);
+  stroke-width: 2;
+}
+
+.runtime-chart-area {
+  fill: var(--accent, #5b8def);
+  fill-opacity: 0.12;
+}
+
+.runtime-chart-axis {
+  fill: var(--text-dim);
+  font-size: 11px;
+}
+
+.runtime-chart-empty {
+  fill: var(--text-dim);
+  font-size: 13px;
+}
+
+.runtime-chart-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.runtime-legend-line::before,
+.runtime-legend-cap::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.runtime-legend-line::before {
+  background: var(--accent, #5b8def);
+}
+
+.runtime-legend-cap::before {
+  border-top: 2px dashed var(--red, #c45c5c);
+  height: 0;
+}
+
+.runtime-active {
+  max-width: 760px;
+}
+
+.runtime-active-title {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.runtime-active-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.runtime-active-sep {
+  margin: 0 6px;
+}
+

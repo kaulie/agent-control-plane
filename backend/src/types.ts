@@ -25,11 +25,25 @@ export interface WorkspaceConfig {
   root?: string;
 }
 
+/**
+ * Project-level deployment / restart contract.
+ * When gracefulRestart is true, both notify + poll URLs are required.
+ */
+export interface DeploymentConfig {
+  /** Whether this project's runtime supports graceful restart. */
+  gracefulRestart?: boolean;
+  /** Called before restart (e.g. POST drain/notify). */
+  restartNotifyUrl?: string;
+  /** Polled until restart is allowed (e.g. GET can-restart). */
+  restartPollUrl?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
+  deployment?: DeploymentConfig;
 }
 
 export interface ProjectSettingsView {

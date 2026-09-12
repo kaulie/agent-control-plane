@@ -1,9 +1,64 @@
-import type { AppSettings } from "./types.js";
+import type { AppSettings, DeploymentConfig } from "./types.js";
 import { DEFAULT_AGENT_WORKSPACE_ROOT } from "./config.js";
 
 const GLOBAL_RULES_HEADING = "# Global agent rules";
 const PROJECT_RULES_HEADING = "# Project agent rules";
 const SECTION_SEP = "\n\n---\n\n";
+
+function isHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize / validate project deployment settings.
+ * Throws Error with a user-facing message on invalid input.
+ */
+export function normalizeDeploymentConfig(
+  patch: DeploymentConfig | undefined,
+  existing?: DeploymentConfig,
+): DeploymentConfig | undefined {
+  if (patch === undefined) return existing;
+
+  const gracefulRestart = patch.gracefulRestart === true;
+  if (!gracefulRestart) {
+    return { gracefulRestart: false };
+  }
+
+  const notify =
+    (patch.restartNotifyUrl !== undefined
+      ? patch.restartNotifyUrl
+      : existing?.restartNotifyUrl
+    )?.trim() || "";
+  const poll =
+    (patch.restartPollUrl !== undefined
+      ? patch.restartPollUrl
+      : existing?.restartPollUrl
+    )?.trim() || "";
+
+  if (!notify) {
+    throw new Error("支持 graceful restart 时必须填写「重启前通知 URL」");
+  }
+  if (!poll) {
+    throw new Error("支持 graceful restart 时必须填写「可重启轮询 URL」");
+  }
+  if (!isHttpUrl(notify)) {
+    throw new Error("重启前通知 URL 必须是 http(s) 地址");
+  }
+  if (!isHttpUrl(poll)) {
+    throw new Error("可重启轮询 URL 必须是 http(s) 地址");
+  }
+
+  return {
+    gracefulRestart: true,
+    restartNotifyUrl: notify,
+    restartPollUrl: poll,
+  };
+}
 
 export function parseSettings(raw: string | null | undefined): AppSettings {
   if (!raw?.trim()) return {};
@@ -56,6 +111,17 @@ export function patchSettings(
       next.workspace = { root };
     } else {
       delete next.workspace;
+    }
+  }
+  if (patch.deployment !== undefined) {
+    const deployment = normalizeDeploymentConfig(
+      patch.deployment,
+      existing.deployment,
+    );
+    if (deployment) {
+      next.deployment = deployment;
+    } else {
+      delete next.deployment;
     }
   }
   return next;
@@ -127,6 +193,10 @@ export function mergeSettings(
   }
   if (global.workspace?.root?.trim()) {
     out.workspace = { root: resolveWorkspaceRoot(global) };
+  }
+  // Deployment is project-scoped only (not inherited from global).
+  if (project.deployment) {
+    out.deployment = { ...project.deployment };
   }
   return out;
 }

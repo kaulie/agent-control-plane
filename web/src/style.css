@@ -1801,6 +1801,15 @@ body {
   cursor: not-allowed;
 }
 
+.runtime-field-wide {
+  flex: 1 1 100%;
+  min-width: 100%;
+}
+
+.deployment-url-fields {
+  margin-top: 12px;
+}
+
 .runtime-select-compact {
   min-width: 110px;
   max-width: 180px;

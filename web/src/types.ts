@@ -26,11 +26,18 @@ export interface WorkspaceConfig {
   root?: string;
 }
 
+export interface DeploymentConfig {
+  gracefulRestart?: boolean;
+  restartNotifyUrl?: string;
+  restartPollUrl?: string;
+}
+
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
+  deployment?: DeploymentConfig;
 }
 
 export interface ProjectSettingsView {

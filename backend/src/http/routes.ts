@@ -204,7 +204,14 @@ export async function registerRoutes(
     appVersion: version(),
   }));
 
-  app.get("/api/ops/agent-runtime", async () => gateway.getAgentRuntimeStatus());
+  app.get<{ Querystring: { windowMs?: string } }>(
+    "/api/ops/agent-runtime",
+    async (req) => {
+      const raw = Number(req.query.windowMs);
+      const windowMs = Number.isFinite(raw) ? raw : undefined;
+      return gateway.getAgentRuntimeStatus(windowMs);
+    },
+  );
 
   app.get("/api/auth", async () => {
     const results = await Promise.all(

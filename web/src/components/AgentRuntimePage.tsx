@@ -8,12 +8,20 @@ interface Props {
 
 const AUTO_KEY = "agent-runtime-auto-refresh";
 const INTERVAL_KEY = "agent-runtime-refresh-ms";
+const WINDOW_KEY = "agent-runtime-window-ms";
 
 const INTERVAL_OPTIONS: Array<{ ms: number; label: string }> = [
   { ms: 5_000, label: "5 秒" },
   { ms: 15_000, label: "15 秒" },
   { ms: 30_000, label: "30 秒" },
   { ms: 60_000, label: "1 分钟" },
+];
+
+const WINDOW_OPTIONS: Array<{ ms: number; label: string }> = [
+  { ms: 15 * 60_000, label: "15 分钟" },
+  { ms: 30 * 60_000, label: "30 分钟" },
+  { ms: 60 * 60_000, label: "1 小时" },
+  { ms: 3 * 60 * 60_000, label: "3 小时" },
 ];
 
 const CHART = {
@@ -44,6 +52,16 @@ function readIntervalMs(): number {
     /* ignore */
   }
   return 5_000;
+}
+
+function readWindowMs(): number {
+  try {
+    const n = Number(localStorage.getItem(WINDOW_KEY));
+    if (WINDOW_OPTIONS.some((o) => o.ms === n)) return n;
+  } catch {
+    /* ignore */
+  }
+  return 30 * 60_000;
 }
 
 function formatClock(iso: string): string {
@@ -89,6 +107,7 @@ export function AgentRuntimePage({ onBack }: Props) {
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const [intervalMs, setIntervalMs] = useState(readIntervalMs);
+  const [windowMs, setWindowMs] = useState(readWindowMs);
 
   useEffect(() => {
     try {
@@ -107,12 +126,20 @@ export function AgentRuntimePage({ onBack }: Props) {
   }, [intervalMs]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(WINDOW_KEY, String(windowMs));
+    } catch {
+      /* ignore */
+    }
+  }, [windowMs]);
+
+  useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | undefined;
 
     const load = (): void => {
       api
-        .getAgentRuntime()
+        .getAgentRuntime({ windowMs })
         .then((res) => {
           if (cancelled) return;
           setData(res);
@@ -134,7 +161,7 @@ export function AgentRuntimePage({ onBack }: Props) {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [autoRefresh, intervalMs]);
+  }, [autoRefresh, intervalMs, windowMs]);
 
   const maxY = useMemo(() => {
     const cap = data?.maxConcurrentRuns ?? 1;
@@ -155,6 +182,8 @@ export function AgentRuntimePage({ onBack }: Props) {
 
   const intervalLabel =
     INTERVAL_OPTIONS.find((o) => o.ms === intervalMs)?.label ?? "5 秒";
+  const windowLabel =
+    WINDOW_OPTIONS.find((o) => o.ms === windowMs)?.label ?? "30 分钟";
   const subtitle = autoRefresh
     ? `全局并发 · 自动刷新 ${intervalLabel}`
     : "全局并发 · 自动刷新已关闭";
@@ -170,7 +199,7 @@ export function AgentRuntimePage({ onBack }: Props) {
   const refreshNow = (): void => {
     setLoading(true);
     api
-      .getAgentRuntime()
+      .getAgentRuntime({ windowMs })
       .then((res) => {
         setData(res);
         setError(null);
@@ -214,6 +243,19 @@ export function AgentRuntimePage({ onBack }: Props) {
             ))}
           </select>
         </label>
+        <label className="stats-filter">
+          <span>时间轴</span>
+          <select
+            value={windowMs}
+            onChange={(e) => setWindowMs(Number(e.target.value))}
+          >
+            {WINDOW_OPTIONS.map((o) => (
+              <option key={o.ms} value={o.ms}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className="runtime-refresh-now" onClick={refreshNow}>
           立即刷新
         </button>
@@ -251,7 +293,9 @@ export function AgentRuntimePage({ onBack }: Props) {
           </div>
 
           <div className="runtime-chart-wrap">
-            <div className="runtime-chart-label">并发执行数量（最近约 30 分钟）</div>
+            <div className="runtime-chart-label">
+              并发执行数量（最近 {windowLabel}）
+            </div>
             <svg
               className="runtime-chart"
               viewBox={`0 0 ${width} ${height}`}

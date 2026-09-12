@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { ProjectSettingsView } from "../types";
+import type { DeploymentServiceConfig, ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
-import DeploymentSection from "./settings/DeploymentSection";
+import DeploymentSection, {
+  type DeploymentServiceDraft,
+} from "./settings/DeploymentSection";
 import PlanExportSection from "./settings/PlanExportSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
 
@@ -10,6 +12,35 @@ interface Props {
   projectId: string;
   projectName: string;
   onBack: () => void;
+}
+
+function toDrafts(
+  services: DeploymentServiceConfig[] | undefined,
+): DeploymentServiceDraft[] {
+  return (services ?? []).map((s) => ({
+    ...s,
+    key: `svc-${s.serviceId}-${Math.random().toString(36).slice(2, 8)}`,
+  }));
+}
+
+function draftsEqual(
+  a: DeploymentServiceDraft[],
+  b: DeploymentServiceDraft[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.serviceId !== y.serviceId ||
+      Boolean(x.gracefulRestart) !== Boolean(y.gracefulRestart) ||
+      (x.restartNotifyUrl ?? "") !== (y.restartNotifyUrl ?? "") ||
+      (x.restartPollUrl ?? "") !== (y.restartPollUrl ?? "")
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export default function ProjectSettingsPage({
@@ -26,27 +57,37 @@ export default function ProjectSettingsPage({
   const [savedDefaultProvider, setSavedDefaultProvider] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [savedDefaultModel, setSavedDefaultModel] = useState("");
-  const [gracefulRestart, setGracefulRestart] = useState(false);
-  const [savedGracefulRestart, setSavedGracefulRestart] = useState(false);
-  const [restartNotifyUrl, setRestartNotifyUrl] = useState("");
-  const [savedRestartNotifyUrl, setSavedRestartNotifyUrl] = useState("");
-  const [restartPollUrl, setRestartPollUrl] = useState("");
-  const [savedRestartPollUrl, setSavedRestartPollUrl] = useState("");
+  const [services, setServices] = useState<DeploymentServiceDraft[]>([]);
+  const [savedServices, setSavedServices] = useState<DeploymentServiceDraft[]>(
+    [],
+  );
+  const [knownServices, setKnownServices] = useState<
+    Array<{ serviceId: string; name?: string }>
+  >([]);
   const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [registering, setRegistering] = useState(false);
+  const [registeringServiceId, setRegisteringServiceId] = useState<
+    string | null
+  >(null);
   const [registerNotice, setRegisterNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const applyDeploymentFromView = useCallback((data: ProjectSettingsView) => {
+    const drafts = toDrafts(data.project.deployment?.services);
+    setServices(drafts);
+    setSavedServices(drafts);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [data, providers] = await Promise.all([
+      const [data, providers, depServices] = await Promise.all([
         api.getProjectSettings(projectId),
         api.listProviders().catch(() => null),
+        api.listDeploymentServices().catch(() => ({ services: [] })),
       ]);
       setView(data);
       setRules(data.project.agent?.rules ?? "");
@@ -57,36 +98,26 @@ export default function ProjectSettingsPage({
       setSavedDefaultProvider(data.project.runtime?.defaultProvider ?? "");
       setDefaultModel(data.project.runtime?.defaultModel ?? "");
       setSavedDefaultModel(data.project.runtime?.defaultModel ?? "");
-      const dep = data.project.deployment;
-      const gr = dep?.gracefulRestart === true;
-      setGracefulRestart(gr);
-      setSavedGracefulRestart(gr);
-      setRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-      setSavedRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-      setRestartPollUrl(dep?.restartPollUrl ?? "");
-      setSavedRestartPollUrl(dep?.restartPollUrl ?? "");
+      applyDeploymentFromView(data);
       if (providers) setEnvDefaultProvider(providers.defaultProvider);
+      setKnownServices(
+        (depServices.services ?? [])
+          .map((s) => ({
+            serviceId: String(s.serviceId ?? "").trim(),
+            ...(typeof s.name === "string" ? { name: s.name } : {}),
+          }))
+          .filter((s) => s.serviceId),
+      );
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, applyDeploymentFromView]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const applyDeploymentFromView = (data: ProjectSettingsView): void => {
-    const dep = data.project.deployment;
-    const gr = dep?.gracefulRestart === true;
-    setGracefulRestart(gr);
-    setSavedGracefulRestart(gr);
-    setRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-    setSavedRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-    setRestartPollUrl(dep?.restartPollUrl ?? "");
-    setSavedRestartPollUrl(dep?.restartPollUrl ?? "");
-  };
 
   const save = async (): Promise<void> => {
     setSaving(true);
@@ -101,13 +132,20 @@ export default function ProjectSettingsPage({
           defaultProvider: defaultProvider.trim(),
           defaultModel: defaultModel.trim(),
         },
-        deployment: gracefulRestart
-          ? {
-              gracefulRestart: true,
-              restartNotifyUrl: restartNotifyUrl.trim(),
-              restartPollUrl: restartPollUrl.trim(),
-            }
-          : { gracefulRestart: false },
+        deployment: {
+          services: services
+            .filter((s) => s.serviceId.trim())
+            .map((s) => ({
+              serviceId: s.serviceId.trim(),
+              gracefulRestart: s.gracefulRestart === true,
+              ...(s.gracefulRestart
+                ? {
+                    restartNotifyUrl: s.restartNotifyUrl?.trim() || "",
+                    restartPollUrl: s.restartPollUrl?.trim() || "",
+                  }
+                : {}),
+            })),
+        },
       });
       setView(data);
       setSavedRules(rules);
@@ -123,21 +161,26 @@ export default function ProjectSettingsPage({
     }
   };
 
-  const registerDeployment = async (): Promise<void> => {
-    setRegistering(true);
+  const registerDeployment = async (
+    svc: DeploymentServiceDraft,
+  ): Promise<void> => {
+    const serviceId = svc.serviceId.trim();
+    if (!serviceId) return;
+    setRegisteringServiceId(serviceId);
     setError(null);
     setNotice(null);
     setRegisterNotice(null);
     try {
+      const gracefulRestart = svc.gracefulRestart === true;
       const result = await api.registerProjectDeployment(projectId, {
+        serviceId,
         gracefulRestart,
         ...(gracefulRestart
           ? {
-              restartNotifyUrl: restartNotifyUrl.trim(),
-              restartPollUrl: restartPollUrl.trim(),
+              restartNotifyUrl: svc.restartNotifyUrl?.trim() || "",
+              restartPollUrl: svc.restartPollUrl?.trim() || "",
             }
           : {}),
-        serviceId: projectName.trim() || undefined,
       });
       setView(result.settings);
       applyDeploymentFromView(result.settings);
@@ -145,7 +188,7 @@ export default function ProjectSettingsPage({
     } catch (e) {
       setError(String(e));
     } finally {
-      setRegistering(false);
+      setRegisteringServiceId(null);
     }
   };
 
@@ -154,9 +197,7 @@ export default function ProjectSettingsPage({
     exportDir !== savedExportDir ||
     defaultProvider !== savedDefaultProvider ||
     defaultModel !== savedDefaultModel ||
-    gracefulRestart !== savedGracefulRestart ||
-    restartNotifyUrl !== savedRestartNotifyUrl ||
-    restartPollUrl !== savedRestartPollUrl;
+    !draftsEqual(services, savedServices);
   const globalRules = view?.global.agent?.rules ?? "";
   const effectiveRules = view?.effective.agent?.rules ?? "";
   const globalExportDir = view?.global.plan?.exportDir ?? "";
@@ -186,20 +227,12 @@ export default function ProjectSettingsPage({
             onModelChange={setDefaultModel}
           />
           <DeploymentSection
-            gracefulRestart={gracefulRestart}
-            restartNotifyUrl={restartNotifyUrl}
-            restartPollUrl={restartPollUrl}
-            registering={registering}
-            registerDisabled={
-              registering ||
-              (gracefulRestart &&
-                (!restartNotifyUrl.trim() || !restartPollUrl.trim()))
-            }
+            services={services}
+            knownServices={knownServices}
+            registeringServiceId={registeringServiceId}
             registerNotice={registerNotice}
-            onGracefulRestartChange={setGracefulRestart}
-            onNotifyUrlChange={setRestartNotifyUrl}
-            onPollUrlChange={setRestartPollUrl}
-            onRegister={() => void registerDeployment()}
+            onChange={setServices}
+            onRegister={(svc) => void registerDeployment(svc)}
           />
           <AgentRulesSection
             title="全局 Agent Rules（只读）"
@@ -217,7 +250,9 @@ export default function ProjectSettingsPage({
           <AgentRulesSection
             title="生效预览"
             description="合并后的规则（全局 + 项目）。"
-            value={dirty ? buildRulesPreview(globalRules, rules) : effectiveRules}
+            value={
+              dirty ? buildRulesPreview(globalRules, rules) : effectiveRules
+            }
             mode="preview"
           />
           <PlanExportSection

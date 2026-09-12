@@ -72,7 +72,7 @@ App 侧：`POST :4211/api/ops/deploy`（graceful）→ 转发 `DEPLOYMENT_API_UR
 ```bash
 curl -sS -X PUT http://127.0.0.1:4220/api/services/web-cursor \
   -H 'content-type: application/json' \
-  -d '{"restartNotifyUrl":"http://127.0.0.1:4211/api/ops/restart-notify","restartPollUrl":"http://127.0.0.1:4211/api/ops/restart-status","gracefulRestartMaxWaitMs":600000}'
+  -d '{"restartNotifyUrl":"http://127.0.0.1:4211/api/ops/restart-notify","restartPollUrl":"http://127.0.0.1:4211/api/ops/restart-status","gracefulRestartMaxWaitMs":300000}'
 ```
 
 ### 运行时启停（随发版包进入 runtime）

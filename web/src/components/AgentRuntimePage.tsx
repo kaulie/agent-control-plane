@@ -304,7 +304,7 @@ export function AgentRuntimePage({ onBack }: Props) {
         <div className="runtime-drain-banner" role="status">
           部署 drain 中：已暂停启动排队任务
           {data.runningCount === 0 && data.queuedCount > 0
-            ? `（当前 0 并发但仍有 ${data.queuedCount} 条排队，属预期；超时或取消 hold 后会自动恢复）`
+            ? `（当前 0 并发但仍有 ${data.queuedCount} 条排队，属预期；约 5 分钟超时或取消 hold 后会自动恢复）`
             : "；在跑的 agent 会跑完"}
           {data.admissionPausedAt
             ? ` · 开始于 ${formatClock(data.admissionPausedAt)}`

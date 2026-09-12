@@ -585,14 +585,31 @@ export class AgentGateway {
         ? this.admissionPaused
           ? "无运行中的 agent；可以重启。排队任务在部署结束后由新进程恢复。"
           : "无运行中的 agent；可以重启。"
-        : `当前有 ${snap.runningCount} 个 agent 在运行；已暂停启动排队中的任务。请稍后再查。`,
+        : this.admissionPaused
+          ? `当前有 ${snap.runningCount} 个 agent 在运行；已暂停启动排队中的任务。请稍后再查。`
+          : `当前有 ${snap.runningCount} 个 agent 在运行；请稍后再查。`,
     };
   }
 
   /**
    * Pause starting any new/queued runs (in-flight continue). Used by graceful deploy.
    */
-  beginDeployDrain(): void {
+  beginDeployDrain(meta?: {
+    serviceId?: string;
+    requestId?: string;
+    deployment?: string;
+    version?: string;
+    message?: string;
+  }): void {
+    if (meta) {
+      console.warn(
+        `[deploy-drain] notify serviceId=${meta.serviceId ?? "-"} requestId=${
+          meta.requestId ?? "-"
+        } deployment=${meta.deployment ?? "-"} version=${meta.version ?? "-"} msg=${
+          meta.message ?? "-"
+        }`,
+      );
+    }
     if (this.admissionPaused) return;
     this.admissionPaused = true;
     console.warn(

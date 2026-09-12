@@ -136,7 +136,8 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/ops/restart-status", async () => {
+  app.get("/api/ops/restart-status", async (_req, reply) => {
+    reply.header("Cache-Control", "no-store");
     const snap = gateway.getRestartStatus();
     const held = opts.deployQueue.getHeld();
     let deploy = held
@@ -158,6 +159,9 @@ export async function registerRoutes(
     const heldAfter = opts.deployQueue.getHeld();
     return {
       ...snap,
+      // Deployment-service poll aliases (any true → proceed).
+      canDeploy: snap.canRestart,
+      ready: snap.canRestart,
       gracefulRestart,
       maxWaitMs: opts.deployQueue.maxWaitMs,
       waitUntil: heldAfter ? waitUntil : null,
@@ -168,6 +172,47 @@ export async function registerRoutes(
         ? undefined
         : "稍后再次 GET /api/ops/restart-status；空闲或等待超时后会自动放行已 hold 的部署",
     };
+  });
+
+  /**
+   * Deployment-service restart notify contract:
+   * POST JSON → begin drain (admissionPaused). Body is logged; 2xx is enough.
+   */
+  app.post<{
+    Body: {
+      serviceId?: string;
+      requestId?: string;
+      deployment?: string;
+      version?: string;
+      message?: string;
+    };
+  }>("/api/ops/restart-notify", async (req, reply) => {
+    const body = req.body ?? {};
+    const serviceId = body.serviceId?.trim() || "";
+    const requestId = body.requestId?.trim() || "";
+    const deployment = body.deployment?.trim() || "";
+    const message = body.message?.trim() || "";
+    if (!serviceId || !requestId || !deployment || !message) {
+      return reply.code(400).send({
+        error:
+          "serviceId, requestId, deployment, and message are required",
+      });
+    }
+    gateway.beginDeployDrain({
+      serviceId,
+      requestId,
+      deployment,
+      ...(body.version?.trim() ? { version: body.version.trim() } : {}),
+      message,
+    });
+    const snap = gateway.getRestartStatus();
+    return reply.code(200).send({
+      ok: true,
+      admissionPaused: true,
+      canRestart: snap.canRestart,
+      runningCount: snap.runningCount,
+      message: "drain started; poll /api/ops/restart-status until canRestart",
+    });
   });
 
   app.post("/api/ops/deploy/cancel-hold", async (_req, reply) => {

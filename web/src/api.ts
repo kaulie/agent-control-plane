@@ -215,13 +215,18 @@ export const api = {
       body: JSON.stringify(body),
     }).then((r) => j<ProjectSettingsView>(r)),
 
+  listDeploymentServices: () =>
+    fetch(`${BASE}/ops/deployment-services`).then((r) =>
+      j<{ services: Array<Record<string, unknown>> }>(r),
+    ),
+
   registerProjectDeployment: (
     projectId: string,
     body: {
+      serviceId: string;
       gracefulRestart: boolean;
       restartNotifyUrl?: string;
       restartPollUrl?: string;
-      serviceId?: string;
     },
   ) =>
     fetch(`${BASE}/projects/${projectId}/deployment/register`, {

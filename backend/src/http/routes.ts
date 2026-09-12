@@ -351,16 +351,16 @@ export async function registerRoutes(
   });
 
   /**
-   * Persist project deployment settings and push graceful URLs to the
+   * Persist one deployment service on the project and push graceful URLs to the
    * independent deployment service contract (PUT /api/services/:serviceId).
    */
   app.post<{
     Params: { projectId: string };
     Body: {
+      serviceId?: string;
       gracefulRestart?: boolean;
       restartNotifyUrl?: string;
       restartPollUrl?: string;
-      serviceId?: string;
     };
   }>("/api/projects/:projectId/deployment/register", async (req, reply) => {
     try {
@@ -369,37 +369,33 @@ export async function registerRoutes(
         return reply.code(404).send({ error: "project not found" });
       }
 
-      const gracefulRestart = req.body?.gracefulRestart === true;
-      const deploymentPatch = gracefulRestart
-        ? {
-            gracefulRestart: true as const,
-            restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
-            restartPollUrl: req.body?.restartPollUrl?.trim() || "",
-          }
-        : { gracefulRestart: false as const };
+      const serviceId = req.body?.serviceId?.trim() || "";
+      if (!serviceId) {
+        return reply.code(400).send({ error: "serviceId is required" });
+      }
 
-      const view = gateway.updateProjectSettings(req.params.projectId, {
-        deployment: deploymentPatch,
+      const gracefulRestart = req.body?.gracefulRestart === true;
+      const view = gateway.upsertProjectDeploymentService(req.params.projectId, {
+        serviceId,
+        gracefulRestart,
+        ...(gracefulRestart
+          ? {
+              restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
+              restartPollUrl: req.body?.restartPollUrl?.trim() || "",
+            }
+          : {}),
       });
       if (!view) {
         return reply.code(404).send({ error: "project not found" });
       }
 
-      const serviceId =
-        req.body?.serviceId?.trim() || project.name.trim() || project.projectId;
       const service = await opts.deployQueue.registerServiceGraceful({
         serviceId,
         gracefulRestart,
         ...(gracefulRestart
           ? {
-              restartNotifyUrl: String(
-                (deploymentPatch as { restartNotifyUrl?: string })
-                  .restartNotifyUrl ?? "",
-              ),
-              restartPollUrl: String(
-                (deploymentPatch as { restartPollUrl?: string }).restartPollUrl ??
-                  "",
-              ),
+              restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
+              restartPollUrl: req.body?.restartPollUrl?.trim() || "",
               gracefulRestartMaxWaitMs: opts.deployQueue.maxWaitMs,
             }
           : {}),
@@ -417,6 +413,17 @@ export async function registerRoutes(
     } catch (err) {
       return reply
         .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/api/ops/deployment-services", async (_req, reply) => {
+    try {
+      const services = await opts.deployQueue.listServices();
+      return { services };
+    } catch (err) {
+      return reply
+        .code(502)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });

@@ -1810,6 +1810,14 @@ body {
   margin-top: 12px;
 }
 
+.deployment-service-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg-3);
+}
+
 .deployment-register-row {
   display: flex;
   flex-wrap: wrap;
@@ -1820,6 +1828,27 @@ body {
 
 .deployment-register-btn {
   flex: 0 0 auto;
+}
+
+.deployment-remove-btn,
+.deployment-add-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.deployment-remove-btn:hover,
+.deployment-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.deployment-add-known {
+  color: var(--text-dim);
 }
 
 .runtime-select-compact {

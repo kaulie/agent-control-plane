@@ -562,9 +562,12 @@ export class Store {
     projectId: string,
     patch: AppSettings,
   ): AppSettings | undefined {
-    if (!this.getProject(projectId)) return undefined;
+    const project = this.getProject(projectId);
+    if (!project) return undefined;
     const current = this.getProjectSettings(projectId) ?? {};
-    const next = patchSettings(current, patch);
+    const next = patchSettings(current, patch, {
+      deploymentFallbackServiceId: project.name,
+    });
     const updatedAt = new Date().toISOString();
     this.db
       .prepare(

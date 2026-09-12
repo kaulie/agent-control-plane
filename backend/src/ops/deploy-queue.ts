@@ -376,6 +376,13 @@ export class DeployQueue {
     return j<Record<string, unknown>>(putRes);
   }
 
+  /** List service contracts from the deployment API. */
+  async listServices(): Promise<Array<Record<string, unknown>>> {
+    const res = await fetch(`${this.apiUrl}/api/services`);
+    const body = await j<{ services?: Array<Record<string, unknown>> }>(res);
+    return body.services ?? [];
+  }
+
   private async onWaitTimeout(): Promise<void> {
     this.waitTimer = undefined;
     if (!this.held) return;

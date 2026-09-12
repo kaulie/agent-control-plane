@@ -26,15 +26,28 @@ export interface WorkspaceConfig {
 }
 
 /**
- * Project-level deployment / restart contract.
+ * One deployment-service contract bound to a project.
  * When gracefulRestart is true, both notify + poll URLs are required.
  */
-export interface DeploymentConfig {
-  /** Whether this project's runtime supports graceful restart. */
+export interface DeploymentServiceConfig {
+  /** Deployment SQLite service id (unique within the project). */
+  serviceId: string;
   gracefulRestart?: boolean;
-  /** Called before restart (e.g. POST drain/notify). */
   restartNotifyUrl?: string;
-  /** Polled until restart is allowed (e.g. GET can-restart). */
+  restartPollUrl?: string;
+}
+
+/**
+ * Project-level deployment settings (multi-service).
+ * Legacy flat fields are accepted on read and migrated to `services`.
+ */
+export interface DeploymentConfig {
+  services?: DeploymentServiceConfig[];
+  /** @deprecated migrated into services[0] */
+  gracefulRestart?: boolean;
+  /** @deprecated migrated into services[0] */
+  restartNotifyUrl?: string;
+  /** @deprecated migrated into services[0] */
   restartPollUrl?: string;
 }
 

@@ -364,9 +364,7 @@ export async function registerRoutes(
     };
   }>("/api/projects/:projectId/deployment/register", async (req, reply) => {
     try {
-      const project = gateway
-        .listProjects()
-        .find((p) => p.projectId === req.params.projectId);
+      const project = gateway.getProject(req.params.projectId);
       if (!project) {
         return reply.code(404).send({ error: "project not found" });
       }

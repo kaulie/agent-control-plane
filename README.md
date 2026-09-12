@@ -120,6 +120,14 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 Each Task belongs to a Project (`projectId`). On first boot a default project
 `Default` (`project-default`) is created and existing tasks are attached to it.
 
+## CI
+
+Pull requests and pushes to `main` run [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+`npm ci` → typecheck → build → `npm test`. Compiled `backend/dist` and `web/dist`
+are uploaded as GitHub Actions artifacts and expire after **7 days** (Actions run
+→ Artifacts). This does not deploy; production still uses `release.sh` then
+async `POST /api/ops/deploy`.
+
 ## Project layout
 
 ```

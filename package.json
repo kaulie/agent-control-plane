@@ -13,7 +13,8 @@
     "dev:web": "npm run dev --workspace web",
     "build": "npm run build --workspace backend && npm run build --workspace web",
     "start": "npm run build && npm run start --workspace backend",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node backend/scripts/run-tests.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

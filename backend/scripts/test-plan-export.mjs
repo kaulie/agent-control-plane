@@ -45,7 +45,8 @@ const md = buildPlanMarkdown({
 
 assert(md.includes("# Plan — Dental plan"), "title in markdown");
 assert(md.includes("Step 1: analyze"), "plan body in markdown");
-assert(md.includes("Make a plan"), "user request in markdown");
+assert(md.includes("## Plan"), "plan section heading");
+assert(md.includes("task-abc"), "taskId in markdown");
 
 const streamed = buildPlanMarkdown({
   exportDir: "/tmp/plans",

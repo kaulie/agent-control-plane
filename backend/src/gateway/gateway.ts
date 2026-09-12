@@ -180,11 +180,19 @@ export class AgentGateway {
    * in-flight runs continue until they finish.
    */
   private admissionPaused = false;
-  /** In-memory ring buffer of runningCount samples (survives until process restart). */
+  /**
+   * In-memory ring buffer of runningCount samples.
+   * Also mirrored to SQLite (`concurrency_samples`) so charts survive restart.
+   */
   private readonly concurrencySeries: ConcurrencySample[] = [];
+  private concurrencyPersistCount = 0;
   private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 5_000;
   /** ~3 hours at 5s interval (longest chart window). */
   private static readonly CONCURRENCY_SERIES_MAX = 2_160;
+  /** Keep DB/history aligned with the longest UI window (3h). */
+  private static readonly CONCURRENCY_RETENTION_MS = 3 * 60 * 60 * 1000;
+  /** Prune SQLite about once per minute (12 × 5s). */
+  private static readonly CONCURRENCY_PRUNE_EVERY = 12;
   private static readonly DEFAULT_WINDOW_MS = 30 * 60 * 1000;
   private static readonly ALLOWED_WINDOWS_MS = [
     15 * 60 * 1000,
@@ -644,6 +652,7 @@ export class AgentGateway {
 
   private startConcurrencySampler(): void {
     if (this.concurrencySampleTimer) return;
+    this.loadConcurrencySeriesFromStore();
     this.recordConcurrencySample();
     this.concurrencySampleTimer = setInterval(
       () => this.recordConcurrencySample(),
@@ -659,13 +668,62 @@ export class AgentGateway {
     }
   }
 
+  private loadConcurrencySeriesFromStore(): void {
+    if (this.concurrencySeries.length > 0) return;
+    const cutoff = new Date(
+      Date.now() - AgentGateway.CONCURRENCY_RETENTION_MS,
+    ).toISOString();
+    try {
+      const rows = this.store.listConcurrencySamplesSince(cutoff);
+      for (const row of rows) {
+        this.concurrencySeries.push({
+          t: row.t,
+          runningCount: row.runningCount,
+        });
+      }
+      while (
+        this.concurrencySeries.length > AgentGateway.CONCURRENCY_SERIES_MAX
+      ) {
+        this.concurrencySeries.shift();
+      }
+      if (rows.length > 0) {
+        console.warn(
+          `[concurrency-series] restored ${rows.length} samples from sqlite`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[concurrency-series] failed to load from sqlite: ${String(err)}`,
+      );
+    }
+  }
+
   private recordConcurrencySample(): void {
-    this.concurrencySeries.push({
+    const sample: ConcurrencySample = {
       t: new Date().toISOString(),
       runningCount: this.runningCount,
-    });
+    };
+    this.concurrencySeries.push(sample);
     while (this.concurrencySeries.length > AgentGateway.CONCURRENCY_SERIES_MAX) {
       this.concurrencySeries.shift();
+    }
+
+    try {
+      this.store.insertConcurrencySample(sample.t, sample.runningCount);
+      this.concurrencyPersistCount += 1;
+      if (
+        this.concurrencyPersistCount % AgentGateway.CONCURRENCY_PRUNE_EVERY ===
+        0
+      ) {
+        const before = new Date(
+          Date.now() - AgentGateway.CONCURRENCY_RETENTION_MS,
+        ).toISOString();
+        this.store.pruneConcurrencySamples(before);
+      }
+    } catch (err) {
+      console.warn(
+        `[concurrency-series] failed to persist sample: ${String(err)}`,
+      );
     }
   }
 

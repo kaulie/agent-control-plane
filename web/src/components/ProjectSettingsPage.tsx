@@ -35,6 +35,8 @@ export default function ProjectSettingsPage({
   const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [registerNotice, setRegisterNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -75,10 +77,22 @@ export default function ProjectSettingsPage({
     void load();
   }, [load]);
 
+  const applyDeploymentFromView = (data: ProjectSettingsView): void => {
+    const dep = data.project.deployment;
+    const gr = dep?.gracefulRestart === true;
+    setGracefulRestart(gr);
+    setSavedGracefulRestart(gr);
+    setRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
+    setSavedRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
+    setRestartPollUrl(dep?.restartPollUrl ?? "");
+    setSavedRestartPollUrl(dep?.restartPollUrl ?? "");
+  };
+
   const save = async (): Promise<void> => {
     setSaving(true);
     setError(null);
     setNotice(null);
+    setRegisterNotice(null);
     try {
       const data = await api.updateProjectSettings(projectId, {
         agent: { rules },
@@ -100,19 +114,38 @@ export default function ProjectSettingsPage({
       setSavedExportDir(exportDir);
       setSavedDefaultProvider(defaultProvider);
       setSavedDefaultModel(defaultModel);
-      const dep = data.project.deployment;
-      const gr = dep?.gracefulRestart === true;
-      setGracefulRestart(gr);
-      setSavedGracefulRestart(gr);
-      setRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-      setSavedRestartNotifyUrl(dep?.restartNotifyUrl ?? "");
-      setRestartPollUrl(dep?.restartPollUrl ?? "");
-      setSavedRestartPollUrl(dep?.restartPollUrl ?? "");
+      applyDeploymentFromView(data);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const registerDeployment = async (): Promise<void> => {
+    setRegistering(true);
+    setError(null);
+    setNotice(null);
+    setRegisterNotice(null);
+    try {
+      const result = await api.registerProjectDeployment(projectId, {
+        gracefulRestart,
+        ...(gracefulRestart
+          ? {
+              restartNotifyUrl: restartNotifyUrl.trim(),
+              restartPollUrl: restartPollUrl.trim(),
+            }
+          : {}),
+        serviceId: projectName.trim() || undefined,
+      });
+      setView(result.settings);
+      applyDeploymentFromView(result.settings);
+      setRegisterNotice(result.message);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRegistering(false);
     }
   };
 
@@ -156,9 +189,17 @@ export default function ProjectSettingsPage({
             gracefulRestart={gracefulRestart}
             restartNotifyUrl={restartNotifyUrl}
             restartPollUrl={restartPollUrl}
+            registering={registering}
+            registerDisabled={
+              registering ||
+              (gracefulRestart &&
+                (!restartNotifyUrl.trim() || !restartPollUrl.trim()))
+            }
+            registerNotice={registerNotice}
             onGracefulRestartChange={setGracefulRestart}
             onNotifyUrlChange={setRestartNotifyUrl}
             onPollUrlChange={setRestartPollUrl}
+            onRegister={() => void registerDeployment()}
           />
           <AgentRulesSection
             title="全局 Agent Rules（只读）"

@@ -2,18 +2,26 @@ interface Props {
   gracefulRestart: boolean;
   restartNotifyUrl: string;
   restartPollUrl: string;
+  registering?: boolean;
+  registerDisabled?: boolean;
+  registerNotice?: string | null;
   onGracefulRestartChange: (supported: boolean) => void;
   onNotifyUrlChange: (value: string) => void;
   onPollUrlChange: (value: string) => void;
+  onRegister: () => void;
 }
 
 export default function DeploymentSection({
   gracefulRestart,
   restartNotifyUrl,
   restartPollUrl,
+  registering = false,
+  registerDisabled = false,
+  registerNotice = null,
   onGracefulRestartChange,
   onNotifyUrlChange,
   onPollUrlChange,
+  onRegister,
 }: Props) {
   return (
     <section className="settings-section">
@@ -67,9 +75,28 @@ export default function DeploymentSection({
         </div>
       ) : (
         <p className="settings-section-meta">
-          不支持时部署可立即重启，无需等待 drain。
+          不支持时部署可立即重启，无需等待 drain。注册时会清空部署服务上的
+          notify / poll。
         </p>
       )}
+
+      <div className="deployment-register-row">
+        <button
+          type="button"
+          className="settings-save deployment-register-btn"
+          disabled={registerDisabled || registering}
+          onClick={onRegister}
+        >
+          {registering ? "注册中…" : "注册到 deployment"}
+        </button>
+        {registerNotice ? (
+          <span className="settings-notice">{registerNotice}</span>
+        ) : (
+          <span className="settings-section-meta">
+            写入项目设置，并同步到部署服务契约（serviceId = 项目名）
+          </span>
+        )}
+      </div>
     </section>
   );
 }

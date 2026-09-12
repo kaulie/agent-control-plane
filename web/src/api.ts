@@ -214,6 +214,29 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<ProjectSettingsView>(r)),
+
+  registerProjectDeployment: (
+    projectId: string,
+    body: {
+      gracefulRestart: boolean;
+      restartNotifyUrl?: string;
+      restartPollUrl?: string;
+      serviceId?: string;
+    },
+  ) =>
+    fetch(`${BASE}/projects/${projectId}/deployment/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) =>
+      j<{
+        ok: boolean;
+        serviceId: string;
+        message: string;
+        settings: ProjectSettingsView;
+        service: Record<string, unknown>;
+      }>(r),
+    ),
 };
 
 export type { TokenUsage };

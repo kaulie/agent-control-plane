@@ -312,6 +312,70 @@ export class DeployQueue {
     return undefined;
   }
 
+  /**
+   * Update graceful-restart URLs on an existing deployment-service contract.
+   * Requires the service to already be registered (runtimeDir / cmds present).
+   */
+  async registerServiceGraceful(input: {
+    serviceId: string;
+    gracefulRestart: boolean;
+    restartNotifyUrl?: string;
+    restartPollUrl?: string;
+    gracefulRestartMaxWaitMs?: number;
+  }): Promise<Record<string, unknown>> {
+    const serviceId = input.serviceId.trim();
+    if (!serviceId) throw new Error("serviceId is required");
+
+    const getRes = await fetch(
+      `${this.apiUrl}/api/services/${encodeURIComponent(serviceId)}`,
+    );
+    if (getRes.status === 404) {
+      throw new Error(
+        `部署服务中未找到 service「${serviceId}」，请先在 deployment 注册基础契约`,
+      );
+    }
+    const existing = await j<Record<string, unknown>>(getRes);
+
+    let restartNotifyUrl = "";
+    let restartPollUrl = "";
+    let gracefulRestartMaxWaitMs: number | undefined;
+    if (input.gracefulRestart) {
+      restartNotifyUrl = input.restartNotifyUrl?.trim() || "";
+      restartPollUrl = input.restartPollUrl?.trim() || "";
+      if (!restartNotifyUrl || !restartPollUrl) {
+        throw new Error("支持 graceful restart 时必须提供 notify / poll URL");
+      }
+      gracefulRestartMaxWaitMs =
+        input.gracefulRestartMaxWaitMs ?? this.maxWaitMs;
+    }
+
+    const body: Record<string, unknown> = {
+      name: existing.name,
+      runtimeDir: existing.runtimeDir,
+      healthUrl: existing.healthUrl,
+      startCmd: existing.startCmd,
+      stopCmd: existing.stopCmd,
+      restartCmd: existing.restartCmd,
+      restartNotifyUrl,
+      restartPollUrl,
+    };
+    if (gracefulRestartMaxWaitMs != null) {
+      body.gracefulRestartMaxWaitMs = gracefulRestartMaxWaitMs;
+    } else {
+      body.gracefulRestartMaxWaitMs = 0;
+    }
+
+    const putRes = await fetch(
+      `${this.apiUrl}/api/services/${encodeURIComponent(serviceId)}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    return j<Record<string, unknown>>(putRes);
+  }
+
   private async onWaitTimeout(): Promise<void> {
     this.waitTimer = undefined;
     if (!this.held) return;

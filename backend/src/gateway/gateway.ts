@@ -741,20 +741,31 @@ export class AgentGateway {
       this.publish({ type: "agent_event", event });
     };
 
-    this.persistUserMessage(
-      taskId,
-      runId,
-      agentId,
-      {
-        text,
-        mode,
-        imageRefs,
-        planAnswerBatch: input.planAnswerBatch,
-        selfCheck: input.selfCheck,
-        queued: isQueued,
-      },
-      persistAndPublish,
-    );
+    try {
+      this.persistUserMessage(
+        taskId,
+        runId,
+        agentId,
+        {
+          text,
+          mode,
+          imageRefs,
+          planAnswerBatch: input.planAnswerBatch,
+          selfCheck: input.selfCheck,
+          queued: isQueued,
+        },
+        persistAndPublish,
+      );
+    } catch (err) {
+      // Don't leave a phantom running/queued run — the UI would show
+      // "Agent 工作中" with no worker, and follow-up sends look like no-ops.
+      this.store.updateRun(runId, {
+        status: "error",
+        completedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
 
     if (isQueued) {
       this.enqueuePending(taskId, pending);

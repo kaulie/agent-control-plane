@@ -30,12 +30,38 @@ That copies scripts into `deployment/web-cursor/ops/` and starts both daemons.
 
 ## Request a deploy (no self-kill)
 
-Prefer the gateway API (returns immediately):
+Prefer the gateway API (returns immediately). **Graceful by default:**
 
 ```bash
 curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
   -H 'content-type: application/json' \
   -d '{"deployment":"deployment-<hash>"}'
+```
+
+If agents are running, the response is `state: "waiting_for_idle"`: in-flight runs
+continue, **queued runs are paused**, and no request file is written yet. Poll:
+
+```bash
+curl -sS http://127.0.0.1:4211/api/ops/restart-status
+# { "canRestart": true|false, "runningCount": N, "deploy": {...} }
+```
+
+When `canRestart` becomes true (or the last run finishes), the held deploy is
+released into `deploy-requests/` for deploy-agent. After restart, queued runs
+resume via `recoverQueuedRuns`.
+
+Emergency (skip wait, may interrupt running agents):
+
+```bash
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+  -H 'content-type: application/json' \
+  -d '{"deployment":"deployment-<hash>","force":true}'
+```
+
+Cancel a held deploy and resume queue admission:
+
+```bash
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy/cancel-hold
 ```
 
 Or drop a JSON file:
@@ -47,7 +73,6 @@ EOF
 ```
 
 Poll status:
-
 ```bash
 curl -sS http://127.0.0.1:4211/api/ops/deploy/deploy-req-demo
 # or: cat /Users/gaolei/deployment/web-cursor/deploy-status/deploy-req-demo.json

@@ -76,6 +76,11 @@ export interface GatewayConfig {
   maxConcurrentRuns?: number;
   /** Gateway RSS limit in MiB; 0 disables memory-triggered run shedding. */
   agentRssLimitMb?: number;
+  /**
+   * Called when deploy-drain is on and the last active run finishes
+   * (runningCount hits 0). Used to release a held deploy request.
+   */
+  onDeployDrainIdle?: () => void;
 }
 
 export interface SendMessageInput {
@@ -123,6 +128,18 @@ export interface AgentRuntimeStatus {
   activeRuns: Array<{ taskId: string; runId: string }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
+  /** True while graceful deploy drain is pausing new run starts. */
+  admissionPaused?: boolean;
+}
+
+export interface RestartStatus {
+  canRestart: boolean;
+  admissionPaused: boolean;
+  runningCount: number;
+  maxConcurrentRuns: number;
+  queuedCount: number;
+  activeRuns: Array<{ taskId: string; runId: string }>;
+  message: string;
 }
 
 /**
@@ -142,6 +159,11 @@ export class AgentGateway {
   private memoryTimer: NodeJS.Timeout | undefined;
   private concurrencySampleTimer: NodeJS.Timeout | undefined;
   private rssAboveLimit = false;
+  /**
+   * When true (graceful deploy drain), do not start queued or new runs;
+   * in-flight runs continue until they finish.
+   */
+  private admissionPaused = false;
   /** In-memory ring buffer of runningCount samples (survives until process restart). */
   private readonly concurrencySeries: ConcurrencySample[] = [];
   private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 5_000;
@@ -474,7 +496,51 @@ export class AgentGateway {
       activeRuns,
       series: this.concurrencySeries.slice(),
       sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
+      admissionPaused: this.admissionPaused,
     };
+  }
+
+  getRestartStatus(): RestartStatus {
+    const snap = this.getAgentRuntimeStatus();
+    const canRestart = snap.runningCount === 0;
+    return {
+      canRestart,
+      admissionPaused: this.admissionPaused,
+      runningCount: snap.runningCount,
+      maxConcurrentRuns: snap.maxConcurrentRuns,
+      queuedCount: snap.queuedCount,
+      activeRuns: snap.activeRuns,
+      message: canRestart
+        ? this.admissionPaused
+          ? "无运行中的 agent；可以重启。排队任务在部署结束后由新进程恢复。"
+          : "无运行中的 agent；可以重启。"
+        : `当前有 ${snap.runningCount} 个 agent 在运行；已暂停启动排队中的任务。请稍后再查。`,
+    };
+  }
+
+  /**
+   * Pause starting any new/queued runs (in-flight continue). Used by graceful deploy.
+   */
+  beginDeployDrain(): void {
+    if (this.admissionPaused) return;
+    this.admissionPaused = true;
+    console.warn(
+      `[deploy-drain] admission paused; running=${this.runningCount} queued=${
+        this.getAgentRuntimeStatus().queuedCount
+      }`,
+    );
+  }
+
+  /** Resume starting queued runs after a held deploy is cancelled. */
+  endDeployDrain(): number {
+    if (!this.admissionPaused) return 0;
+    this.admissionPaused = false;
+    console.warn("[deploy-drain] admission resumed");
+    return this.drainGlobalQueue();
+  }
+
+  isAdmissionPaused(): boolean {
+    return this.admissionPaused;
   }
 
   /** Rebuild in-memory queues from DB and start draining where idle. */
@@ -674,6 +740,7 @@ export class AgentGateway {
   /** Returns true if a run was started. */
   private processNextPending(taskId: string): boolean {
     if (
+      this.admissionPaused ||
       this.activeRuns.has(taskId) ||
       this.runningCount >= this.maxConcurrentRuns
     ) {
@@ -701,6 +768,7 @@ export class AgentGateway {
 
   /** Start queued runs while global capacity remains. */
   private drainGlobalQueue(): number {
+    if (this.admissionPaused) return 0;
     let started = 0;
     const taskIds = [...this.pendingRuns.keys()];
     for (const taskId of taskIds) {
@@ -792,6 +860,7 @@ export class AgentGateway {
 
     const agentId = task.agentId ?? "";
     const isQueued =
+      this.admissionPaused ||
       this.activeRuns.has(taskId) ||
       this.runningCount >= this.maxConcurrentRuns;
 
@@ -1094,6 +1163,16 @@ export class AgentGateway {
         runId,
       });
       this.drainGlobalQueue();
+      if (this.admissionPaused && this.runningCount === 0) {
+        try {
+          this.config.onDeployDrainIdle?.();
+        } catch (err) {
+          console.warn(
+            "[deploy-drain] onDeployDrainIdle failed:",
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
     }
   }
 

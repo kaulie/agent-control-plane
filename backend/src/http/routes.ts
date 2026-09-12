@@ -42,16 +42,60 @@ export async function registerRoutes(
 
   /**
    * Async deploy: enqueue for the independent deploy-agent.
-   * Never runs deploy.sh in-process (avoids killing this gateway mid-request).
+   * Graceful by default: if agents are running, hold the request, pause starting
+   * queued runs, and ask the caller to poll GET /api/ops/restart-status.
+   * Pass force=true to enqueue immediately (may interrupt running agents).
    */
   app.post<{
-    Body: { deployment?: string; hash?: string; taskId?: string; requestId?: string };
+    Body: {
+      deployment?: string;
+      hash?: string;
+      taskId?: string;
+      requestId?: string;
+      force?: boolean;
+    };
   }>("/api/ops/deploy", async (req, reply) => {
     const raw = req.body?.deployment?.trim() || req.body?.hash?.trim() || "";
     if (!raw) {
       return reply.code(400).send({ error: "deployment or hash is required" });
     }
+    const force = req.body?.force === true;
     try {
+      if (!force) {
+        gateway.beginDeployDrain();
+        const snap = gateway.getRestartStatus();
+        if (!snap.canRestart) {
+          let status;
+          const existing = opts.deployQueue.getHeld();
+          if (existing) {
+            status = opts.deployQueue.getStatus(existing.requestId)!;
+          } else {
+            status = opts.deployQueue.hold({
+              deployment: raw,
+              runningCount: snap.runningCount,
+              queuedCount: snap.queuedCount,
+              ...(req.body?.taskId?.trim()
+                ? { taskId: req.body.taskId.trim() }
+                : {}),
+              ...(req.body?.requestId?.trim()
+                ? { requestId: req.body.requestId.trim() }
+                : {}),
+            });
+          }
+          return reply.code(202).send({
+            ...status,
+            canRestart: false,
+            admissionPaused: true,
+            activeRuns: snap.activeRuns,
+            poll: "/api/ops/restart-status",
+          });
+        }
+      }
+
+      if (force) {
+        opts.deployQueue.cancelHeld();
+      }
+
       const status = opts.deployQueue.enqueue({
         deployment: raw,
         ...(req.body?.taskId?.trim() ? { taskId: req.body.taskId.trim() } : {}),
@@ -61,14 +105,52 @@ export async function registerRoutes(
       });
       return reply.code(202).send({
         ...status,
-        message:
-          "deploy queued for independent deploy-agent; poll GET /api/ops/deploy/:requestId",
+        canRestart: true,
+        ...(force ? { forced: true } : { admissionPaused: gateway.isAdmissionPaused() }),
       });
     } catch (err) {
       return reply
         .code(400)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  app.get("/api/ops/restart-status", async () => {
+    const snap = gateway.getRestartStatus();
+    const held = opts.deployQueue.getHeld();
+    let deploy = held ? opts.deployQueue.getStatus(held.requestId) : undefined;
+
+    if (snap.canRestart && opts.deployQueue.getHeld()) {
+      const released = opts.deployQueue.releaseHeld();
+      if (released) {
+        deploy = released;
+      }
+    }
+
+    const heldAfter = opts.deployQueue.getHeld();
+    return {
+      ...snap,
+      heldDeployment: heldAfter?.deployment ?? deploy?.deployment ?? null,
+      deploy: deploy ?? null,
+      pollHint: snap.canRestart
+        ? undefined
+        : "稍后再次 GET /api/ops/restart-status；空闲后会自动放行已 hold 的部署",
+    };
+  });
+
+  app.post("/api/ops/deploy/cancel-hold", async (_req, reply) => {
+    const cancelled = opts.deployQueue.cancelHeld();
+    const resumed = gateway.endDeployDrain();
+    if (!cancelled && resumed === 0 && !gateway.isAdmissionPaused()) {
+      return reply.code(404).send({
+        error: "no held deploy and admission is not paused",
+      });
+    }
+    return {
+      cancelled,
+      resumedQueuedStarts: resumed,
+      restart: gateway.getRestartStatus(),
+    };
   });
 
   app.get<{ Params: { requestId: string } }>(

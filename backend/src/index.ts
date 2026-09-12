@@ -140,6 +140,9 @@ if (fs.existsSync(config.webDistDir)) {
   app.log.info(`serving web UI from ${config.webDistDir}`);
 }
 
+/** Filled after gateway + deployQueue exist; releases held deploy when idle. */
+const deployDrainHooks: { onIdle: () => void } = { onIdle: () => {} };
+
 const gateway = new AgentGateway(
   store,
   providers,
@@ -158,9 +161,19 @@ const gateway = new AgentGateway(
     },
     maxConcurrentRuns: config.maxConcurrentRuns,
     agentRssLimitMb: config.agentRssLimitMb,
+    onDeployDrainIdle: () => deployDrainHooks.onIdle(),
   },
   publish,
 );
+
+deployDrainHooks.onIdle = () => {
+  const released = deployQueue.releaseHeld();
+  if (released) {
+    app.log.info(
+      `deploy-drain: agents idle; released held deploy ${released.requestId} → ${released.deployment}`,
+    );
+  }
+};
 
 await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,

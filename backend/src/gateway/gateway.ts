@@ -81,6 +81,11 @@ export interface GatewayConfig {
    * (runningCount hits 0). Used to release a held deploy request.
    */
   onDeployDrainIdle?: () => void;
+  /**
+   * Safety timeout for admission pause (notify/hold). After this, resume the
+   * queue even if restart never arrives. Default 10 min.
+   */
+  deployGracefulWaitMs?: number;
 }
 
 export interface SendMessageInput {
@@ -146,6 +151,8 @@ export interface AgentRuntimeStatus {
   /** Requested chart window in ms (series is clipped to this look-back). */
   windowMs?: number;
   admissionPaused?: boolean;
+  /** ISO time when admission pause started (deploy drain / restart-notify). */
+  admissionPausedAt?: string;
 }
 
 export interface RestartStatus {
@@ -180,6 +187,9 @@ export class AgentGateway {
    * in-flight runs continue until they finish.
    */
   private admissionPaused = false;
+  private admissionPausedAt: number | null = null;
+  private admissionPauseTimer: NodeJS.Timeout | undefined;
+  private readonly deployGracefulWaitMs: number;
   /**
    * In-memory ring buffer of runningCount samples.
    * Also mirrored to SQLite (`concurrency_samples`) so charts survive restart.
@@ -209,6 +219,10 @@ export class AgentGateway {
   ) {
     this.maxConcurrentRuns = Math.max(1, config.maxConcurrentRuns ?? 2);
     this.agentRssLimitMb = Math.max(0, config.agentRssLimitMb ?? 2048);
+    this.deployGracefulWaitMs = Math.max(
+      0,
+      config.deployGracefulWaitMs ?? 10 * 60 * 1000,
+    );
   }
 
   /** Resolve the live adapter for a task (falls back to registry default). */
@@ -540,6 +554,9 @@ export class AgentGateway {
       sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
       windowMs: resolvedWindow,
       admissionPaused: this.admissionPaused,
+      ...(this.admissionPausedAt
+        ? { admissionPausedAt: new Date(this.admissionPausedAt).toISOString() }
+        : {}),
     };
   }
 
@@ -610,17 +627,22 @@ export class AgentGateway {
         }`,
       );
     }
-    if (this.admissionPaused) return;
-    this.admissionPaused = true;
-    console.warn(
-      `[deploy-drain] admission paused; running=${this.runningCount} queued=${
-        this.getAgentRuntimeStatus().queuedCount
-      }`,
-    );
+    if (!this.admissionPaused) {
+      this.admissionPaused = true;
+      console.warn(
+        `[deploy-drain] admission paused; running=${this.runningCount} queued=${
+          this.getAgentRuntimeStatus().queuedCount
+        }`,
+      );
+    }
+    this.admissionPausedAt = Date.now();
+    this.armAdmissionPauseSafetyTimer();
   }
 
-  /** Resume starting queued runs after a held deploy is cancelled. */
+  /** Resume starting queued runs after a held deploy is cancelled / timed out. */
   endDeployDrain(): number {
+    this.clearAdmissionPauseSafetyTimer();
+    this.admissionPausedAt = null;
     if (!this.admissionPaused) return 0;
     this.admissionPaused = false;
     console.warn("[deploy-drain] admission resumed");
@@ -629,6 +651,34 @@ export class AgentGateway {
 
   isAdmissionPaused(): boolean {
     return this.admissionPaused;
+  }
+
+  /** When pause started (ISO), if currently paused. */
+  getAdmissionPausedAt(): string | null {
+    return this.admissionPausedAt
+      ? new Date(this.admissionPausedAt).toISOString()
+      : null;
+  }
+
+  private armAdmissionPauseSafetyTimer(): void {
+    this.clearAdmissionPauseSafetyTimer();
+    if (this.deployGracefulWaitMs <= 0) return;
+    this.admissionPauseTimer = setTimeout(() => {
+      this.admissionPauseTimer = undefined;
+      if (!this.admissionPaused) return;
+      console.warn(
+        `[deploy-drain] safety timeout (${this.deployGracefulWaitMs}ms); resuming queue so jobs are not wedged without a restart`,
+      );
+      this.endDeployDrain();
+    }, this.deployGracefulWaitMs);
+    this.admissionPauseTimer.unref?.();
+  }
+
+  private clearAdmissionPauseSafetyTimer(): void {
+    if (this.admissionPauseTimer) {
+      clearTimeout(this.admissionPauseTimer);
+      this.admissionPauseTimer = undefined;
+    }
   }
 
   /** Rebuild in-memory queues from DB and start draining where idle. */
@@ -665,6 +715,7 @@ export class AgentGateway {
       this.memoryTimer = undefined;
     }
     this.stopConcurrencySampler();
+    this.clearAdmissionPauseSafetyTimer();
   }
 
   private startConcurrencySampler(): void {

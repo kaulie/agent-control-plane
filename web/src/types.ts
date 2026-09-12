@@ -82,6 +82,7 @@ export interface AgentRuntimeStatus {
   sampleIntervalMs: number;
   windowMs?: number;
   admissionPaused?: boolean;
+  admissionPausedAt?: string;
 }
 
 export interface Task {

@@ -127,6 +127,9 @@ export function AgentRuntimePage({ onBack }: Props) {
       <p className="stats-note">
         展示 gateway 进程内的实时并发（runningCount）与上限（AGENT_MAX_CONCURRENT_RUNS）。
         曲线来自进程内存采样，重启后清空；可用来确认其他任务是否占满全局槽位。
+        {data?.admissionPaused
+          ? " 当前处于部署 drain：正在运行的 agent 会跑完，排队任务暂不启动。"
+          : ""}
       </p>
 
       {error && <div className="stats-error">{error}</div>}

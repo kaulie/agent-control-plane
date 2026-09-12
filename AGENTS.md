@@ -8,9 +8,9 @@ You are the agent behind **Web Cursor**. These rules always apply.
 |---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here（**开发 only**） |
 | Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
-| `/Users/gaolei/deployment/web-cursor/bin/` | Independent ship tools (`release.sh` / `deploy.sh`) — not part of the app |
-| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | Frozen release package (built at release time) — never hand-edit |
-| `/Users/gaolei/runtime/web-cursor` | Fixed production dir — **never** edit; only `bin/deploy.sh` may rsync code in |
+| [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
+| `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
+| `~/runtime/web-cursor` | App runtime — **never** hand-edit; ship via deployment API |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | Optional local clone — **not** the deploy source |
 
 **Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, GitHub origin, deliver with `git push` + `gh pr create` (do not merge `main` or deploy unless the user asks).
@@ -32,21 +32,28 @@ gh pr create --base main --title "..." --body "..."
 # write PR URL back to the task (or POST /api/tasks/<taskId>/pull-request)
 ```
 
-## Deploy only via independent bin scripts
+## Deploy via independent deployment service
 
 After the GitHub PR is **merged** into `main` (and the user asks to ship):
 
 ```bash
-/Users/gaolei/deployment/web-cursor/bin/release.sh
-# freeze + build deployment-<hash>/ from GitHub (default: main)
+~/runtime/agent-control-plane-deployment/bin/release.sh
+# → packages/deployment-<hash>/
 
-/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
-# rsync package → runtime, then restart
+# Prefer gateway (graceful) which forwards to deployment API:
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+  -H 'content-type: application/json' \
+  -d '{"deployment":"deployment-<hash>","serviceId":"web-cursor"}'
+
+# Or call deployment service directly:
+curl -sS -X POST http://127.0.0.1:4220/api/deploys \
+  -H 'content-type: application/json' \
+  -d '{"serviceId":"web-cursor","deployment":"deployment-<hash>"}'
 ```
 
-- `release.sh` / `deploy.sh` are **ops tools**, independent of the app and of task workspaces.
-- **Never** run release/deploy from `agent-workspace/**`; do not rely on a long-lived app checkout to ship.
-- Build happens **only** inside `deployment-<hash>/`.
+- Deployment is a **separate process** under `~/runtime/agent-control-plane-deployment`.
+- Start/stop of the app follows the **service contract** in deployment SQLite (`startCmd` / `stopCmd` / `restartCmd` / `healthUrl`).
+- **Never** run release/deploy from `agent-workspace/**`.
 - Runtime does **not** `npm install` / `build`, and does **not** use git to change versions.
 - `deploy.sh` rsync **must** preserve `backend/.env` and `backend/data/`.
 - Never hand-edit or ad-hoc copy into runtime.

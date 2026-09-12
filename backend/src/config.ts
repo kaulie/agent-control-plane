@@ -68,10 +68,12 @@ export interface Config {
   /** Absolute path to mcp-servers/git-via-proxy/server.mjs */
   gitViaProxyServerPath: string;
   /**
-   * Deployment home for async deploy-agent inbox/outbox
-   * (default /Users/gaolei/deployment/web-cursor).
+   * Independent deployment HTTP API base URL
+   * (default http://127.0.0.1:4220).
    */
-  deployHome: string;
+  deploymentApiUrl: string;
+  /** Service contract id registered in deployment SQLite (default web-cursor). */
+  deployServiceId: string;
   /** Global cap on concurrent agent runs across all tasks/providers. */
   maxConcurrentRuns: number;
   /**
@@ -79,6 +81,17 @@ export interface Config {
    * active run is cancelled to shed memory pressure. 0 disables auto-shed.
    */
   agentRssLimitMb: number;
+  /**
+   * When true (default), POST /api/ops/deploy waits for running agents and
+   * pauses queued starts. When false, enqueue immediately (legacy behavior).
+   * Env: GRACEFUL_RESTART=1|0
+   */
+  gracefulRestart: boolean;
+  /**
+   * Max time to hold a graceful deploy before forcing release (default 10 min).
+   * Env: DEPLOY_GRACEFUL_WAIT_MS or DEPLOY_GRACEFUL_WAIT_SEC
+   */
+  deployGracefulWaitMs: number;
 }
 
 /** Deployed VERSION file next to web/backend (authoritative after rsync). */
@@ -138,6 +151,15 @@ export function loadConfig(): Config {
   const gitViaProxyMcp = envFlag(process.env.GIT_VIA_PROXY_MCP, true);
   const gitViaProxyServerPath = resolveGitViaProxyServerPath(productRoot);
 
+  const waitMsRaw = process.env.DEPLOY_GRACEFUL_WAIT_MS?.trim();
+  const waitSecRaw = process.env.DEPLOY_GRACEFUL_WAIT_SEC?.trim();
+  let deployGracefulWaitMs = 10 * 60 * 1000;
+  if (waitMsRaw) {
+    deployGracefulWaitMs = Math.max(0, Number(waitMsRaw) || 0);
+  } else if (waitSecRaw) {
+    deployGracefulWaitMs = Math.max(0, (Number(waitSecRaw) || 0) * 1000);
+  }
+
   return {
     appVersion: process.env.APP_VERSION?.trim() || "dev",
     port: Number(process.env.PORT || 4211),
@@ -160,9 +182,12 @@ export function loadConfig(): Config {
     gitViaProxyShell,
     gitViaProxyMcp,
     gitViaProxyServerPath,
-    deployHome:
-      process.env.DEPLOY_HOME?.trim() ||
-      "/Users/gaolei/deployment/web-cursor",
+    deploymentApiUrl: (
+      process.env.DEPLOYMENT_API_URL?.trim() ||
+      "http://127.0.0.1:4220"
+    ).replace(/\/$/, ""),
+    deployServiceId:
+      process.env.DEPLOY_SERVICE_ID?.trim() || "web-cursor",
     maxConcurrentRuns: Math.max(
       1,
       Number(process.env.AGENT_MAX_CONCURRENT_RUNS || 2),
@@ -171,5 +196,10 @@ export function loadConfig(): Config {
       0,
       Number(process.env.AGENT_RSS_LIMIT_MB || 2048),
     ),
+    gracefulRestart: envFlag(
+      process.env.GRACEFUL_RESTART ?? process.env.graceful_restart,
+      true,
+    ),
+    deployGracefulWaitMs,
   };
 }

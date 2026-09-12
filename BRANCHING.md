@@ -11,9 +11,9 @@
 |---|---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 的独立工作区（clone 后在此开发） | 是（唯一**开发**目录） |
 | 项目 `gitRepoUrl`（GitHub） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源 | 否（只读配置；用它作 remote） |
-| `/Users/gaolei/deployment/web-cursor/bin/` | **独立发版工具**（`release.sh` / `deploy.sh`）；与 app 仓库解耦 | 仅在用户要求改发版流程时 |
-| `/Users/gaolei/deployment/web-cursor/ops/` | **独立运维守护**（watchdog + deploy-agent）；与 runtime 解耦 | 仅在用户要求改运维流程时 |
-| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | **待上线精确包**（release 时 build 完成；禁止手改） | 否（仅由 `release.sh` 生成） |
+| [`kaulie/agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment) | **独立部署服务**源码（HTTP + SQLite 契约） | 仅在用户要求改部署系统时（在该仓库改） |
+| `~/runtime/agent-control-plane-deployment` | 部署服务安装目录（API `:4220`、packages、sqlite） | 否（install 产物） |
+| `~/runtime/web-cursor` | 被部署的应用 runtime（由服务契约描述） | 禁止手改；经 deployment API 上线 |
 | `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录（只收 deploy rsync + 启停） | 禁止改 |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | 可选本机 clone（**不是**部署源） | 否 |
 
@@ -111,17 +111,15 @@ EOF
 2. 用**独立发版脚本**（不在 task workspace、也不依赖常驻 app clone）：
 
 ```bash
-/Users/gaolei/deployment/web-cursor/bin/release.sh
-# → 从 GitHub main（或指定 ref）冻结并构建 deployment-<hash>/
+~/runtime/agent-control-plane-deployment/bin/release.sh
+# → packages/deployment-<hash>/
 
-# 异步上线（推荐，避免 gateway 自己杀自己）：
+# 异步上线：gateway graceful 后转发到部署服务 HTTP API（:4220）
 curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
   -H 'content-type: application/json' \
-  -d '{"deployment":"deployment-<hash>"}'
-# deploy-agent 在 deployment/web-cursor/ops/ 侧执行 bin/deploy.sh
-
-# 仅手工/排障时才同步调用：
-/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
+  -d '{"deployment":"deployment-<hash>","serviceId":"web-cursor"}'
+# 或直接调部署服务：
+# curl -sS -X POST http://127.0.0.1:4220/api/deploys -d '{"serviceId":"web-cursor","deployment":"..."}'
 ```
 
 - `release.sh` / `deploy.sh` 属于上线域工具，**不是** web-cursor 应用本身的一部分。

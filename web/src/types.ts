@@ -59,6 +59,7 @@ export interface AgentRuntimeStatus {
   activeRuns: Array<{ taskId: string; runId: string }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
+  admissionPaused?: boolean;
 }
 
 export interface Task {

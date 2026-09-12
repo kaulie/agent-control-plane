@@ -2,7 +2,7 @@
 # Legacy runtime-bundled watchdog.
 # Prefer the independent deployment-side ops watchdog:
 #   /Users/gaolei/deployment/web-cursor/ops/watchdog.sh
-#   (install via: bash ops/install.sh from the repo)
+#   (install via agent-control-plane-deployment ./install.sh)
 #
 # This script remains for emergency use from a live runtime tree only.
 set -euo pipefail

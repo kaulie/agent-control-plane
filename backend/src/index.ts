@@ -17,7 +17,11 @@ import { registerWebSocket } from "./ws/ws.js";
 import { DeployQueue } from "./ops/deploy-queue.js";
 
 const config = loadConfig();
-const deployQueue = new DeployQueue(config.deployHome);
+const deployQueue = new DeployQueue({
+  apiUrl: config.deploymentApiUrl,
+  defaultServiceId: config.deployServiceId,
+  maxWaitMs: config.deployGracefulWaitMs,
+});
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
 function advertisedVersion(): string {
   return readRuntimeVersion(config.productRoot) ?? config.appVersion;
@@ -140,6 +144,9 @@ if (fs.existsSync(config.webDistDir)) {
   app.log.info(`serving web UI from ${config.webDistDir}`);
 }
 
+/** Filled after gateway + deployQueue exist; releases held deploy when idle. */
+const deployDrainHooks: { onIdle: () => void } = { onIdle: () => {} };
+
 const gateway = new AgentGateway(
   store,
   providers,
@@ -158,17 +165,42 @@ const gateway = new AgentGateway(
     },
     maxConcurrentRuns: config.maxConcurrentRuns,
     agentRssLimitMb: config.agentRssLimitMb,
+    onDeployDrainIdle: () => deployDrainHooks.onIdle(),
   },
   publish,
 );
+
+deployDrainHooks.onIdle = () => {
+  void deployQueue.releaseHeld().then((released) => {
+    if (released) {
+      app.log.info(
+        `deploy-drain: agents idle; released held deploy ${released.requestId} → ${released.deployment}`,
+      );
+    }
+  }).catch((err) => {
+    app.log.warn(
+      `deploy-drain: releaseHeld failed: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+};
+
+deployQueue.setOnWaitTimeoutRelease((status) => {
+  app.log.warn(
+    `deploy-drain: wait timeout; forced release ${status.requestId} → ${status.deployment}`,
+  );
+});
 
 await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
   appVersion: advertisedVersion(),
   resolveAppVersion: advertisedVersion,
   deployQueue,
+  gracefulRestart: config.gracefulRestart,
 });
-app.log.info(`deploy home (async ops): ${config.deployHome}`);
+app.log.info(`deployment API: ${config.deploymentApiUrl} service=${config.deployServiceId}`);
+app.log.info(
+  `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
+);
 
 // 标记本次运行（若本次进程崩溃，下次启动即可据此检测）
 fs.writeFileSync(runningFlag, String(process.pid));

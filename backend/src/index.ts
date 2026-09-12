@@ -165,6 +165,7 @@ const gateway = new AgentGateway(
     },
     maxConcurrentRuns: config.maxConcurrentRuns,
     agentRssLimitMb: config.agentRssLimitMb,
+    deployGracefulWaitMs: config.deployGracefulWaitMs,
     onDeployDrainIdle: () => deployDrainHooks.onIdle(),
   },
   publish,

@@ -2108,6 +2108,28 @@ body {
   color: var(--text-dim);
 }
 
+.runtime-drain-banner {
+  max-width: 760px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.stats-card-warn .stats-card-value {
+  color: var(--accent);
+}
+
+.runtime-admission {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .runtime-refresh-bar {
   display: flex;
   flex-wrap: wrap;

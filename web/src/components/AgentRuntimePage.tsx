@@ -298,10 +298,19 @@ export function AgentRuntimePage({ onBack }: Props) {
       <p className="stats-note">
         展示 gateway 进程内的实时并发（runningCount）与上限（AGENT_MAX_CONCURRENT_RUNS）。
         曲线来自 SQLite 持久化的并发采样（约保留最近 3 小时）；可用来确认其他任务是否占满全局槽位。
-        {data?.admissionPaused
-          ? " 当前处于部署 drain：正在运行的 agent 会跑完，排队任务暂不启动。"
-          : ""}
       </p>
+
+      {data?.admissionPaused ? (
+        <div className="runtime-drain-banner" role="status">
+          部署 drain 中：已暂停启动排队任务
+          {data.runningCount === 0 && data.queuedCount > 0
+            ? `（当前 0 并发但仍有 ${data.queuedCount} 条排队，属预期；超时或取消 hold 后会自动恢复）`
+            : "；在跑的 agent 会跑完"}
+          {data.admissionPausedAt
+            ? ` · 开始于 ${formatClock(data.admissionPausedAt)}`
+            : ""}
+        </div>
+      ) : null}
 
       {error && <div className="stats-error">{error}</div>}
       {loading && !data && <div className="stats-empty">加载中…</div>}
@@ -319,6 +328,12 @@ export function AgentRuntimePage({ onBack }: Props) {
             <div className="stats-card">
               <div className="stats-card-label">排队中</div>
               <div className="stats-card-value">{data.queuedCount}</div>
+            </div>
+            <div className={`stats-card${data.admissionPaused ? " stats-card-warn" : ""}`}>
+              <div className="stats-card-label">准入</div>
+              <div className="stats-card-value runtime-admission">
+                {data.admissionPaused ? "drain" : "开放"}
+              </div>
             </div>
             <div className="stats-card">
               <div className="stats-card-label">活跃任务</div>

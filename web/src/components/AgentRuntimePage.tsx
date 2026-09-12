@@ -75,21 +75,42 @@ function formatClock(iso: string): string {
   });
 }
 
+function clipSeriesToWindow(
+  series: ConcurrencySample[],
+  windowMs: number,
+  nowMs: number,
+): ConcurrencySample[] {
+  const cutoff = nowMs - windowMs;
+  return series.filter((s) => {
+    const t = Date.parse(s.t);
+    return Number.isFinite(t) && t >= cutoff && t <= nowMs;
+  });
+}
+
+/** Map samples onto a fixed time domain so changing 时间轴 re-scales X immediately. */
 function buildPolyline(
   series: ConcurrencySample[],
   maxY: number,
+  windowStartMs: number,
+  windowEndMs: number,
 ): { points: string; area: string } {
   const { width, height, padL, padR, padT, padB } = CHART;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
-  const n = series.length;
-  if (n === 0) return { points: "", area: "" };
+  const span = Math.max(1, windowEndMs - windowStartMs);
+  if (series.length === 0) return { points: "", area: "" };
 
-  const coords = series.map((s, i) => {
-    const x = padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-    const y = padT + innerH - (Math.min(s.runningCount, maxY) / maxY) * innerH;
-    return { x, y };
-  });
+  const coords = series
+    .map((s) => {
+      const t = Date.parse(s.t);
+      if (!Number.isFinite(t)) return null;
+      const x = padL + ((t - windowStartMs) / span) * innerW;
+      const y = padT + innerH - (Math.min(s.runningCount, maxY) / maxY) * innerH;
+      return { x, y };
+    })
+    .filter((c): c is { x: number; y: number } => c != null);
+
+  if (coords.length === 0) return { points: "", area: "" };
 
   const points = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
   const baseY = padT + innerH;
@@ -108,6 +129,8 @@ export function AgentRuntimePage({ onBack }: Props) {
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const [intervalMs, setIntervalMs] = useState(readIntervalMs);
   const [windowMs, setWindowMs] = useState(readWindowMs);
+  /** Chart time domain end; advanced on fetch / window change so X axis tracks 时间轴. */
+  const [chartNowMs, setChartNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     try {
@@ -143,6 +166,7 @@ export function AgentRuntimePage({ onBack }: Props) {
         .then((res) => {
           if (cancelled) return;
           setData(res);
+          setChartNowMs(Date.now());
           setError(null);
         })
         .catch((e) => {
@@ -153,6 +177,8 @@ export function AgentRuntimePage({ onBack }: Props) {
         });
     };
 
+    // Remap X domain immediately when 时间轴 changes (don't wait for fetch).
+    setChartNowMs(Date.now());
     load();
     if (autoRefresh) {
       timer = setInterval(load, intervalMs);
@@ -163,15 +189,23 @@ export function AgentRuntimePage({ onBack }: Props) {
     };
   }, [autoRefresh, intervalMs, windowMs]);
 
+  const series = useMemo(
+    () => clipSeriesToWindow(data?.series ?? [], windowMs, chartNowMs),
+    [data?.series, windowMs, chartNowMs],
+  );
+
   const maxY = useMemo(() => {
     const cap = data?.maxConcurrentRuns ?? 1;
-    const peak = Math.max(0, ...(data?.series.map((s) => s.runningCount) ?? []));
+    const peak = Math.max(0, ...series.map((s) => s.runningCount));
     return Math.max(cap, peak, 1);
-  }, [data]);
+  }, [data?.maxConcurrentRuns, series]);
+
+  const windowStartMs = chartNowMs - windowMs;
+  const windowEndMs = chartNowMs;
 
   const { points, area } = useMemo(
-    () => buildPolyline(data?.series ?? [], maxY),
-    [data?.series, maxY],
+    () => buildPolyline(series, maxY, windowStartMs, windowEndMs),
+    [series, maxY, windowStartMs, windowEndMs],
   );
 
   const yTicks = useMemo(() => {
@@ -192,9 +226,8 @@ export function AgentRuntimePage({ onBack }: Props) {
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
   const maxLineY = padT + innerH - (Math.min(data?.maxConcurrentRuns ?? 0, maxY) / maxY) * innerH;
-  const series = data?.series ?? [];
-  const firstT = series[0]?.t;
-  const lastT = series[series.length - 1]?.t;
+  const axisStart = new Date(windowStartMs).toISOString();
+  const axisEnd = new Date(windowEndMs).toISOString();
 
   const refreshNow = (): void => {
     setLoading(true);
@@ -202,6 +235,7 @@ export function AgentRuntimePage({ onBack }: Props) {
       .getAgentRuntime({ windowMs })
       .then((res) => {
         setData(res);
+        setChartNowMs(Date.now());
         setError(null);
       })
       .catch((e) => setError(String(e)))
@@ -297,6 +331,7 @@ export function AgentRuntimePage({ onBack }: Props) {
               并发执行数量（最近 {windowLabel}）
             </div>
             <svg
+              key={windowMs}
               className="runtime-chart"
               viewBox={`0 0 ${width} ${height}`}
               role="img"
@@ -332,21 +367,17 @@ export function AgentRuntimePage({ onBack }: Props) {
               {points && (
                 <polyline points={points} className="runtime-chart-line" fill="none" />
               )}
-              {firstT && (
-                <text x={padL} y={height - 10} className="runtime-chart-axis">
-                  {formatClock(firstT)}
-                </text>
-              )}
-              {lastT && (
-                <text
-                  x={padL + innerW}
-                  y={height - 10}
-                  textAnchor="end"
-                  className="runtime-chart-axis"
-                >
-                  {formatClock(lastT)}
-                </text>
-              )}
+              <text x={padL} y={height - 10} className="runtime-chart-axis">
+                {formatClock(axisStart)}
+              </text>
+              <text
+                x={padL + innerW}
+                y={height - 10}
+                textAnchor="end"
+                className="runtime-chart-axis"
+              >
+                {formatClock(axisEnd)}
+              </text>
               {!series.length && (
                 <text
                   x={padL + innerW / 2}

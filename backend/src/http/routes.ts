@@ -56,6 +56,7 @@ export async function registerRoutes(
       hash?: string;
       taskId?: string;
       requestId?: string;
+      serviceId?: string;
       force?: boolean;
     };
   }>("/api/ops/deploy", async (req, reply) => {
@@ -73,7 +74,7 @@ export async function registerRoutes(
           let status;
           const existing = opts.deployQueue.getHeld();
           if (existing) {
-            status = opts.deployQueue.getStatus(existing.requestId)!;
+            status = (await opts.deployQueue.getStatus(existing.requestId))!;
           } else {
             status = opts.deployQueue.hold({
               deployment: raw,
@@ -84,6 +85,9 @@ export async function registerRoutes(
                 : {}),
               ...(req.body?.requestId?.trim()
                 ? { requestId: req.body.requestId.trim() }
+                : {}),
+              ...(req.body?.serviceId?.trim()
+                ? { serviceId: req.body.serviceId.trim() }
                 : {}),
             });
           }
@@ -105,11 +109,14 @@ export async function registerRoutes(
         }
       }
 
-      const status = opts.deployQueue.enqueue({
+      const status = await opts.deployQueue.enqueue({
         deployment: raw,
         ...(req.body?.taskId?.trim() ? { taskId: req.body.taskId.trim() } : {}),
         ...(req.body?.requestId?.trim()
           ? { requestId: req.body.requestId.trim() }
+          : {}),
+        ...(req.body?.serviceId?.trim()
+          ? { serviceId: req.body.serviceId.trim() }
           : {}),
       });
       return reply.code(202).send({
@@ -132,7 +139,9 @@ export async function registerRoutes(
   app.get("/api/ops/restart-status", async () => {
     const snap = gateway.getRestartStatus();
     const held = opts.deployQueue.getHeld();
-    let deploy = held ? opts.deployQueue.getStatus(held.requestId) : undefined;
+    let deploy = held
+      ? await opts.deployQueue.getStatus(held.requestId)
+      : undefined;
     const waitUntil = opts.deployQueue.getHeldWaitUntil();
     const remainingMs =
       waitUntil && Number.isFinite(Date.parse(waitUntil))
@@ -140,7 +149,7 @@ export async function registerRoutes(
         : null;
 
     if (snap.canRestart && opts.deployQueue.getHeld()) {
-      const released = opts.deployQueue.releaseHeld();
+      const released = await opts.deployQueue.releaseHeld();
       if (released) {
         deploy = released;
       }
@@ -179,7 +188,7 @@ export async function registerRoutes(
   app.get<{ Params: { requestId: string } }>(
     "/api/ops/deploy/:requestId",
     async (req, reply) => {
-      const status = opts.deployQueue.getStatus(req.params.requestId);
+      const status = await opts.deployQueue.getStatus(req.params.requestId);
       if (!status) {
         return reply.code(404).send({ error: "deploy request not found" });
       }

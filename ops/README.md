@@ -1,21 +1,15 @@
 # Ops / deploy tooling moved
 
-独立部署与运维脚本已迁到：
+独立部署服务：
 
 **https://github.com/kaulie/agent-control-plane-deployment**
 
-本机安装：
+本机目录：`~/runtime/agent-control-plane-deployment`（HTTP `:4220` + SQLite 服务契约）
 
 ```bash
 git clone https://github.com/kaulie/agent-control-plane-deployment
 cd agent-control-plane-deployment
-DEPLOY_HOME=/Users/gaolei/deployment/web-cursor ./install.sh
+./install.sh
 ```
 
-发版 / 上线请使用：
-
-- `/Users/gaolei/deployment/web-cursor/bin/release.sh`
-- `/Users/gaolei/deployment/web-cursor/bin/deploy.sh`
-- 或 gateway `POST /api/ops/deploy`（异步，推荐）
-
-应用仓库只保留 gateway 侧的 deploy API（graceful restart 等），不再携带 ops 守护进程源码。
+App gateway 通过 `DEPLOYMENT_API_URL`（默认 `http://127.0.0.1:4220`）调用部署 API，不再写本地 `deploy-requests/` 文件。

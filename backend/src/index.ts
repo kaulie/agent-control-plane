@@ -17,7 +17,9 @@ import { registerWebSocket } from "./ws/ws.js";
 import { DeployQueue } from "./ops/deploy-queue.js";
 
 const config = loadConfig();
-const deployQueue = new DeployQueue(config.deployHome, {
+const deployQueue = new DeployQueue({
+  apiUrl: config.deploymentApiUrl,
+  defaultServiceId: config.deployServiceId,
   maxWaitMs: config.deployGracefulWaitMs,
 });
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
@@ -169,12 +171,17 @@ const gateway = new AgentGateway(
 );
 
 deployDrainHooks.onIdle = () => {
-  const released = deployQueue.releaseHeld();
-  if (released) {
-    app.log.info(
-      `deploy-drain: agents idle; released held deploy ${released.requestId} → ${released.deployment}`,
+  void deployQueue.releaseHeld().then((released) => {
+    if (released) {
+      app.log.info(
+        `deploy-drain: agents idle; released held deploy ${released.requestId} → ${released.deployment}`,
+      );
+    }
+  }).catch((err) => {
+    app.log.warn(
+      `deploy-drain: releaseHeld failed: ${err instanceof Error ? err.message : err}`,
     );
-  }
+  });
 };
 
 deployQueue.setOnWaitTimeoutRelease((status) => {
@@ -190,7 +197,7 @@ await registerRoutes(app, gateway, providers, {
   deployQueue,
   gracefulRestart: config.gracefulRestart,
 });
-app.log.info(`deploy home (async ops): ${config.deployHome}`);
+app.log.info(`deployment API: ${config.deploymentApiUrl} service=${config.deployServiceId}`);
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
 );

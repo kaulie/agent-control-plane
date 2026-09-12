@@ -32,21 +32,28 @@ gh pr create --base main --title "..." --body "..."
 # write PR URL back to the task (or POST /api/tasks/<taskId>/pull-request)
 ```
 
-## Deploy only via independent bin scripts
+## Deploy via independent deployment service
 
 After the GitHub PR is **merged** into `main` (and the user asks to ship):
 
 ```bash
-/Users/gaolei/deployment/web-cursor/bin/release.sh
-# freeze + build deployment-<hash>/ from GitHub (default: main)
+~/runtime/agent-control-plane-deployment/bin/release.sh
+# → packages/deployment-<hash>/
 
-/Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>
-# rsync package → runtime, then restart
+# Prefer gateway (graceful) which forwards to deployment API:
+curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+  -H 'content-type: application/json' \
+  -d '{"deployment":"deployment-<hash>","serviceId":"web-cursor"}'
+
+# Or call deployment service directly:
+curl -sS -X POST http://127.0.0.1:4220/api/deploys \
+  -H 'content-type: application/json' \
+  -d '{"serviceId":"web-cursor","deployment":"deployment-<hash>"}'
 ```
 
-- `release.sh` / `deploy.sh` are **ops tools**, independent of the app and of task workspaces.
-- **Never** run release/deploy from `agent-workspace/**`; do not rely on a long-lived app checkout to ship.
-- Build happens **only** inside `deployment-<hash>/`.
+- Deployment is a **separate process** under `~/runtime/agent-control-plane-deployment`.
+- Start/stop of the app follows the **service contract** in deployment SQLite (`startCmd` / `stopCmd` / `restartCmd` / `healthUrl`).
+- **Never** run release/deploy from `agent-workspace/**`.
 - Runtime does **not** `npm install` / `build`, and does **not** use git to change versions.
 - `deploy.sh` rsync **must** preserve `backend/.env` and `backend/data/`.
 - Never hand-edit or ad-hoc copy into runtime.

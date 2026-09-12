@@ -132,6 +132,15 @@ export interface AgentRuntimeStatus {
     projectName?: string;
     taskTitle?: string;
   }>;
+  /** Pending runs waiting for admission / capacity (FIFO per task). */
+  queuedRuns: Array<{
+    taskId: string;
+    runId: string;
+    projectId?: string;
+    projectName?: string;
+    taskTitle?: string;
+    mode?: "agent" | "plan";
+  }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
   /** Requested chart window in ms (series is clipped to this look-back). */
@@ -495,23 +504,18 @@ export class AgentGateway {
 
   /** Live concurrency + recent in-memory series for the ops monitor page. */
   getAgentRuntimeStatus(windowMs?: number): AgentRuntimeStatus {
-    let queuedCount = 0;
-    for (const list of this.pendingRuns.values()) {
-      queuedCount += list.length;
+    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) =>
+      this.enrichRuntimeSlot(taskId, runId),
+    );
+    const queuedRuns: AgentRuntimeStatus["queuedRuns"] = [];
+    for (const [taskId, list] of this.pendingRuns.entries()) {
+      for (const pending of list) {
+        queuedRuns.push({
+          ...this.enrichRuntimeSlot(taskId, pending.runId),
+          mode: pending.mode,
+        });
+      }
     }
-    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => {
-      const task = this.store.getTask(taskId);
-      const project = task?.projectId
-        ? this.store.getProject(task.projectId)
-        : undefined;
-      return {
-        taskId,
-        runId,
-        ...(task?.projectId ? { projectId: task.projectId } : {}),
-        ...(project?.name ? { projectName: project.name } : {}),
-        ...(task?.title ? { taskTitle: task.title } : {}),
-      };
-    });
     const resolvedWindow = this.resolveWindowMs(windowMs);
     const cutoff = Date.now() - resolvedWindow;
     const series = this.concurrencySeries.filter((s) => {
@@ -521,12 +525,30 @@ export class AgentGateway {
     return {
       runningCount: this.runningCount,
       maxConcurrentRuns: this.maxConcurrentRuns,
-      queuedCount,
+      queuedCount: queuedRuns.length,
       activeRuns,
+      queuedRuns,
       series,
       sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
       windowMs: resolvedWindow,
       admissionPaused: this.admissionPaused,
+    };
+  }
+
+  private enrichRuntimeSlot(
+    taskId: string,
+    runId: string,
+  ): AgentRuntimeStatus["activeRuns"][number] {
+    const task = this.store.getTask(taskId);
+    const project = task?.projectId
+      ? this.store.getProject(task.projectId)
+      : undefined;
+    return {
+      taskId,
+      runId,
+      ...(task?.projectId ? { projectId: task.projectId } : {}),
+      ...(project?.name ? { projectName: project.name } : {}),
+      ...(task?.title ? { taskTitle: task.title } : {}),
     };
   }
 

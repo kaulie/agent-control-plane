@@ -2226,6 +2226,34 @@ body {
 .runtime-active-title {
   font-size: 13px;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-section-count {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.runtime-active-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 0 8px;
+}
+
+.runtime-queue-pos {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.runtime-queue-mode {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .runtime-active-list {

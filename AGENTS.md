@@ -8,10 +8,9 @@ You are the agent behind **Web Cursor**. These rules always apply.
 |---|---|
 | `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here（**开发 only**） |
 | Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
-| [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Deploy tooling source (`bin/` + `ops/`) — separate from the app |
-| `/Users/gaolei/deployment/web-cursor/bin/` | Installed ship tools (`release.sh` / `deploy.sh`) — not part of the app |
-| `/Users/gaolei/deployment/web-cursor/deployment-<hash>/` | Frozen release package (built at release time) — never hand-edit |
-| `/Users/gaolei/runtime/web-cursor` | Fixed production dir — **never** edit; only `bin/deploy.sh` may rsync code in |
+| [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
+| `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
+| `~/runtime/web-cursor` | App runtime — **never** hand-edit; ship via deployment API |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | Optional local clone — **not** the deploy source |
 
 **Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, GitHub origin, deliver with `git push` + `gh pr create` (do not merge `main` or deploy unless the user asks).

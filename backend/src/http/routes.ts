@@ -90,6 +90,8 @@ export async function registerRoutes(
     appVersion: version(),
   }));
 
+  app.get("/api/ops/agent-runtime", async () => gateway.getAgentRuntimeStatus());
+
   app.get("/api/auth", async () => {
     const results = await Promise.all(
       providers.list().map(async (p) => {

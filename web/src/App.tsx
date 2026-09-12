@@ -5,6 +5,7 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from 
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import UsageStatsPage from "./components/UsageStatsPage";
+import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import Timeline from "./components/Timeline";
 import PlanDocumentPanel from "./components/PlanDocumentPanel";
@@ -766,6 +767,14 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
+            title="Agent 运行状态"
+            onClick={() => setView("agent-runtime")}
+          >
+            ⏱
+          </button>
+          <button
+            type="button"
+            className="icon-btn header-settings"
             title="全局设置"
             onClick={() => setView("global-settings")}
           >
@@ -809,6 +818,8 @@ export default function App() {
             defaultProjectId={selectedProjectId}
             onBack={() => setView("chat")}
           />
+        ) : view === "agent-runtime" ? (
+          <AgentRuntimePage onBack={() => setView("chat")} />
         ) : (
           <>
         <TaskList

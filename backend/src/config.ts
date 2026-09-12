@@ -88,7 +88,7 @@ export interface Config {
    */
   gracefulRestart: boolean;
   /**
-   * Max time to hold a graceful deploy before forcing release (default 10 min).
+   * Max time to hold a graceful deploy before forcing release (default 5 min).
    * Env: DEPLOY_GRACEFUL_WAIT_MS or DEPLOY_GRACEFUL_WAIT_SEC
    */
   deployGracefulWaitMs: number;
@@ -153,7 +153,7 @@ export function loadConfig(): Config {
 
   const waitMsRaw = process.env.DEPLOY_GRACEFUL_WAIT_MS?.trim();
   const waitSecRaw = process.env.DEPLOY_GRACEFUL_WAIT_SEC?.trim();
-  let deployGracefulWaitMs = 10 * 60 * 1000;
+  let deployGracefulWaitMs = 5 * 60 * 1000;
   if (waitMsRaw) {
     deployGracefulWaitMs = Math.max(0, Number(waitMsRaw) || 0);
   } else if (waitSecRaw) {

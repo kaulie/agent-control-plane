@@ -83,7 +83,7 @@ export class DeployQueue {
   constructor(options: DeployQueueOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, "");
     this.defaultServiceId = options.defaultServiceId?.trim() || "web-cursor";
-    this.maxWaitMs = Math.max(0, options.maxWaitMs ?? 10 * 60 * 1000);
+    this.maxWaitMs = Math.max(0, options.maxWaitMs ?? 5 * 60 * 1000);
     this.onWaitTimeoutRelease = options.onWaitTimeoutRelease;
   }
 

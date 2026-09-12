@@ -47,7 +47,7 @@ export async function registerRoutes(
    * Async deploy: enqueue for the independent deploy-agent.
    * When GRACEFUL_RESTART=1 (default): if agents are running, hold the request,
    * pause starting queued runs, and ask the caller to poll restart-status
-   * (max wait: DEPLOY_GRACEFUL_WAIT_MS, default 10 min).
+   * (max wait: DEPLOY_GRACEFUL_WAIT_MS, default 5 min).
    * When GRACEFUL_RESTART=0 or force=true: enqueue immediately (legacy).
    */
   app.post<{

@@ -83,7 +83,7 @@ export interface GatewayConfig {
   onDeployDrainIdle?: () => void;
   /**
    * Safety timeout for admission pause (notify/hold). After this, resume the
-   * queue even if restart never arrives. Default 10 min.
+   * queue even if restart never arrives. Default 5 min.
    */
   deployGracefulWaitMs?: number;
 }
@@ -221,7 +221,7 @@ export class AgentGateway {
     this.agentRssLimitMb = Math.max(0, config.agentRssLimitMb ?? 2048);
     this.deployGracefulWaitMs = Math.max(
       0,
-      config.deployGracefulWaitMs ?? 10 * 60 * 1000,
+      config.deployGracefulWaitMs ?? 5 * 60 * 1000,
     );
   }
 

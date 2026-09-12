@@ -222,6 +222,15 @@ export class Store {
         ON agent_successions(to_agent_id);
     `);
 
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS concurrency_samples (
+        t TEXT PRIMARY KEY,
+        running_count INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_concurrency_samples_t
+        ON concurrency_samples(t);
+    `);
+
     this.db.exec(
       `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
     );
@@ -1088,5 +1097,40 @@ export class Store {
       ...(r.completed_at ? { completedAt: r.completed_at } : {}),
       usage: JSON.parse(r.usage_json) as TokenUsage,
     }));
+  }
+
+  /** Persist one gateway concurrency sample (ops monitor chart). */
+  insertConcurrencySample(t: string, runningCount: number): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO concurrency_samples (t, running_count)
+         VALUES (?, ?)`,
+      )
+      .run(t, runningCount);
+  }
+
+  /** Samples at/after cutoff ISO timestamp, oldest first. */
+  listConcurrencySamplesSince(
+    cutoffIso: string,
+  ): Array<{ t: string; runningCount: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT t, running_count FROM concurrency_samples
+         WHERE t >= ?
+         ORDER BY t ASC`,
+      )
+      .all(cutoffIso) as unknown as Array<{ t: string; running_count: number }>;
+    return rows.map((r) => ({
+      t: r.t,
+      runningCount: r.running_count,
+    }));
+  }
+
+  /** Drop samples strictly older than beforeIso (retention window). */
+  pruneConcurrencySamples(beforeIso: string): number {
+    const result = this.db
+      .prepare(`DELETE FROM concurrency_samples WHERE t < ?`)
+      .run(beforeIso);
+    return Number(result.changes ?? 0);
   }
 }

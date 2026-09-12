@@ -30,7 +30,14 @@ That copies scripts into `deployment/web-cursor/ops/` and starts both daemons.
 
 ## Request a deploy (no self-kill)
 
-Prefer the gateway API (returns immediately). **Graceful by default:**
+Prefer the gateway API (returns immediately).
+
+**Config** (backend `.env`):
+
+| Env | Default | Meaning |
+|---|---|---|
+| `GRACEFUL_RESTART` / `graceful_restart` | `1` | `1` = wait for idle + pause queued starts; `0` = legacy immediate enqueue |
+| `DEPLOY_GRACEFUL_WAIT_MS` | `600000` (10 min) | Max hold time before forcing release (or `DEPLOY_GRACEFUL_WAIT_SEC`) |
 
 ```bash
 curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
@@ -38,25 +45,28 @@ curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
   -d '{"deployment":"deployment-<hash>"}'
 ```
 
-If agents are running, the response is `state: "waiting_for_idle"`: in-flight runs
-continue, **queued runs are paused**, and no request file is written yet. Poll:
+With `GRACEFUL_RESTART=1`, if agents are running the response is
+`state: "waiting_for_idle"`: in-flight runs continue, **queued runs are paused**,
+and no request file is written yet. Poll:
 
 ```bash
 curl -sS http://127.0.0.1:4211/api/ops/restart-status
-# { "canRestart": true|false, "runningCount": N, "deploy": {...} }
+# { "canRestart": true|false, "runningCount": N, "remainingMs": ..., "deploy": {...} }
 ```
 
-When `canRestart` becomes true (or the last run finishes), the held deploy is
-released into `deploy-requests/` for deploy-agent. After restart, queued runs
-resume via `recoverQueuedRuns`.
+When `canRestart` becomes true, the last run finishes, **or the wait deadline
+expires**, the held deploy is released into `deploy-requests/` for deploy-agent.
+After restart, queued runs resume via `recoverQueuedRuns`.
 
-Emergency (skip wait, may interrupt running agents):
+Skip wait for one request (may interrupt running agents):
 
 ```bash
 curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
   -H 'content-type: application/json' \
   -d '{"deployment":"deployment-<hash>","force":true}'
 ```
+
+Legacy always-immediate mode: set `GRACEFUL_RESTART=0` in backend `.env`.
 
 Cancel a held deploy and resume queue admission:
 

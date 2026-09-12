@@ -115,13 +115,13 @@ EOF
 # → 从 GitHub main（或指定 ref）冻结并构建 deployment-<hash>/
 
 # 异步上线（推荐，避免 gateway 自己杀自己；默认 graceful）：
-# 若有 agent 在跑 → state=waiting_for_idle，暂停排队启动；轮询
-#   GET /api/ops/restart-status 直至 canRestart，held 部署会自动放行。
+# GRACEFUL_RESTART=1（默认）：有 agent 在跑 → waiting_for_idle，暂停排队启动；
+#   轮询 GET /api/ops/restart-status；空闲或超过 DEPLOY_GRACEFUL_WAIT_MS（默认10min）后放行。
+# GRACEFUL_RESTART=0：直接入队重启（旧行为）。单次跳过：body 加 "force":true
 curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
   -H 'content-type: application/json' \
   -d '{"deployment":"deployment-<hash>"}'
 # deploy-agent 在 deployment/web-cursor/ops/ 侧执行 bin/deploy.sh
-# 紧急跳过等待：同上 body 加 "force":true
 
 # 仅手工/排障时才同步调用：
 /Users/gaolei/deployment/web-cursor/bin/deploy.sh deployment-<hash>

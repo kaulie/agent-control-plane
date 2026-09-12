@@ -21,8 +21,11 @@ export async function registerRoutes(
     /** Live version for /health (disk VERSION preferred). */
     resolveAppVersion?: () => string;
     deployQueue: DeployQueue;
+    /** When false, deploy enqueues immediately (legacy). Default true. */
+    gracefulRestart?: boolean;
   },
 ): Promise<void> {
+  const gracefulRestart = opts.gracefulRestart !== false;
   const version = (): string =>
     opts.resolveAppVersion?.() ?? opts.appVersion;
 
@@ -42,9 +45,10 @@ export async function registerRoutes(
 
   /**
    * Async deploy: enqueue for the independent deploy-agent.
-   * Graceful by default: if agents are running, hold the request, pause starting
-   * queued runs, and ask the caller to poll GET /api/ops/restart-status.
-   * Pass force=true to enqueue immediately (may interrupt running agents).
+   * When GRACEFUL_RESTART=1 (default): if agents are running, hold the request,
+   * pause starting queued runs, and ask the caller to poll restart-status
+   * (max wait: DEPLOY_GRACEFUL_WAIT_MS, default 10 min).
+   * When GRACEFUL_RESTART=0 or force=true: enqueue immediately (legacy).
    */
   app.post<{
     Body: {
@@ -60,8 +64,9 @@ export async function registerRoutes(
       return reply.code(400).send({ error: "deployment or hash is required" });
     }
     const force = req.body?.force === true;
+    const useGraceful = gracefulRestart && !force;
     try {
-      if (!force) {
+      if (useGraceful) {
         gateway.beginDeployDrain();
         const snap = gateway.getRestartStatus();
         if (!snap.canRestart) {
@@ -86,14 +91,18 @@ export async function registerRoutes(
             ...status,
             canRestart: false,
             admissionPaused: true,
+            gracefulRestart: true,
             activeRuns: snap.activeRuns,
             poll: "/api/ops/restart-status",
           });
         }
       }
 
-      if (force) {
+      if (force || !gracefulRestart) {
         opts.deployQueue.cancelHeld();
+        if (gateway.isAdmissionPaused()) {
+          gateway.endDeployDrain();
+        }
       }
 
       const status = opts.deployQueue.enqueue({
@@ -106,7 +115,12 @@ export async function registerRoutes(
       return reply.code(202).send({
         ...status,
         canRestart: true,
-        ...(force ? { forced: true } : { admissionPaused: gateway.isAdmissionPaused() }),
+        gracefulRestart,
+        ...(force
+          ? { forced: true }
+          : !gracefulRestart
+            ? { forced: true, reason: "GRACEFUL_RESTART=0" }
+            : { admissionPaused: gateway.isAdmissionPaused() }),
       });
     } catch (err) {
       return reply
@@ -119,6 +133,11 @@ export async function registerRoutes(
     const snap = gateway.getRestartStatus();
     const held = opts.deployQueue.getHeld();
     let deploy = held ? opts.deployQueue.getStatus(held.requestId) : undefined;
+    const waitUntil = opts.deployQueue.getHeldWaitUntil();
+    const remainingMs =
+      waitUntil && Number.isFinite(Date.parse(waitUntil))
+        ? Math.max(0, Date.parse(waitUntil) - Date.now())
+        : null;
 
     if (snap.canRestart && opts.deployQueue.getHeld()) {
       const released = opts.deployQueue.releaseHeld();
@@ -130,11 +149,15 @@ export async function registerRoutes(
     const heldAfter = opts.deployQueue.getHeld();
     return {
       ...snap,
+      gracefulRestart,
+      maxWaitMs: opts.deployQueue.maxWaitMs,
+      waitUntil: heldAfter ? waitUntil : null,
+      remainingMs: heldAfter ? remainingMs : null,
       heldDeployment: heldAfter?.deployment ?? deploy?.deployment ?? null,
       deploy: deploy ?? null,
       pollHint: snap.canRestart
         ? undefined
-        : "稍后再次 GET /api/ops/restart-status；空闲后会自动放行已 hold 的部署",
+        : "稍后再次 GET /api/ops/restart-status；空闲或等待超时后会自动放行已 hold 的部署",
     };
   });
 

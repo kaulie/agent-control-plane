@@ -63,6 +63,14 @@ export interface AgentRuntimeStatus {
     projectName?: string;
     taskTitle?: string;
   }>;
+  queuedRuns?: Array<{
+    taskId: string;
+    runId: string;
+    projectId?: string;
+    projectName?: string;
+    taskTitle?: string;
+    mode?: "agent" | "plan";
+  }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
   windowMs?: number;

@@ -364,9 +364,14 @@ export function AgentRuntimePage({ onBack }: Props) {
             </div>
           </div>
 
-          {data.activeRuns.length > 0 && (
-            <div className="runtime-active">
-              <div className="runtime-active-title">当前占用槽位</div>
+          <div className="runtime-active">
+            <div className="runtime-active-title">
+              当前占用槽位
+              <span className="runtime-section-count">{data.activeRuns.length}</span>
+            </div>
+            {data.activeRuns.length === 0 ? (
+              <div className="runtime-active-empty">暂无运行中的任务</div>
+            ) : (
               <ul className="runtime-active-list">
                 {data.activeRuns.map((r) => (
                   <li key={r.runId}>
@@ -388,8 +393,50 @@ export function AgentRuntimePage({ onBack }: Props) {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+
+          <div className="runtime-active">
+            <div className="runtime-active-title">
+              排队中任务
+              <span className="runtime-section-count">
+                {(data.queuedRuns ?? []).length}
+              </span>
             </div>
-          )}
+            {(data.queuedRuns ?? []).length === 0 ? (
+              <div className="runtime-active-empty">暂无排队任务</div>
+            ) : (
+              <ul className="runtime-active-list">
+                {(data.queuedRuns ?? []).map((r, i) => (
+                  <li key={`${r.runId}-${i}`}>
+                    <span className="runtime-queue-pos">#{i + 1}</span>
+                    <span className="runtime-active-sep">·</span>
+                    <span className="runtime-active-project">
+                      {r.projectName?.trim() || r.projectId || "未命名项目"}
+                    </span>
+                    <span className="runtime-active-sep">·</span>
+                    <code>{r.taskId}</code>
+                    {r.taskTitle?.trim() ? (
+                      <>
+                        <span className="runtime-active-sep">·</span>
+                        <span className="runtime-active-title-text">
+                          {r.taskTitle.trim()}
+                        </span>
+                      </>
+                    ) : null}
+                    {r.mode ? (
+                      <>
+                        <span className="runtime-active-sep">·</span>
+                        <span className="runtime-queue-mode">{r.mode}</span>
+                      </>
+                    ) : null}
+                    <span className="runtime-active-sep">·</span>
+                    <code>{r.runId}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </>
       )}
     </main>

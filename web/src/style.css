@@ -2099,6 +2099,49 @@ body {
   color: var(--text-dim);
 }
 
+.runtime-refresh-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  max-width: 760px;
+}
+
+.runtime-refresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+  padding-bottom: 6px;
+}
+
+.runtime-refresh-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.runtime-refresh-interval.is-disabled {
+  opacity: 0.55;
+}
+
+.runtime-refresh-now {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.runtime-refresh-now:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .runtime-chart-wrap {
   max-width: 760px;
   padding: 12px 14px;
@@ -2191,6 +2234,15 @@ body {
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.7;
+}
+
+.runtime-active-project {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.runtime-active-title-text {
+  color: var(--text);
 }
 
 .runtime-active-sep {

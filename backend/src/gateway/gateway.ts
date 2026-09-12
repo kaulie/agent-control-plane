@@ -125,10 +125,17 @@ export interface AgentRuntimeStatus {
   runningCount: number;
   maxConcurrentRuns: number;
   queuedCount: number;
-  activeRuns: Array<{ taskId: string; runId: string }>;
+  activeRuns: Array<{
+    taskId: string;
+    runId: string;
+    projectId?: string;
+    projectName?: string;
+    taskTitle?: string;
+  }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
-  /** True while graceful deploy drain is pausing new run starts. */
+  /** Requested chart window in ms (series is clipped to this look-back). */
+  windowMs?: number;
   admissionPaused?: boolean;
 }
 
@@ -138,7 +145,7 @@ export interface RestartStatus {
   runningCount: number;
   maxConcurrentRuns: number;
   queuedCount: number;
-  activeRuns: Array<{ taskId: string; runId: string }>;
+  activeRuns: AgentRuntimeStatus["activeRuns"];
   message: string;
 }
 
@@ -167,8 +174,15 @@ export class AgentGateway {
   /** In-memory ring buffer of runningCount samples (survives until process restart). */
   private readonly concurrencySeries: ConcurrencySample[] = [];
   private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 5_000;
-  /** ~30 minutes at 5s interval. */
-  private static readonly CONCURRENCY_SERIES_MAX = 360;
+  /** ~3 hours at 5s interval (longest chart window). */
+  private static readonly CONCURRENCY_SERIES_MAX = 2_160;
+  private static readonly DEFAULT_WINDOW_MS = 30 * 60 * 1000;
+  private static readonly ALLOWED_WINDOWS_MS = [
+    15 * 60 * 1000,
+    30 * 60 * 1000,
+    60 * 60 * 1000,
+    3 * 60 * 60 * 1000,
+  ] as const;
 
   constructor(
     private store: Store,
@@ -480,24 +494,51 @@ export class AgentGateway {
   }
 
   /** Live concurrency + recent in-memory series for the ops monitor page. */
-  getAgentRuntimeStatus(): AgentRuntimeStatus {
+  getAgentRuntimeStatus(windowMs?: number): AgentRuntimeStatus {
     let queuedCount = 0;
     for (const list of this.pendingRuns.values()) {
       queuedCount += list.length;
     }
-    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => ({
-      taskId,
-      runId,
-    }));
+    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) => {
+      const task = this.store.getTask(taskId);
+      const project = task?.projectId
+        ? this.store.getProject(task.projectId)
+        : undefined;
+      return {
+        taskId,
+        runId,
+        ...(task?.projectId ? { projectId: task.projectId } : {}),
+        ...(project?.name ? { projectName: project.name } : {}),
+        ...(task?.title ? { taskTitle: task.title } : {}),
+      };
+    });
+    const resolvedWindow = this.resolveWindowMs(windowMs);
+    const cutoff = Date.now() - resolvedWindow;
+    const series = this.concurrencySeries.filter((s) => {
+      const t = Date.parse(s.t);
+      return Number.isFinite(t) && t >= cutoff;
+    });
     return {
       runningCount: this.runningCount,
       maxConcurrentRuns: this.maxConcurrentRuns,
       queuedCount,
       activeRuns,
-      series: this.concurrencySeries.slice(),
+      series,
       sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
+      windowMs: resolvedWindow,
       admissionPaused: this.admissionPaused,
     };
+  }
+
+  private resolveWindowMs(raw?: number): number {
+    if (
+      typeof raw === "number" &&
+      Number.isFinite(raw) &&
+      (AgentGateway.ALLOWED_WINDOWS_MS as readonly number[]).includes(raw)
+    ) {
+      return raw;
+    }
+    return AgentGateway.DEFAULT_WINDOW_MS;
   }
 
   getRestartStatus(): RestartStatus {

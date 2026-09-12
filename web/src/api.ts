@@ -119,8 +119,14 @@ export const api = {
     );
   },
 
-  getAgentRuntime: () =>
-    fetch(`${BASE}/ops/agent-runtime`).then((r) => j<AgentRuntimeStatus>(r)),
+  getAgentRuntime: (params?: { windowMs?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.windowMs != null) q.set("windowMs", String(params.windowMs));
+    const s = q.toString();
+    return fetch(`${BASE}/ops/agent-runtime${s ? `?${s}` : ""}`).then((r) =>
+      j<AgentRuntimeStatus>(r),
+    );
+  },
 
   getEvents: (
     id: string,

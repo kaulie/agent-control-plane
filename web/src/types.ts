@@ -56,9 +56,16 @@ export interface AgentRuntimeStatus {
   runningCount: number;
   maxConcurrentRuns: number;
   queuedCount: number;
-  activeRuns: Array<{ taskId: string; runId: string }>;
+  activeRuns: Array<{
+    taskId: string;
+    runId: string;
+    projectId?: string;
+    projectName?: string;
+    taskTitle?: string;
+  }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
+  windowMs?: number;
   admissionPaused?: boolean;
 }
 

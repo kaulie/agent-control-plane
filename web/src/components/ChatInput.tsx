@@ -39,7 +39,7 @@ export interface ChatPayload {
 }
 
 interface Props {
-  onSend: (payload: ChatPayload) => void;
+  onSend: (payload: ChatPayload) => void | Promise<boolean | void>;
   onStop?: () => void;
   disabled: boolean;
   running: boolean;
@@ -108,12 +108,13 @@ export default function ChatInput({
   // The mode is always user-chosen; it is never forced by the task state.
   // Only the user's last selection is remembered (localStorage).
   const [mode, setMode] = useState<AgentMode>(loadStoredMode);
+  const [sending, setSending] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const effectiveMode: AgentMode = mode;
 
   const canSend =
-    (!!text.trim() || images.length > 0) && !disabled && !stopping;
+    (!!text.trim() || images.length > 0) && !disabled && !stopping && !sending;
 
   const selectMode = (next: AgentMode): void => {
     setMode(next);
@@ -150,10 +151,27 @@ export default function ChatInput({
 
   const submit = (): void => {
     if (!canSend) return;
-    onSend({ text: text.trim(), images, mode: effectiveMode });
-    setText("");
-    setImages([]);
+    const payload: ChatPayload = {
+      text: text.trim(),
+      images,
+      mode: effectiveMode,
+    };
+    // Keep the draft until the server accepts it. Clearing first made failed
+    // sends look like "no reaction" (empty box, no timeline row).
+    setSending(true);
     setAttachError(null);
+    void Promise.resolve(onSend(payload))
+      .then((ok) => {
+        if (ok === false) return;
+        setText("");
+        setImages([]);
+      })
+      .catch((e) => {
+        setAttachError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        setSending(false);
+      });
   };
 
   const placeholder = running
@@ -179,7 +197,7 @@ export default function ChatInput({
                 type="button"
                 className="chat-image-remove"
                 aria-label="Remove image"
-                disabled={disabled || stopping}
+                disabled={disabled || stopping || sending}
                 onClick={() => removeImage(i)}
               >
                 ×
@@ -215,7 +233,7 @@ export default function ChatInput({
           className="btn-attach"
           title="Attach images"
           aria-label="Attach images"
-          disabled={disabled || stopping || images.length >= MAX_IMAGES}
+          disabled={disabled || stopping || sending || images.length >= MAX_IMAGES}
           onClick={() => fileRef.current?.click()}
         >
           📎
@@ -223,7 +241,7 @@ export default function ChatInput({
         <select
           className="mode-select"
           value={effectiveMode}
-          disabled={disabled || stopping}
+          disabled={disabled || stopping || sending}
           aria-label="Conversation mode"
           title={modeSelectTitle}
           onChange={(e) => selectMode(e.target.value as AgentMode)}
@@ -234,7 +252,7 @@ export default function ChatInput({
         <textarea
           value={text}
           placeholder={placeholder}
-          disabled={disabled || stopping}
+          disabled={disabled || stopping || sending}
           rows={4}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
@@ -277,7 +295,7 @@ export default function ChatInput({
           </button>
         ) : null}
         <button onClick={submit} disabled={!canSend}>
-          {running ? "Queue" : "Send"}
+          {sending ? "Sending…" : running ? "Queue" : "Send"}
         </button>
       </div>
     </div>

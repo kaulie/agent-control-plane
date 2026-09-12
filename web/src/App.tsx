@@ -542,14 +542,41 @@ export default function App() {
     }
   }, [projects, refreshProjects, selectedProjectId]);
 
+  /** Pull events/detail after send so the user message is visible even if WS is quiet. */
+  const refreshAfterSend = useCallback(
+    async (taskId: string): Promise<void> => {
+      try {
+        const after = lastSeqRef.current;
+        const [evRes, detailRes] = await Promise.all([
+          after != null
+            ? api.getEvents(taskId, { after })
+            : api.getEvents(taskId, { limit: 100 }),
+          api.getTask(taskId),
+        ]);
+        setEvents((prev) => mergeEventsBySeq(prev, evRes.events));
+        lastSeqRef.current = evRes.nextSeq;
+        setDetail(detailRes);
+        applyRunState(detailRes);
+        if (!detailRes.runs.some((r) => r.status === "running")) {
+          setStopping(false);
+        }
+        setGracePolls((n) => Math.max(n, 2));
+      } catch {
+        setGracePolls(2);
+        void refreshDetail(taskId);
+      }
+    },
+    [applyRunState, refreshDetail],
+  );
+
   const sendMessage = useCallback(
     async (payload: {
       text: string;
       images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
       mode: "agent" | "plan";
-    }) => {
-      if (!selectedId) return;
-      if (!payload.text.trim() && payload.images.length === 0) return;
+    }): Promise<boolean> => {
+      if (!selectedId) return false;
+      if (!payload.text.trim() && payload.images.length === 0) return false;
       setError(null);
       setInterruptNotice(null);
       setStopping(false);
@@ -577,12 +604,15 @@ export default function App() {
         if (payload.mode === "plan") {
           setMainTab("plan");
         }
+        await refreshAfterSend(selectedId);
+        return true;
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
+        return false;
       }
     },
-    [refreshDetail, selectedId],
+    [refreshAfterSend, refreshDetail, selectedId],
   );
 
   const stopAgent = useCallback(async () => {
@@ -697,12 +727,13 @@ export default function App() {
           setRunning(true);
         }
         setMainTab("plan");
+        await refreshAfterSend(selectedId);
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
       }
     },
-    [refreshDetail, selectedId],
+    [refreshAfterSend, refreshDetail, selectedId],
   );
 
   // An unanswered plan question batch (only ever produced by a plan-mode run)

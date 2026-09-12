@@ -92,8 +92,22 @@ interface EventRow {
   cost: string | null;
 }
 
+/**
+ * Compact unique id. Previously sliced UUID to 8 hex chars (32 bits), which
+ * collides once `events.event_id` grows into the hundreds of thousands
+ * (birthday bound ~77k at 50%). 16 hex chars is 64 bits — safe at this scale
+ * and a different length than legacy `evt-xxxxxxxx` rows, so new ids cannot
+ * collide with the existing table.
+ */
 export function newId(prefix: string): string {
-  return `${prefix}-${randomUUID().slice(0, 8)}`;
+  return `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function isUniqueEventIdError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    /UNIQUE constraint failed: events\.event_id/i.test(err.message)
+  );
 }
 
 export class Store {
@@ -879,25 +893,34 @@ export class Store {
   // ---- events ----
 
   appendEvent(event: AgentEvent): void {
-    const result = this.db
-      .prepare(
-        `INSERT INTO events (event_id, task_id, run_id, agent_id, timestamp, event_type, payload, usage, cost)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        event.eventId,
-        event.taskId,
-        event.runId,
-        event.agentId,
-        event.timestamp,
-        event.eventType,
-        JSON.stringify(event.payload),
-        event.usage ? JSON.stringify(event.usage) : null,
-        event.cost ? JSON.stringify(event.cost) : null,
-      );
-    // Attach AUTOINCREMENT seq before WS publish — without it the UI treats
-    // live events as seq=0 and sorts them above historically loaded rows.
-    event.seq = Number(result.lastInsertRowid);
+    const insert = this.db.prepare(
+      `INSERT INTO events (event_id, task_id, run_id, agent_id, timestamp, event_type, payload, usage, cost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    // Retry with a fresh id if we still hit a rare collision (or a caller
+    // reused an eventId). Mutate event.eventId so WS publish matches the row.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const result = insert.run(
+          event.eventId,
+          event.taskId,
+          event.runId,
+          event.agentId,
+          event.timestamp,
+          event.eventType,
+          JSON.stringify(event.payload),
+          event.usage ? JSON.stringify(event.usage) : null,
+          event.cost ? JSON.stringify(event.cost) : null,
+        );
+        // Attach AUTOINCREMENT seq before WS publish — without it the UI treats
+        // live events as seq=0 and sorts them above historically loaded rows.
+        event.seq = Number(result.lastInsertRowid);
+        return;
+      } catch (err) {
+        if (!isUniqueEventIdError(err) || attempt === 4) throw err;
+        event.eventId = newId("evt");
+      }
+    }
   }
 
   listEvents(

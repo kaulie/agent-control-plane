@@ -45,7 +45,7 @@ export default function DeploymentSection({
             <input
               className="settings-path-input"
               type="url"
-              placeholder="https://example.com/api/ops/deploy/notify"
+              placeholder="http://127.0.0.1:4211/api/ops/restart-notify"
               value={restartNotifyUrl}
               onChange={(e) => onNotifyUrlChange(e.target.value)}
             />
@@ -55,7 +55,7 @@ export default function DeploymentSection({
             <input
               className="settings-path-input"
               type="url"
-              placeholder="https://example.com/api/ops/restart-status"
+              placeholder="http://127.0.0.1:4211/api/ops/restart-status"
               value={restartPollUrl}
               onChange={(e) => onPollUrlChange(e.target.value)}
             />

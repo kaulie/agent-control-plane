@@ -60,6 +60,21 @@ App 侧：`POST :4211/api/ops/deploy`（graceful）→ 转发 `DEPLOYMENT_API_UR
 
 环境变量（app）：`DEPLOYMENT_API_URL`、`DEPLOY_SERVICE_ID`、`GRACEFUL_RESTART`、`DEPLOY_GRACEFUL_WAIT_MS`。
 
+**项目方 graceful 契约（部署服务回调）：**
+
+| Method | URL（本仓库默认） | 作用 |
+|---|---|---|
+| `POST` | `http://127.0.0.1:4211/api/ops/restart-notify` | 开始 drain（`admissionPaused`） |
+| `GET` | `http://127.0.0.1:4211/api/ops/restart-status` | 轮询；`canRestart`/`canDeploy`/`ready` 任一为 true 即可重启 |
+
+登记到部署服务（部署服务支持这些字段后）：
+
+```bash
+curl -sS -X PUT http://127.0.0.1:4220/api/services/web-cursor \
+  -H 'content-type: application/json' \
+  -d '{"restartNotifyUrl":"http://127.0.0.1:4211/api/ops/restart-notify","restartPollUrl":"http://127.0.0.1:4211/api/ops/restart-status","gracefulRestartMaxWaitMs":600000}'
+```
+
 ### 运行时启停（随发版包进入 runtime）
 
 仓库 `scripts/start.sh` / `stop.sh` / `restart.sh` / `watchdog.sh` 属于**应用运行时**配套，会随 `deployment-<hash>` rsync 到 runtime；由 `bin/deploy.sh` 调用 runtime 内的 `scripts/restart.sh`。

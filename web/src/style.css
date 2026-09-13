@@ -2176,7 +2176,7 @@ body {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 16px;
-  max-width: 760px;
+  max-width: 960px;
 }
 
 .runtime-refresh-toggle {
@@ -2212,6 +2212,16 @@ body {
 .runtime-refresh-now:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.runtime-custom-range input[type="datetime-local"] {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color-scheme: dark;
 }
 
 .runtime-chart-wrap {

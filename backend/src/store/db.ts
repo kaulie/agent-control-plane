@@ -1102,7 +1102,7 @@ export class Store {
     }));
   }
 
-  /** Persist one gateway concurrency sample (ops monitor chart). */
+  /** Persist one gateway concurrency sample (ops monitor chart). Never pruned. */
   insertConcurrencySample(t: string, runningCount: number): void {
     this.db
       .prepare(
@@ -1110,6 +1110,14 @@ export class Store {
          VALUES (?, ?)`,
       )
       .run(t, runningCount);
+  }
+
+  /** Earliest sample timestamp, or null if the table is empty. */
+  getEarliestConcurrencySampleAt(): string | null {
+    const row = this.db
+      .prepare(`SELECT t FROM concurrency_samples ORDER BY t ASC LIMIT 1`)
+      .get() as { t: string } | undefined;
+    return row?.t ?? null;
   }
 
   /** Samples at/after cutoff ISO timestamp, oldest first. */
@@ -1129,11 +1137,49 @@ export class Store {
     }));
   }
 
-  /** Drop samples strictly older than beforeIso (retention window). */
-  pruneConcurrencySamples(beforeIso: string): number {
-    const result = this.db
-      .prepare(`DELETE FROM concurrency_samples WHERE t < ?`)
-      .run(beforeIso);
-    return Number(result.changes ?? 0);
+  /**
+   * Samples in [fromIso, toIso], oldest first.
+   * `minute` / `hour` buckets use MAX(running_count) so peaks remain visible.
+   */
+  listConcurrencySamplesRange(
+    fromIso: string,
+    toIso: string,
+    granularity: "raw" | "minute" | "hour" = "raw",
+  ): Array<{ t: string; runningCount: number }> {
+    if (granularity === "raw") {
+      const rows = this.db
+        .prepare(
+          `SELECT t, running_count FROM concurrency_samples
+           WHERE t >= ? AND t <= ?
+           ORDER BY t ASC`,
+        )
+        .all(fromIso, toIso) as unknown as Array<{
+        t: string;
+        running_count: number;
+      }>;
+      return rows.map((r) => ({ t: r.t, runningCount: r.running_count }));
+    }
+
+    // ISO `2026-09-12T15:38:06.058Z` → minute `…T15:38:00.000Z`, hour `…T15:00:00.000Z`
+    const bucketExpr =
+      granularity === "minute"
+        ? `substr(t, 1, 16) || ':00.000Z'`
+        : `substr(t, 1, 13) || ':00:00.000Z'`;
+    const groupExpr =
+      granularity === "minute" ? `substr(t, 1, 16)` : `substr(t, 1, 13)`;
+
+    const rows = this.db
+      .prepare(
+        `SELECT ${bucketExpr} AS t, MAX(running_count) AS running_count
+         FROM concurrency_samples
+         WHERE t >= ? AND t <= ?
+         GROUP BY ${groupExpr}
+         ORDER BY t ASC`,
+      )
+      .all(fromIso, toIso) as unknown as Array<{
+      t: string;
+      running_count: number;
+    }>;
+    return rows.map((r) => ({ t: r.t, runningCount: r.running_count }));
   }
 }

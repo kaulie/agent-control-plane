@@ -21,11 +21,12 @@ if [ -f "${PID_FILE}" ]; then
   rm -f "${PID_FILE}"
 fi
 
-# 2) 按端口兜底清理
-PORT_PIDS=$(lsof -ti:${PORT} 2>/dev/null || true)
+# 2) 按端口兜底清理：只杀 LISTEN 进程，避免误杀连到该端口的客户端
+#    （如部署系统 control-plane 的 graceful poll 空闲 keep-alive 连接）
+PORT_PIDS=$(lsof -ti:${PORT} -sTCP:LISTEN 2>/dev/null || true)
 if [ -n "${PORT_PIDS}" ]; then
   kill ${PORT_PIDS} 2>/dev/null || true
-  echo "[stop] 按端口清理 PID=${PORT_PIDS}"
+  echo "[stop] 按端口清理监听进程 PID=${PORT_PIDS}"
   stopped=1
 fi
 

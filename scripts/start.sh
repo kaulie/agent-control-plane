@@ -22,9 +22,10 @@ log() { echo "[start] $(date '+%F %T') $*"; }
 # 用户显式启动 → 清除看门狗暂停标记
 rm -f "${PAUSED_FLAG}"
 
-# 已在运行则跳过
-if [ -n "$(lsof -ti:${PORT} 2>/dev/null || true)" ]; then
-  log "已在运行（端口 ${PORT} 被占用），跳过"
+# 已在运行则跳过：只看是否有 LISTEN 进程，避免客户端连接（panel/Chrome
+# 连到 4211）造成"已在运行"误判而跳过启动，导致服务起不来。
+if [ -n "$(lsof -ti:${PORT} -sTCP:LISTEN 2>/dev/null || true)" ]; then
+  log "已在运行（端口 ${PORT} 监听中），跳过"
   exit 0
 fi
 

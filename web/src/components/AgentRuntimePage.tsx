@@ -144,6 +144,18 @@ function formatClock(iso: string): string {
   });
 }
 
+/** Slot utilization: running / cap, as percent (0–∞; can exceed 100 if oversubscribed). */
+function loadRatePct(running: number, cap: number): number {
+  if (!(cap > 0) || !Number.isFinite(running)) return 0;
+  return (Math.max(0, running) / cap) * 100;
+}
+
+function formatLoadPct(pct: number): string {
+  if (!Number.isFinite(pct)) return "—";
+  const rounded = pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10;
+  return `${rounded}%`;
+}
+
 /** Map samples onto a fixed time domain so changing 时间轴 re-scales X immediately. */
 function buildPolyline(
   series: ConcurrencySample[],
@@ -306,11 +318,27 @@ export function AgentRuntimePage({ onBack }: Props) {
 
   const spanMs = Math.max(1, windowEndMs - windowStartMs);
   const series = data?.series ?? [];
+  const cap = Math.max(0, data?.maxConcurrentRuns ?? 0);
+  const currentLoadPct = loadRatePct(data?.runningCount ?? 0, cap);
+
+  const windowLoad = useMemo(() => {
+    if (!series.length || !(cap > 0)) {
+      return { peakPct: null as number | null, avgPct: null as number | null };
+    }
+    let peak = 0;
+    let sum = 0;
+    for (const s of series) {
+      const pct = loadRatePct(s.runningCount, cap);
+      if (pct > peak) peak = pct;
+      sum += pct;
+    }
+    return { peakPct: peak, avgPct: sum / series.length };
+  }, [series, cap]);
 
   const maxY = useMemo(() => {
-    const cap = data?.maxConcurrentRuns ?? 1;
+    const limit = data?.maxConcurrentRuns ?? 1;
     const peak = Math.max(0, ...series.map((s) => s.runningCount));
-    return Math.max(cap, peak, 1);
+    return Math.max(limit, peak, 1);
   }, [data?.maxConcurrentRuns, series]);
 
   const { points, area } = useMemo(
@@ -452,6 +480,7 @@ export function AgentRuntimePage({ onBack }: Props) {
 
       <p className="stats-note">
         展示 gateway 实时并发（runningCount）与上限（AGENT_MAX_CONCURRENT_RUNS）。
+        满载率 = 当前并发 ÷ 上限。所选时间轴内另给出峰值 / 平均满载率。
         曲线来自 SQLite 全量持久化采样（约每 15 秒一点，永不删除）。
         时间轴超过 1 小时按分钟聚合峰值，超过 24 小时按小时聚合峰值。
       </p>
@@ -480,6 +509,36 @@ export function AgentRuntimePage({ onBack }: Props) {
                 {data.runningCount}
                 <span className="runtime-cap"> / {data.maxConcurrentRuns}</span>
               </div>
+            </div>
+            <div
+              className={`stats-card${currentLoadPct >= 100 ? " stats-card-warn" : ""}`}
+              title="满载率 = 当前并发 ÷ AGENT_MAX_CONCURRENT_RUNS"
+            >
+              <div className="stats-card-label">满载率</div>
+              <div className="stats-card-value runtime-load-pct">
+                {formatLoadPct(currentLoadPct)}
+              </div>
+              <div className="stats-card-caption">
+                {data.runningCount}/{data.maxConcurrentRuns} 槽位
+              </div>
+            </div>
+            <div className="stats-card" title="所选时间轴内采样点的最高满载率">
+              <div className="stats-card-label">峰值满载率</div>
+              <div className="stats-card-value runtime-load-pct">
+                {windowLoad.peakPct == null
+                  ? "—"
+                  : formatLoadPct(windowLoad.peakPct)}
+              </div>
+              <div className="stats-card-caption">{rangeOpt.label}</div>
+            </div>
+            <div className="stats-card" title="所选时间轴内采样点的平均满载率">
+              <div className="stats-card-label">平均满载率</div>
+              <div className="stats-card-value runtime-load-pct">
+                {windowLoad.avgPct == null
+                  ? "—"
+                  : formatLoadPct(windowLoad.avgPct)}
+              </div>
+              <div className="stats-card-caption">{rangeOpt.label}</div>
             </div>
             <div className="stats-card">
               <div className="stats-card-label">排队中</div>
@@ -579,6 +638,12 @@ export function AgentRuntimePage({ onBack }: Props) {
               <span className="runtime-legend-line">并发数</span>
               <span className="runtime-legend-cap">
                 上限 {data.maxConcurrentRuns}
+              </span>
+              <span className="runtime-legend-load">
+                当前满载 {formatLoadPct(currentLoadPct)}
+                {windowLoad.peakPct != null
+                  ? ` · 峰值 ${formatLoadPct(windowLoad.peakPct)}`
+                  : ""}
               </span>
             </div>
           </div>

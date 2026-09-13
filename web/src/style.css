@@ -2171,6 +2171,15 @@ body {
   letter-spacing: 0.04em;
 }
 
+.runtime-load-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-legend-load {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 .runtime-refresh-bar {
   display: flex;
   flex-wrap: wrap;

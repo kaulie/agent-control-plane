@@ -128,6 +128,8 @@ export interface ConcurrencySample {
   runningCount: number;
 }
 
+export type ConcurrencyGranularity = "raw" | "minute" | "hour";
+
 export interface AgentRuntimeStatus {
   runningCount: number;
   maxConcurrentRuns: number;
@@ -150,11 +152,27 @@ export interface AgentRuntimeStatus {
   }>;
   series: ConcurrencySample[];
   sampleIntervalMs: number;
-  /** Requested chart window in ms (series is clipped to this look-back). */
+  /** Look-back window in ms when not using an absolute from/to range. */
   windowMs?: number;
+  /** Inclusive chart range (ISO). */
+  from?: string;
+  to?: string;
+  /** Series bucket size after server-side downsampling. */
+  granularity?: ConcurrencyGranularity;
   admissionPaused?: boolean;
   /** ISO time when admission pause started (deploy drain / restart-notify). */
   admissionPausedAt?: string;
+}
+
+export interface AgentRuntimeQuery {
+  /** Look-back from now; ignored when from/to or all is set. */
+  windowMs?: number;
+  /** Absolute range start (ISO). Requires `to`. */
+  from?: string;
+  /** Absolute range end (ISO). Requires `from`. */
+  to?: string;
+  /** Load from earliest persisted sample through now. */
+  all?: boolean;
 }
 
 export interface RestartStatus {
@@ -193,25 +211,16 @@ export class AgentGateway {
   private admissionPauseTimer: NodeJS.Timeout | undefined;
   private readonly deployGracefulWaitMs: number;
   /**
-   * In-memory ring buffer of runningCount samples.
-   * Also mirrored to SQLite (`concurrency_samples`) so charts survive restart.
+   * Short in-memory ring (warm cache / restart hydrate).
+   * Full history lives in SQLite (`concurrency_samples`) and is never pruned.
    */
   private readonly concurrencySeries: ConcurrencySample[] = [];
-  private concurrencyPersistCount = 0;
-  private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 5_000;
-  /** ~3 hours at 5s interval (longest chart window). */
-  private static readonly CONCURRENCY_SERIES_MAX = 2_160;
-  /** Keep DB/history aligned with the longest UI window (3h). */
-  private static readonly CONCURRENCY_RETENTION_MS = 3 * 60 * 60 * 1000;
-  /** Prune SQLite about once per minute (12 × 5s). */
-  private static readonly CONCURRENCY_PRUNE_EVERY = 12;
+  private static readonly CONCURRENCY_SAMPLE_INTERVAL_MS = 15_000;
+  /** Keep ~1 hour of raw samples in memory (240 × 15s). */
+  private static readonly CONCURRENCY_SERIES_MAX = 240;
   private static readonly DEFAULT_WINDOW_MS = 30 * 60 * 1000;
-  private static readonly ALLOWED_WINDOWS_MS = [
-    15 * 60 * 1000,
-    30 * 60 * 1000,
-    60 * 60 * 1000,
-    3 * 60 * 60 * 1000,
-  ] as const;
+  private static readonly HOUR_MS = 60 * 60 * 1000;
+  private static readonly DAY_MS = 24 * 60 * 60 * 1000;
 
   constructor(
     private store: Store,
@@ -556,8 +565,8 @@ export class AgentGateway {
     return this.pendingRuns.get(taskId)?.length ?? 0;
   }
 
-  /** Live concurrency + recent in-memory series for the ops monitor page. */
-  getAgentRuntimeStatus(windowMs?: number): AgentRuntimeStatus {
+  /** Live concurrency + persisted (optionally downsampled) series for ops monitor. */
+  getAgentRuntimeStatus(query?: AgentRuntimeQuery): AgentRuntimeStatus {
     const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) =>
       this.enrichRuntimeSlot(taskId, runId),
     );
@@ -570,12 +579,14 @@ export class AgentGateway {
         });
       }
     }
-    const resolvedWindow = this.resolveWindowMs(windowMs);
-    const cutoff = Date.now() - resolvedWindow;
-    const series = this.concurrencySeries.filter((s) => {
-      const t = Date.parse(s.t);
-      return Number.isFinite(t) && t >= cutoff;
-    });
+
+    const range = this.resolveRuntimeRange(query);
+    const series = this.store.listConcurrencySamplesRange(
+      range.fromIso,
+      range.toIso,
+      range.granularity,
+    );
+
     return {
       runningCount: this.runningCount,
       maxConcurrentRuns: this.maxConcurrentRuns,
@@ -584,7 +595,10 @@ export class AgentGateway {
       queuedRuns,
       series,
       sampleIntervalMs: AgentGateway.CONCURRENCY_SAMPLE_INTERVAL_MS,
-      windowMs: resolvedWindow,
+      granularity: range.granularity,
+      from: range.fromIso,
+      to: range.toIso,
+      ...(range.windowMs != null ? { windowMs: range.windowMs } : {}),
       admissionPaused: this.admissionPaused,
       ...(this.admissionPausedAt
         ? { admissionPausedAt: new Date(this.admissionPausedAt).toISOString() }
@@ -609,12 +623,50 @@ export class AgentGateway {
     };
   }
 
+  private resolveRuntimeRange(query?: AgentRuntimeQuery): {
+    fromIso: string;
+    toIso: string;
+    granularity: ConcurrencyGranularity;
+    windowMs?: number;
+  } {
+    const nowMs = Date.now();
+    let fromMs: number;
+    let toMs: number;
+    let windowMs: number | undefined;
+
+    const fromRaw = query?.from ? Date.parse(query.from) : NaN;
+    const toRaw = query?.to ? Date.parse(query.to) : NaN;
+    if (Number.isFinite(fromRaw) && Number.isFinite(toRaw)) {
+      fromMs = Math.min(fromRaw, toRaw);
+      toMs = Math.max(fromRaw, toRaw);
+    } else if (query?.all) {
+      const earliest = this.store.getEarliestConcurrencySampleAt();
+      const earliestMs = earliest ? Date.parse(earliest) : NaN;
+      fromMs = Number.isFinite(earliestMs) ? earliestMs : nowMs;
+      toMs = nowMs;
+    } else {
+      windowMs = this.resolveWindowMs(query?.windowMs);
+      fromMs = nowMs - windowMs;
+      toMs = nowMs;
+    }
+
+    const spanMs = Math.max(0, toMs - fromMs);
+    return {
+      fromIso: new Date(fromMs).toISOString(),
+      toIso: new Date(toMs).toISOString(),
+      granularity: this.resolveGranularity(spanMs),
+      ...(windowMs != null ? { windowMs } : {}),
+    };
+  }
+
+  private resolveGranularity(spanMs: number): ConcurrencyGranularity {
+    if (spanMs > AgentGateway.DAY_MS) return "hour";
+    if (spanMs > AgentGateway.HOUR_MS) return "minute";
+    return "raw";
+  }
+
   private resolveWindowMs(raw?: number): number {
-    if (
-      typeof raw === "number" &&
-      Number.isFinite(raw) &&
-      (AgentGateway.ALLOWED_WINDOWS_MS as readonly number[]).includes(raw)
-    ) {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
       return raw;
     }
     return AgentGateway.DEFAULT_WINDOW_MS;
@@ -770,8 +822,9 @@ export class AgentGateway {
 
   private loadConcurrencySeriesFromStore(): void {
     if (this.concurrencySeries.length > 0) return;
+    // Warm ~1h ring only; chart queries always read SQLite (full history).
     const cutoff = new Date(
-      Date.now() - AgentGateway.CONCURRENCY_RETENTION_MS,
+      Date.now() - AgentGateway.HOUR_MS,
     ).toISOString();
     try {
       const rows = this.store.listConcurrencySamplesSince(cutoff);
@@ -810,16 +863,6 @@ export class AgentGateway {
 
     try {
       this.store.insertConcurrencySample(sample.t, sample.runningCount);
-      this.concurrencyPersistCount += 1;
-      if (
-        this.concurrencyPersistCount % AgentGateway.CONCURRENCY_PRUNE_EVERY ===
-        0
-      ) {
-        const before = new Date(
-          Date.now() - AgentGateway.CONCURRENCY_RETENTION_MS,
-        ).toISOString();
-        this.store.pruneConcurrencySamples(before);
-      }
     } catch (err) {
       console.warn(
         `[concurrency-series] failed to persist sample: ${String(err)}`,

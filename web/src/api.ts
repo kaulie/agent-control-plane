@@ -119,9 +119,20 @@ export const api = {
     );
   },
 
-  getAgentRuntime: (params?: { windowMs?: number }) => {
+  getAgentRuntime: (params?: {
+    windowMs?: number;
+    from?: string;
+    to?: string;
+    all?: boolean;
+  }) => {
     const q = new URLSearchParams();
-    if (params?.windowMs != null) q.set("windowMs", String(params.windowMs));
+    if (params?.all) q.set("all", "1");
+    else if (params?.from && params?.to) {
+      q.set("from", params.from);
+      q.set("to", params.to);
+    } else if (params?.windowMs != null) {
+      q.set("windowMs", String(params.windowMs));
+    }
     const s = q.toString();
     return fetch(`${BASE}/ops/agent-runtime${s ? `?${s}` : ""}`).then((r) =>
       j<AgentRuntimeStatus>(r),

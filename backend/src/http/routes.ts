@@ -249,14 +249,27 @@ export async function registerRoutes(
     appVersion: version(),
   }));
 
-  app.get<{ Querystring: { windowMs?: string } }>(
-    "/api/ops/agent-runtime",
-    async (req) => {
-      const raw = Number(req.query.windowMs);
-      const windowMs = Number.isFinite(raw) ? raw : undefined;
-      return gateway.getAgentRuntimeStatus(windowMs);
-    },
-  );
+  app.get<{
+    Querystring: {
+      windowMs?: string;
+      from?: string;
+      to?: string;
+      all?: string;
+    };
+  }>("/api/ops/agent-runtime", async (req) => {
+    const raw = Number(req.query.windowMs);
+    const windowMs = Number.isFinite(raw) && raw > 0 ? raw : undefined;
+    const from = req.query.from?.trim() || undefined;
+    const to = req.query.to?.trim() || undefined;
+    const allRaw = (req.query.all ?? "").toLowerCase();
+    const all = allRaw === "1" || allRaw === "true" || allRaw === "yes";
+    return gateway.getAgentRuntimeStatus({
+      ...(windowMs != null ? { windowMs } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(all ? { all: true } : {}),
+    });
+  });
 
   app.get("/api/auth", async () => {
     const results = await Promise.all(

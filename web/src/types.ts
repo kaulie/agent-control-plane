@@ -70,6 +70,8 @@ export interface ConcurrencySample {
   runningCount: number;
 }
 
+export type ConcurrencyGranularity = "raw" | "minute" | "hour";
+
 export interface AgentRuntimeStatus {
   runningCount: number;
   maxConcurrentRuns: number;
@@ -92,6 +94,9 @@ export interface AgentRuntimeStatus {
   series: ConcurrencySample[];
   sampleIntervalMs: number;
   windowMs?: number;
+  from?: string;
+  to?: string;
+  granularity?: ConcurrencyGranularity;
   admissionPaused?: boolean;
   admissionPausedAt?: string;
 }

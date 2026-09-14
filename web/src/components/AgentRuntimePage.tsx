@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { formatDuration } from "../format";
 import type {
   AgentRuntimeStatus,
   ConcurrencyGranularity,
@@ -209,6 +210,25 @@ function buildQuery(
     return { from, to };
   }
   return { windowMs: opt.ms ?? 30 * 60_000 };
+}
+
+/** Live elapsed time since a slot was occupied (ticks every second). */
+function OccupiedElapsed({ occupiedAt }: { occupiedAt?: string }) {
+  const startMs = occupiedAt ? Date.parse(occupiedAt) : NaN;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!Number.isFinite(startMs)) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [startMs]);
+
+  if (!Number.isFinite(startMs)) return null;
+  return (
+    <span className="runtime-occupied" title={occupiedAt}>
+      已占用 {formatDuration(Math.max(0, nowMs - startMs))}
+    </span>
+  );
 }
 
 export function AgentRuntimePage({ onBack }: Props) {
@@ -674,6 +694,12 @@ export function AgentRuntimePage({ onBack }: Props) {
                     ) : null}
                     <span className="runtime-active-sep">·</span>
                     <code>{r.runId}</code>
+                    {r.occupiedAt ? (
+                      <>
+                        <span className="runtime-active-sep">·</span>
+                        <OccupiedElapsed occupiedAt={r.occupiedAt} />
+                      </>
+                    ) : null}
                   </li>
                 ))}
               </ul>

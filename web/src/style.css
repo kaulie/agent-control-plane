@@ -2368,3 +2368,8 @@ body {
   margin: 0 6px;
 }
 
+.runtime-occupied {
+  color: var(--accent, #3b82f6);
+  font-variant-numeric: tabular-nums;
+}
+

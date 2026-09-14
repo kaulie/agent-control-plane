@@ -82,6 +82,8 @@ export interface AgentRuntimeStatus {
     projectId?: string;
     projectName?: string;
     taskTitle?: string;
+    /** ISO time when this run began occupying a concurrency slot. */
+    occupiedAt?: string;
   }>;
   queuedRuns?: Array<{
     taskId: string;

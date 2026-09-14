@@ -140,6 +140,8 @@ export interface AgentRuntimeStatus {
     projectId?: string;
     projectName?: string;
     taskTitle?: string;
+    /** ISO time when this run began occupying a concurrency slot. */
+    occupiedAt: string;
   }>;
   /** Pending runs waiting for admission / capacity (FIFO per task). */
   queuedRuns: Array<{
@@ -190,9 +192,15 @@ export interface RestartStatus {
  *   Task -> Agent Run -> Event Stream -> Usage -> Cost -> Result
  * It depends only on the AgentProvider interface (never a concrete SDK).
  */
+interface ActiveRunSlot {
+  runId: string;
+  /** Epoch ms when the run took a concurrency slot. */
+  occupiedAt: number;
+}
+
 export class AgentGateway {
-  /** In-flight runId keyed by taskId (at most one active run per task). */
-  private activeRuns = new Map<string, string>();
+  /** In-flight run keyed by taskId (at most one active run per task). */
+  private activeRuns = new Map<string, ActiveRunSlot>();
   /** Per-task FIFO of runs waiting while another run is active. */
   private pendingRuns = new Map<string, PendingRun[]>();
   /** Global running count (all providers). */
@@ -567,8 +575,8 @@ export class AgentGateway {
 
   /** Live concurrency + persisted (optionally downsampled) series for ops monitor. */
   getAgentRuntimeStatus(query?: AgentRuntimeQuery): AgentRuntimeStatus {
-    const activeRuns = [...this.activeRuns.entries()].map(([taskId, runId]) =>
-      this.enrichRuntimeSlot(taskId, runId),
+    const activeRuns = [...this.activeRuns.entries()].map(([taskId, slot]) =>
+      this.enrichActiveRuntimeSlot(taskId, slot),
     );
     const queuedRuns: AgentRuntimeStatus["queuedRuns"] = [];
     for (const [taskId, list] of this.pendingRuns.entries()) {
@@ -609,7 +617,7 @@ export class AgentGateway {
   private enrichRuntimeSlot(
     taskId: string,
     runId: string,
-  ): AgentRuntimeStatus["activeRuns"][number] {
+  ): AgentRuntimeStatus["queuedRuns"][number] {
     const task = this.store.getTask(taskId);
     const project = task?.projectId
       ? this.store.getProject(task.projectId)
@@ -621,6 +629,20 @@ export class AgentGateway {
       ...(project?.name ? { projectName: project.name } : {}),
       ...(task?.title ? { taskTitle: task.title } : {}),
     };
+  }
+
+  private enrichActiveRuntimeSlot(
+    taskId: string,
+    slot: ActiveRunSlot,
+  ): AgentRuntimeStatus["activeRuns"][number] {
+    return {
+      ...this.enrichRuntimeSlot(taskId, slot.runId),
+      occupiedAt: new Date(slot.occupiedAt).toISOString(),
+    };
+  }
+
+  private claimActiveSlot(taskId: string, runId: string): void {
+    this.activeRuns.set(taskId, { runId, occupiedAt: Date.now() });
   }
 
   private resolveRuntimeRange(query?: AgentRuntimeQuery): {
@@ -896,10 +918,11 @@ export class AgentGateway {
   private shedOldestRun(rssMb: number): void {
     if (this.activeRuns.size === 0) return;
     const first = this.activeRuns.entries().next().value as
-      | [string, string]
+      | [string, ActiveRunSlot]
       | undefined;
     if (!first) return;
-    const [taskId, runId] = first;
+    const [taskId, slot] = first;
+    const runId = slot.runId;
 
     try {
       const task = this.store.getTask(taskId);
@@ -1022,7 +1045,7 @@ export class AgentGateway {
 
     this.runningCount += 1;
     this.store.updateRun(next.runId, { status: "running" });
-    this.activeRuns.set(taskId, next.runId);
+    this.claimActiveSlot(taskId, next.runId);
     this.store.updateTaskStatus(taskId, "active");
     this.publishQueueUpdate(taskId);
 
@@ -1181,7 +1204,7 @@ export class AgentGateway {
     }
 
     this.runningCount += 1;
-    this.activeRuns.set(taskId, runId);
+    this.claimActiveSlot(taskId, runId);
     this.store.updateTaskStatus(taskId, "active");
     void this.executeRun(task, pending);
 
@@ -1416,7 +1439,7 @@ export class AgentGateway {
         },
       });
     } finally {
-      if (this.activeRuns.get(taskId) === runId) {
+      if (this.activeRuns.get(taskId)?.runId === runId) {
         this.activeRuns.delete(taskId);
       }
       this.runningCount = Math.max(0, this.runningCount - 1);
@@ -1513,7 +1536,7 @@ export class AgentGateway {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
 
-    const runId = this.activeRuns.get(taskId);
+    const runId = this.activeRuns.get(taskId)?.runId;
     if (!runId) {
       throw new Error("No active run to stop");
     }

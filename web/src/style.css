@@ -236,10 +236,27 @@ body {
   padding: 9px 10px;
   cursor: pointer;
   color: var(--text);
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
+.task-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+/* Active (selected) conversation: fill the whole card with an accent tint and
+   add a left rail so it is obvious at a glance which task is open. */
 .task-item.selected {
   border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-3));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.task-item.selected .task-title {
+  color: #fff;
+}
+
+.task-item.selected .task-meta {
+  color: color-mix(in srgb, var(--text) 55%, var(--accent));
 }
 
 .task-title {

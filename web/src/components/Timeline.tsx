@@ -354,6 +354,29 @@ function storeAutoFold(on: boolean): void {
   }
 }
 
+/**
+ * "Conversation only" mode: drop every activity row (thinking, tool calls,
+ * file/terminal/search, status, usage, …) so the timeline keeps just the
+ * user messages and the assistant replies.
+ */
+const HIDE_PROCESS_KEY = "web-cursor:hideProcessDetail";
+
+function loadHideProcess(): boolean {
+  try {
+    return localStorage.getItem(HIDE_PROCESS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeHideProcess(on: boolean): void {
+  try {
+    localStorage.setItem(HIDE_PROCESS_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 function RunningBanner({ running, queueLength }: { running: boolean; queueLength: number }) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const startedRef = useRef<number | null>(null);
@@ -694,20 +717,36 @@ export default function Timeline({
     }
     return { streamRows: stream, queuedRows: queued };
   }, [rows]);
-  const items = useMemo(() => groupConsecutiveRows(streamRows), [streamRows]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const stickToBottomRef = useRef(true);
   const [autoFold, setAutoFold] = useState(() => loadAutoFold());
+  const [hideProcess, setHideProcess] = useState(() => loadHideProcess());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
 
+  // In "conversation only" mode the thinking / tool-call rows are removed from
+  // the stream instead of being collapsed, so only user + assistant stay.
+  const visibleRows = useMemo(
+    () =>
+      hideProcess
+        ? streamRows.filter((row) => row.role !== "activity")
+        : streamRows,
+    [streamRows, hideProcess],
+  );
+  const items = useMemo(() => groupConsecutiveRows(visibleRows), [visibleRows]);
+
   const setAutoFoldPersist = (on: boolean): void => {
     setAutoFold(on);
     storeAutoFold(on);
     if (!on) setExpanded({});
+  };
+
+  const setHideProcessPersist = (on: boolean): void => {
+    setHideProcess(on);
+    storeHideProcess(on);
   };
 
   const toggleExpanded = (key: string): void => {
@@ -754,18 +793,41 @@ export default function Timeline({
     } else {
       updateJumpVisibility();
     }
-  }, [items, running, autoFold, expanded, expandedGroups]);
+  }, [items, running, autoFold, hideProcess, expanded, expandedGroups]);
 
   return (
     <div className="timeline-wrap">
-      <label className="timeline-toolbar">
-        <input
-          type="checkbox"
-          checked={autoFold}
-          onChange={(e) => setAutoFoldPersist(e.target.checked)}
-        />
-        <span>自动折叠执行细节</span>
-      </label>
+      <div className="timeline-toolbar">
+        <label
+          className={`timeline-toolbar-option${
+            hideProcess ? " is-inactive" : ""
+          }`}
+          title={
+            hideProcess
+              ? "已开启「自动折叠思考和执行过程」，执行细节已全部隐藏"
+              : "把 thinking / 工具调用收成一行摘要"
+          }
+        >
+          <input
+            type="checkbox"
+            checked={autoFold}
+            disabled={hideProcess}
+            onChange={(e) => setAutoFoldPersist(e.target.checked)}
+          />
+          <span>自动折叠执行细节</span>
+        </label>
+        <label
+          className="timeline-toolbar-option"
+          title="只显示你和助手的消息，隐藏中间的 thinking / 工具调用"
+        >
+          <input
+            type="checkbox"
+            checked={hideProcess}
+            onChange={(e) => setHideProcessPersist(e.target.checked)}
+          />
+          <span>自动折叠思考和执行过程</span>
+        </label>
+      </div>
       <div className="timeline-scroll-area">
         <div className="timeline" ref={scrollerRef}>
           {hasMore && (
@@ -809,8 +871,12 @@ export default function Timeline({
             );
           })}
           <RunningBanner running={running} queueLength={queueLength} />
-          {!running && rows.length === 0 && (
-            <div className="timeline-empty">No activity yet — send a message below.</div>
+          {!running && items.length === 0 && queuedRows.length === 0 && (
+            <div className="timeline-empty">
+              {hideProcess && rows.length > 0
+                ? "已开启「自动折叠思考和执行过程」——当前没有对话消息。"
+                : "No activity yet — send a message below."}
+            </div>
           )}
         </div>
         {showJump && (

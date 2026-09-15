@@ -8,7 +8,6 @@ import UsageStatsPage from "./components/UsageStatsPage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import Timeline from "./components/Timeline";
-import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
@@ -89,8 +88,7 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
-  const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
-  const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
+  // Plan 只是 run 的一种模式：主界面不再有 Plan tab，也不再有 Plan 文档面板。
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -215,8 +213,6 @@ export default function App() {
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
-    setMainTab("timeline");
-    setSelectedPlanRunId(null);
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
@@ -310,10 +306,6 @@ export default function App() {
                   ),
                 );
               }
-            }
-            if (ev.eventType === "plan_exported") {
-              setSelectedPlanRunId(ev.runId);
-              setMainTab("plan");
             }
           }
         } else if (msg.type === "task_queue_updated") {
@@ -611,9 +603,6 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        if (payload.mode === "plan") {
-          setMainTab("plan");
-        }
         await refreshAfterSend(selectedId);
         void refreshTasks();
         return true;
@@ -687,32 +676,10 @@ export default function App() {
     return "agent";
   }, [running, detail, events]);
 
-  const planRunCount = useMemo(() => {
-    const finished = new Set(
-      (detail?.runs ?? [])
-        .filter((r) => r.status === "finished")
-        .map((r) => r.runId),
-    );
-    let count = 0;
-    for (const ev of events) {
-      if (
-        ev.eventType === "user_message" &&
-        ev.payload.mode === "plan" &&
-        finished.has(ev.runId)
-      ) {
-        count += 1;
-      }
-    }
-    return count;
-  }, [events, detail]);
-
   const pendingPlanQuestions = useMemo(
     () => findPendingPlanQuestionBatch(events),
     [events],
   );
-  // Boolean form for effects/UI so a freshly parsed batch object never causes
-  // an effect to re-fire just because the underlying events array changed.
-  const hasPendingPlanQuestions = pendingPlanQuestions != null;
 
   const submitPlanAnswers = useCallback(
     async (batch: PlanAnswerBatch) => {
@@ -737,7 +704,6 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        setMainTab("plan");
         await refreshAfterSend(selectedId);
         void refreshTasks();
       } catch (e) {
@@ -748,19 +714,8 @@ export default function App() {
     [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
   );
 
-  // An unanswered plan question batch (only ever produced by a plan-mode run)
-  // surfaces on the Plan tab.
-  useEffect(() => {
-    if (hasPendingPlanQuestions) {
-      setMainTab("plan");
-    }
-  }, [hasPendingPlanQuestions]);
-
-  const openPlanForRun = useCallback((runId: string) => {
-    setSelectedPlanRunId(runId);
-    setMainTab("plan");
-  }, []);
-
+  // An unanswered plan question batch (only ever produced by a plan-mode run) is
+  // rendered inline above the composer, so no tab switching is needed.
 
   return (
     <div className="app">
@@ -850,58 +805,25 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              <div className="main-tabs">
-                <button
-                  type="button"
-                  className={`main-tab${mainTab === "timeline" ? " active" : ""}`}
-                  onClick={() => setMainTab("timeline")}
-                >
-                  Timeline
-                </button>
-                <button
-                  type="button"
-                  className={`main-tab${mainTab === "plan" ? " active" : ""}`}
-                  onClick={() => setMainTab("plan")}
-                >
-                  Plan
-                  {(planRunCount > 0 || hasPendingPlanQuestions) && (
-                    <span className="main-tab-badge">
-                      {planRunCount > 0 ? planRunCount : "●"}
-                    </span>
-                  )}
-                </button>
-              </div>
-              {mainTab === "timeline" ? (
-                <Timeline
-                  events={events}
-                  running={running}
-                  queueLength={queueLength}
-                  queuedRunIds={detail.runs
-                    .filter((r) => r.status === "queued")
-                    .map((r) => r.runId)}
-                  hasMore={hasMore}
-                  loadingMore={loadingMore}
-                  onLoadMore={() => void loadMore()}
-                  onPlanExportedClick={openPlanForRun}
-                  onCancelQueued={(runId) => void cancelQueued(runId)}
-                  cancellingQueuedRunId={cancellingQueuedRunId}
+              <Timeline
+                events={events}
+                running={running}
+                queueLength={queueLength}
+                queuedRunIds={detail.runs
+                  .filter((r) => r.status === "queued")
+                  .map((r) => r.runId)}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMore()}
+                onCancelQueued={(runId) => void cancelQueued(runId)}
+                cancellingQueuedRunId={cancellingQueuedRunId}
+              />
+              {pendingPlanQuestions && (
+                <PlanQuestionsWizard
+                  batch={pendingPlanQuestions}
+                  disabled={running}
+                  onSubmit={(answers) => void submitPlanAnswers(answers)}
                 />
-              ) : (
-                <>
-                  {pendingPlanQuestions && (
-                    <PlanQuestionsWizard
-                      batch={pendingPlanQuestions}
-                      disabled={running}
-                      onSubmit={(answers) => void submitPlanAnswers(answers)}
-                    />
-                  )}
-                  <PlanDocumentPanel
-                    taskId={selectedId}
-                    selectedRunId={selectedPlanRunId}
-                    onSelectRunId={setSelectedPlanRunId}
-                    onOpenSettings={() => setView("project-settings")}
-                  />
-                </>
               )}
               <ChatInput
                 onSend={sendMessage}

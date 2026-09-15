@@ -502,7 +502,6 @@ function EventCard({
   groupCount,
   groupExpanded,
   onGroupToggle,
-  onPlanExportedClick,
 }: {
   row: Row;
   collapsed: boolean;
@@ -511,7 +510,6 @@ function EventCard({
   groupCount?: number;
   groupExpanded?: boolean;
   onGroupToggle?: () => void;
-  onPlanExportedClick?: (runId: string) => void;
 }) {
   const foldable = row.role === "activity";
   const isGroupProxy = groupCount != null && groupCount > 1 && !groupExpanded;
@@ -597,41 +595,7 @@ function EventCard({
               ))}
             </div>
           )}
-          {row.body && (
-            <div
-              className={`event-body${row.type === "plan_exported" ? " event-body-link" : ""}`}
-              onClick={
-                row.type === "plan_exported" && onPlanExportedClick
-                  ? () => onPlanExportedClick(row.runId)
-                  : undefined
-              }
-              onKeyDown={
-                row.type === "plan_exported" && onPlanExportedClick
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onPlanExportedClick(row.runId);
-                      }
-                    }
-                  : undefined
-              }
-              role={
-                row.type === "plan_exported" && onPlanExportedClick
-                  ? "button"
-                  : undefined
-              }
-              tabIndex={
-                row.type === "plan_exported" && onPlanExportedClick ? 0 : undefined
-              }
-              title={
-                row.type === "plan_exported"
-                  ? "在 Plan 面板中查看"
-                  : undefined
-              }
-            >
-              {row.body}
-            </div>
-          )}
+          {row.body && <div className="event-body">{row.body}</div>}
           {row.detail && <pre className="event-detail">{row.detail}</pre>}
           {row.type === "agent_response" && row.agentId && (
             <div className="event-agent-id" title={row.agentId}>
@@ -724,7 +688,6 @@ export default function Timeline({
   hasMore,
   loadingMore,
   onLoadMore,
-  onPlanExportedClick,
   onCancelQueued,
   cancellingQueuedRunId = null,
 }: {
@@ -735,7 +698,6 @@ export default function Timeline({
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
-  onPlanExportedClick?: (runId: string) => void;
   onCancelQueued?: (runId: string) => void;
   cancellingQueuedRunId?: string | null;
 }) {
@@ -941,7 +903,6 @@ export default function Timeline({
                 onToggle={
                   foldable && autoFold ? () => toggleExpanded(r.key) : undefined
                 }
-                onPlanExportedClick={onPlanExportedClick}
               />
             );
           })}

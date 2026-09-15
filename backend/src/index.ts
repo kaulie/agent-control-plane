@@ -195,6 +195,7 @@ await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
   appVersion: advertisedVersion(),
   resolveAppVersion: advertisedVersion,
+  processAppVersion: config.appVersion,
   deployQueue,
   gracefulRestart: config.gracefulRestart,
 });

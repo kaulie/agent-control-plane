@@ -1,5 +1,5 @@
 import type { Project, Task } from "../types";
-import { formatTime } from "../format";
+import { formatDateTime } from "../format";
 
 interface Props {
   projects: Project[];
@@ -107,7 +107,7 @@ export default function TaskList({
               <div className="task-meta">
                 #{t.taskId.slice(-6)} · {t.provider}
                 {t.model ? `/${t.model}` : ""} · {t.status} ·{" "}
-                {formatTime(t.lastUserInputAt ?? t.createdAt)}
+                {formatDateTime(t.lastUserInputAt ?? t.createdAt)}
               </div>
             </button>
           ))}

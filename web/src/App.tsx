@@ -21,8 +21,13 @@ import { APP_VERSION } from "./version";
 import {
   beginUpgrade,
   dismissVersionUpdate,
+  finishUpgrade,
   pollHealthVersion,
+  reloadForUpdate,
+  subscribeUpgrade,
   subscribeVersionUpdate,
+  UPGRADE_POLL_SECONDS,
+  type UpgradeState,
   type VersionUpdate,
 } from "./version-check";
 
@@ -87,7 +92,7 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
-  const [upgradingVersion, setUpgradingVersion] = useState<string | null>(null);
+  const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [createTaskDefaults, setCreateTaskDefaults] = useState<{
     provider?: string;
@@ -255,6 +260,9 @@ export default function App() {
   }, [refreshProjects, refreshTasks]);
 
   useEffect(() => subscribeVersionUpdate(setVersionUpdate), []);
+
+  // Live state of the "正在升级中，请等待" overlay (polled /health progress).
+  useEffect(() => subscribeUpgrade(setUpgradeState), []);
 
   // Poll /health for version drift (covers idle tabs between API calls).
   useEffect(() => {
@@ -794,7 +802,7 @@ export default function App() {
           v{APP_VERSION}
         </div>
       </header>
-      {(backendDown || wsStatus === "reconnecting") && (
+      {(backendDown || wsStatus === "reconnecting") && !upgradeState && (
         <div className="reconnect-banner" role="status">
           后端暂时不可达（可能正在部署重启）… 前端仍在自动重试轮询，不是卡死
         </div>
@@ -921,20 +929,61 @@ export default function App() {
           {error} ✕
         </div>
       )}
-      {upgradingVersion ? (
+      {upgradeState ? (
         <div className="update-modal-backdrop" role="presentation">
-          <div className="update-modal" role="dialog" aria-labelledby="update-modal-title">
+          <div
+            className="update-modal"
+            role="dialog"
+            aria-labelledby="update-modal-title"
+            aria-busy={!upgradeState.timedOut}
+          >
             <h2 id="update-modal-title" className="update-modal-title">
-              正在升级
+              {upgradeState.timedOut ? "升级等待超时" : "正在升级中，请等待"}
             </h2>
             <div className="update-modal-upgrading">
-              <span className="update-modal-spinner" aria-hidden="true" />
+              {upgradeState.timedOut ? (
+                <span className="update-modal-icon" aria-hidden="true">
+                  ⚠️
+                </span>
+              ) : (
+                <span className="update-modal-spinner" aria-hidden="true" />
+              )}
               <p className="update-modal-upgrading-text">
-                正在升级到版本 <code>{upgradingVersion}</code>
+                目标版本 <code>{upgradeState.target}</code>
               </p>
               <p className="update-modal-upgrading-hint">
-                服务可用后会自动刷新页面，请稍候…
+                {upgradeState.timedOut
+                  ? "等待超时，服务可能仍在重启。可稍等片刻后手动刷新。"
+                  : upgradeState.unreachable
+                    ? "服务正在重启，暂时不可达；正在每 " +
+                      `${UPGRADE_POLL_SECONDS} 秒重试…`
+                    : `服务端磁盘版本已就绪（${upgradeState.serverVersion ?? "—"}），` +
+                      "正在等待新进程接管…"}
               </p>
+              <p className="update-modal-upgrading-meta">
+                已轮询 {upgradeState.attempts} 次 · 每 {UPGRADE_POLL_SECONDS}s 一次
+                · 已等待 {Math.round(upgradeState.elapsedMs / 1000)}s
+                {upgradeState.processVersion
+                  ? ` · 当前进程 ${upgradeState.processVersion}`
+                  : ""}
+              </p>
+              {!upgradeState.timedOut && (
+                <p className="update-modal-upgrading-hint">
+                  新进程就绪后会自动刷新页面，无需操作。
+                </p>
+              )}
+            </div>
+            <div className="update-modal-actions">
+              <button
+                type="button"
+                className="update-modal-btn"
+                onClick={() => {
+                  finishUpgrade();
+                  reloadForUpdate(upgradeState.target);
+                }}
+              >
+                立即刷新
+              </button>
             </div>
           </div>
         </div>
@@ -952,10 +1001,7 @@ export default function App() {
               <button
                 type="button"
                 className="update-modal-btn primary"
-                onClick={() => {
-                  setUpgradingVersion(versionUpdate.serverVersion);
-                  beginUpgrade(versionUpdate.serverVersion);
-                }}
+                onClick={() => beginUpgrade(versionUpdate.serverVersion)}
               >
                 更新版本
               </button>

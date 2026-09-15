@@ -1840,6 +1840,19 @@ body {
   line-height: 1.5;
 }
 
+.update-modal-upgrading-meta {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.update-modal-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
 @keyframes update-modal-spin {
   to {
     transform: rotate(360deg);

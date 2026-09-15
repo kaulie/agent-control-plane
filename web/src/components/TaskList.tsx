@@ -101,6 +101,7 @@ export default function TaskList({
             <button
               key={t.taskId}
               className={`task-item ${t.taskId === selectedId ? "selected" : ""}`}
+              aria-current={t.taskId === selectedId ? "true" : undefined}
               onClick={() => onSelect(t.taskId)}
             >
               <div className="task-title">{t.title || t.taskId}</div>

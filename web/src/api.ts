@@ -4,8 +4,6 @@ import type {
   AppSettings,
   AuthStatus,
   ModelInfo,
-  PlanDocumentContent,
-  PlanDocumentSummary,
   Project,
   ProjectSettingsView,
   ProviderInfo,
@@ -192,16 +190,6 @@ export const api = {
       { method: "POST" },
     ).then((r) =>
       j<{ runId: string; queueLength: number; cancelled: boolean }>(r),
-    ),
-
-  listPlans: (taskId: string) =>
-    fetch(`${BASE}/tasks/${taskId}/plans`).then((r) =>
-      j<{ plans: PlanDocumentSummary[] }>(r),
-    ),
-
-  getPlan: (taskId: string, runId: string) =>
-    fetch(`${BASE}/tasks/${taskId}/plans/${encodeURIComponent(runId)}`).then(
-      (r) => j<PlanDocumentContent>(r),
     ),
 
   getGlobalSettings: () =>

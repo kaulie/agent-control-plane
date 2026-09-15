@@ -184,24 +184,6 @@ export interface RunRecord {
   toolCalls: number;
 }
 
-export interface PlanDocumentSummary {
-  runId: string;
-  fileName?: string;
-  path?: string;
-  exportedAt: string;
-  userText?: string;
-  hasFile: boolean;
-}
-
-export interface PlanDocumentContent {
-  runId: string;
-  markdown: string;
-  path?: string;
-  fileName?: string;
-  exportedAt: string;
-  source: "file" | "synthesized";
-}
-
 export interface TaskStats {
   inputTokens: number;
   outputTokens: number;

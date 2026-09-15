@@ -8,7 +8,6 @@ import UsageStatsPage from "./components/UsageStatsPage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import Timeline from "./components/Timeline";
-import PlanDocumentPanel from "./components/PlanDocumentPanel";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
@@ -89,10 +88,7 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
-  // Plan 不再是主界面上的一个 tab：Plan 文档改为从 Timeline 里的
-  // 「Plan exported」行点开的弹窗，Plan 提问向导直接内联在输入框上方。
-  const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
-  const [planDocOpen, setPlanDocOpen] = useState(false);
+  // Plan 只是 run 的一种模式：主界面不再有 Plan tab，也不再有 Plan 文档面板。
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -217,8 +213,6 @@ export default function App() {
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
-    setSelectedPlanRunId(null);
-    setPlanDocOpen(false);
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
@@ -312,10 +306,6 @@ export default function App() {
                   ),
                 );
               }
-            }
-            if (ev.eventType === "plan_exported") {
-              // 只记住 runId；不再自动弹窗打断阅读，用户点 Timeline 行再打开。
-              setSelectedPlanRunId(ev.runId);
             }
           }
         } else if (msg.type === "task_queue_updated") {
@@ -726,21 +716,6 @@ export default function App() {
 
   // An unanswered plan question batch (only ever produced by a plan-mode run) is
   // rendered inline above the composer, so no tab switching is needed.
-  const openPlanDoc = useCallback((runId: string) => {
-    setSelectedPlanRunId(runId);
-    setPlanDocOpen(true);
-  }, []);
-
-  // Esc closes the Plan 文档 overlay.
-  useEffect(() => {
-    if (!planDocOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPlanDocOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [planDocOpen]);
-
 
   return (
     <div className="app">
@@ -840,7 +815,6 @@ export default function App() {
                 hasMore={hasMore}
                 loadingMore={loadingMore}
                 onLoadMore={() => void loadMore()}
-                onPlanExportedClick={openPlanDoc}
                 onCancelQueued={(runId) => void cancelQueued(runId)}
                 cancellingQueuedRunId={cancellingQueuedRunId}
               />
@@ -875,42 +849,6 @@ export default function App() {
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} ✕
-        </div>
-      )}
-      {planDocOpen && selectedId && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setPlanDocOpen(false)}
-        >
-          <div
-            className="plan-doc-modal"
-            role="dialog"
-            aria-labelledby="plan-doc-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="plan-doc-modal-head">
-              <h2 id="plan-doc-modal-title" className="modal-title">
-                Plan 文档
-              </h2>
-              <button
-                type="button"
-                className="modal-cancel"
-                onClick={() => setPlanDocOpen(false)}
-              >
-                关闭
-              </button>
-            </div>
-            <PlanDocumentPanel
-              taskId={selectedId}
-              selectedRunId={selectedPlanRunId}
-              onSelectRunId={setSelectedPlanRunId}
-              onOpenSettings={() => {
-                setPlanDocOpen(false);
-                setView("project-settings");
-              }}
-            />
-          </div>
         </div>
       )}
       {upgradeState ? (

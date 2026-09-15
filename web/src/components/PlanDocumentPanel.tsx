@@ -125,7 +125,8 @@ export default function PlanDocumentPanel({
       <div className="plan-panel plan-panel-empty">
         <p>暂无 Plan 文档</p>
         <p className="plan-panel-hint">
-          使用 <strong>Plan</strong> 模式发送消息，run 成功完成后会出现在这里。
+          使用 <strong>Plan</strong> 模式发送消息，run 成功完成后可在 Timeline 的
+          「Plan exported」行点开查看。
         </p>
         <p className="plan-panel-hint">
           若需自动导出到磁盘，请在

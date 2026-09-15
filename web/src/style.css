@@ -282,43 +282,25 @@ body {
   background: var(--bg);
 }
 
-.main-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 16px 0;
+.plan-doc-modal {
+  width: min(920px, 100%);
+  max-height: 85vh;
   background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.main-tab {
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 14px;
-  display: inline-flex;
+.plan-doc-modal-head {
+  display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.main-tab.active {
-  background: var(--bg);
-  border-color: var(--border);
-  color: var(--text);
-}
-
-.main-tab-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-3));
-  color: var(--accent);
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
 }
 
 .plan-panel {
@@ -501,6 +483,9 @@ body {
   border-radius: 12px;
   background: var(--bg);
   flex-shrink: 0;
+  /* 内联在输入框上方（不再是独立 tab），屏幕矮时自身滚动，避免挤掉输入框。 */
+  max-height: 60vh;
+  overflow: auto;
 }
 
 .plan-questions-header {

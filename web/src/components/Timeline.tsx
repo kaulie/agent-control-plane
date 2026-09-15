@@ -625,7 +625,7 @@ function EventCard({
               }
               title={
                 row.type === "plan_exported"
-                  ? "在 Plan 面板中查看"
+                  ? "点击查看 Plan 文档"
                   : undefined
               }
             >

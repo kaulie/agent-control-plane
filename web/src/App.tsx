@@ -89,8 +89,10 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
-  const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
+  // Plan 不再是主界面上的一个 tab：Plan 文档改为从 Timeline 里的
+  // 「Plan exported」行点开的弹窗，Plan 提问向导直接内联在输入框上方。
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
+  const [planDocOpen, setPlanDocOpen] = useState(false);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -215,8 +217,8 @@ export default function App() {
     setHasMore(false);
     setLoadingMore(false);
     setInterruptNotice(null);
-    setMainTab("timeline");
     setSelectedPlanRunId(null);
+    setPlanDocOpen(false);
     setGracePolls(0);
     setNeedsResync(false);
     wasUnreachableRef.current = false;
@@ -312,8 +314,8 @@ export default function App() {
               }
             }
             if (ev.eventType === "plan_exported") {
+              // 只记住 runId；不再自动弹窗打断阅读，用户点 Timeline 行再打开。
               setSelectedPlanRunId(ev.runId);
-              setMainTab("plan");
             }
           }
         } else if (msg.type === "task_queue_updated") {
@@ -611,9 +613,6 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        if (payload.mode === "plan") {
-          setMainTab("plan");
-        }
         await refreshAfterSend(selectedId);
         void refreshTasks();
         return true;
@@ -687,32 +686,10 @@ export default function App() {
     return "agent";
   }, [running, detail, events]);
 
-  const planRunCount = useMemo(() => {
-    const finished = new Set(
-      (detail?.runs ?? [])
-        .filter((r) => r.status === "finished")
-        .map((r) => r.runId),
-    );
-    let count = 0;
-    for (const ev of events) {
-      if (
-        ev.eventType === "user_message" &&
-        ev.payload.mode === "plan" &&
-        finished.has(ev.runId)
-      ) {
-        count += 1;
-      }
-    }
-    return count;
-  }, [events, detail]);
-
   const pendingPlanQuestions = useMemo(
     () => findPendingPlanQuestionBatch(events),
     [events],
   );
-  // Boolean form for effects/UI so a freshly parsed batch object never causes
-  // an effect to re-fire just because the underlying events array changed.
-  const hasPendingPlanQuestions = pendingPlanQuestions != null;
 
   const submitPlanAnswers = useCallback(
     async (batch: PlanAnswerBatch) => {
@@ -737,7 +714,6 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        setMainTab("plan");
         await refreshAfterSend(selectedId);
         void refreshTasks();
       } catch (e) {
@@ -748,18 +724,22 @@ export default function App() {
     [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
   );
 
-  // An unanswered plan question batch (only ever produced by a plan-mode run)
-  // surfaces on the Plan tab.
-  useEffect(() => {
-    if (hasPendingPlanQuestions) {
-      setMainTab("plan");
-    }
-  }, [hasPendingPlanQuestions]);
-
-  const openPlanForRun = useCallback((runId: string) => {
+  // An unanswered plan question batch (only ever produced by a plan-mode run) is
+  // rendered inline above the composer, so no tab switching is needed.
+  const openPlanDoc = useCallback((runId: string) => {
     setSelectedPlanRunId(runId);
-    setMainTab("plan");
+    setPlanDocOpen(true);
   }, []);
+
+  // Esc closes the Plan 文档 overlay.
+  useEffect(() => {
+    if (!planDocOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlanDocOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [planDocOpen]);
 
 
   return (
@@ -850,58 +830,26 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              <div className="main-tabs">
-                <button
-                  type="button"
-                  className={`main-tab${mainTab === "timeline" ? " active" : ""}`}
-                  onClick={() => setMainTab("timeline")}
-                >
-                  Timeline
-                </button>
-                <button
-                  type="button"
-                  className={`main-tab${mainTab === "plan" ? " active" : ""}`}
-                  onClick={() => setMainTab("plan")}
-                >
-                  Plan
-                  {(planRunCount > 0 || hasPendingPlanQuestions) && (
-                    <span className="main-tab-badge">
-                      {planRunCount > 0 ? planRunCount : "●"}
-                    </span>
-                  )}
-                </button>
-              </div>
-              {mainTab === "timeline" ? (
-                <Timeline
-                  events={events}
-                  running={running}
-                  queueLength={queueLength}
-                  queuedRunIds={detail.runs
-                    .filter((r) => r.status === "queued")
-                    .map((r) => r.runId)}
-                  hasMore={hasMore}
-                  loadingMore={loadingMore}
-                  onLoadMore={() => void loadMore()}
-                  onPlanExportedClick={openPlanForRun}
-                  onCancelQueued={(runId) => void cancelQueued(runId)}
-                  cancellingQueuedRunId={cancellingQueuedRunId}
+              <Timeline
+                events={events}
+                running={running}
+                queueLength={queueLength}
+                queuedRunIds={detail.runs
+                  .filter((r) => r.status === "queued")
+                  .map((r) => r.runId)}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMore()}
+                onPlanExportedClick={openPlanDoc}
+                onCancelQueued={(runId) => void cancelQueued(runId)}
+                cancellingQueuedRunId={cancellingQueuedRunId}
+              />
+              {pendingPlanQuestions && (
+                <PlanQuestionsWizard
+                  batch={pendingPlanQuestions}
+                  disabled={running}
+                  onSubmit={(answers) => void submitPlanAnswers(answers)}
                 />
-              ) : (
-                <>
-                  {pendingPlanQuestions && (
-                    <PlanQuestionsWizard
-                      batch={pendingPlanQuestions}
-                      disabled={running}
-                      onSubmit={(answers) => void submitPlanAnswers(answers)}
-                    />
-                  )}
-                  <PlanDocumentPanel
-                    taskId={selectedId}
-                    selectedRunId={selectedPlanRunId}
-                    onSelectRunId={setSelectedPlanRunId}
-                    onOpenSettings={() => setView("project-settings")}
-                  />
-                </>
               )}
               <ChatInput
                 onSend={sendMessage}
@@ -927,6 +875,42 @@ export default function App() {
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} ✕
+        </div>
+      )}
+      {planDocOpen && selectedId && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setPlanDocOpen(false)}
+        >
+          <div
+            className="plan-doc-modal"
+            role="dialog"
+            aria-labelledby="plan-doc-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="plan-doc-modal-head">
+              <h2 id="plan-doc-modal-title" className="modal-title">
+                Plan 文档
+              </h2>
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setPlanDocOpen(false)}
+              >
+                关闭
+              </button>
+            </div>
+            <PlanDocumentPanel
+              taskId={selectedId}
+              selectedRunId={selectedPlanRunId}
+              onSelectRunId={setSelectedPlanRunId}
+              onOpenSettings={() => {
+                setPlanDocOpen(false);
+                setView("project-settings");
+              }}
+            />
+          </div>
         </div>
       )}
       {upgradeState ? (

@@ -336,6 +336,30 @@ function groupConsecutiveRows(rows: Row[]): TimelineItem[] {
   return out;
 }
 
+/** Index of the last row with the given event type, or -1. */
+function lastIndexOfType(rows: Row[], type: string): number {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i].type === type) return i;
+  }
+  return -1;
+}
+
+/**
+ * Drop all but the last row of every run of consecutive assistant rows, so a
+ * reply that was streamed as several `agent_response` blocks (tool calls in
+ * between) keeps only its final message.
+ */
+function keepLastConsecutiveAssistant(rows: Row[]): Row[] {
+  const out: Row[] = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    if (rows[i].role === "assistant" && rows[i + 1]?.role === "assistant") {
+      continue;
+    }
+    out.push(rows[i]);
+  }
+  return out;
+}
+
 function loadAutoFold(): boolean {
   try {
     const v = localStorage.getItem(AUTO_FOLD_KEY);
@@ -372,6 +396,29 @@ function loadHideProcess(): boolean {
 function storeHideProcess(on: boolean): void {
   try {
     localStorage.setItem(HIDE_PROCESS_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * "Conversation only" sub-option: a single answer often arrives as several
+ * consecutive assistant rows once the process rows are hidden — keep just the
+ * last one of each run.
+ */
+const KEEP_LAST_ASSISTANT_KEY = "web-cursor:keepLastAssistantOnly";
+
+function loadKeepLastAssistant(): boolean {
+  try {
+    return localStorage.getItem(KEEP_LAST_ASSISTANT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeKeepLastAssistant(on: boolean): void {
+  try {
+    localStorage.setItem(KEEP_LAST_ASSISTANT_KEY, on ? "1" : "0");
   } catch {
     /* ignore */
   }
@@ -722,20 +769,27 @@ export default function Timeline({
   const stickToBottomRef = useRef(true);
   const [autoFold, setAutoFold] = useState(() => loadAutoFold());
   const [hideProcess, setHideProcess] = useState(() => loadHideProcess());
+  const [keepLastAssistant, setKeepLastAssistant] = useState(() =>
+    loadKeepLastAssistant(),
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
 
   // In "conversation only" mode the thinking / tool-call rows are removed from
-  // the stream instead of being collapsed, so only user + assistant stay.
-  const visibleRows = useMemo(
-    () =>
-      hideProcess
-        ? streamRows.filter((row) => row.role !== "activity")
-        : streamRows,
-    [streamRows, hideProcess],
-  );
+  // the stream instead of being collapsed, so only user + assistant stay. The
+  // last "Completed · 耗时" row always survives as the run summary footer.
+  const visibleRows = useMemo(() => {
+    if (!hideProcess) return streamRows;
+    const completedIdx = lastIndexOfType(streamRows, "run_completed");
+    const conversation = streamRows.filter(
+      (row, idx) => row.role !== "activity" || idx === completedIdx,
+    );
+    return keepLastAssistant
+      ? keepLastConsecutiveAssistant(conversation)
+      : conversation;
+  }, [streamRows, hideProcess, keepLastAssistant]);
   const items = useMemo(() => groupConsecutiveRows(visibleRows), [visibleRows]);
 
   const setAutoFoldPersist = (on: boolean): void => {
@@ -747,6 +801,11 @@ export default function Timeline({
   const setHideProcessPersist = (on: boolean): void => {
     setHideProcess(on);
     storeHideProcess(on);
+  };
+
+  const setKeepLastAssistantPersist = (on: boolean): void => {
+    setKeepLastAssistant(on);
+    storeKeepLastAssistant(on);
   };
 
   const toggleExpanded = (key: string): void => {
@@ -818,7 +877,7 @@ export default function Timeline({
         </label>
         <label
           className="timeline-toolbar-option"
-          title="只显示你和助手的消息，隐藏中间的 thinking / 工具调用"
+          title="只显示你和助手的消息，隐藏中间的 thinking / 工具调用（保留最后的 completed · 耗时 行）"
         >
           <input
             type="checkbox"
@@ -826,6 +885,24 @@ export default function Timeline({
             onChange={(e) => setHideProcessPersist(e.target.checked)}
           />
           <span>自动折叠思考和执行过程</span>
+        </label>
+        <label
+          className={`timeline-toolbar-option${
+            hideProcess ? "" : " is-inactive"
+          }`}
+          title={
+            hideProcess
+              ? "多条连续的 Assistant 消息只保留最后一条"
+              : "仅在开启「自动折叠思考和执行过程」后生效"
+          }
+        >
+          <input
+            type="checkbox"
+            checked={keepLastAssistant}
+            disabled={!hideProcess}
+            onChange={(e) => setKeepLastAssistantPersist(e.target.checked)}
+          />
+          <span>保留最后一条连续 assistant 信息</span>
         </label>
       </div>
       <div className="timeline-scroll-area">

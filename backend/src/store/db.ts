@@ -59,6 +59,7 @@ interface TaskRow {
   agent_id: string | null;
   pr_url: string | null;
   task_type: string | null;
+  last_user_input_at: string | null;
 }
 
 interface RunRow {
@@ -200,6 +201,23 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "last_user_input_at")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
+      // Backfill: latest user_message event, else created_at.
+      this.db.exec(`
+        UPDATE tasks
+        SET last_user_input_at = COALESCE(
+          (
+            SELECT MAX(e.timestamp)
+            FROM events e
+            WHERE e.task_id = tasks.task_id
+              AND e.event_type = 'user_message'
+          ),
+          created_at
+        )
+        WHERE last_user_input_at IS NULL
+      `);
     }
 
     this.db.exec(`
@@ -620,22 +638,24 @@ export class Store {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
     }
+    const now = new Date().toISOString();
     const task: Task = {
       taskId: input.taskId?.trim() || newId("task"),
       projectId: input.projectId,
       title: input.title,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
       status: "active",
       workspace: input.workspace,
       provider: input.provider,
       model: input.model,
       createdBy: input.createdBy,
       taskType: "general",
+      lastUserInputAt: now,
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, last_user_input_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -649,6 +669,7 @@ export class Store {
         task.createdBy ?? null,
         null,
         task.taskType,
+        task.lastUserInputAt,
       );
     return task;
   }
@@ -664,15 +685,31 @@ export class Store {
     if (filter?.projectId) {
       const rows = this.db
         .prepare(
-          `SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC`,
+          `SELECT * FROM tasks
+           WHERE project_id = ?
+           ORDER BY COALESCE(last_user_input_at, created_at) DESC, created_at DESC`,
         )
         .all(filter.projectId) as unknown as TaskRow[];
       return rows.map((r) => this.toTask(r));
     }
     const rows = this.db
-      .prepare(`SELECT * FROM tasks ORDER BY created_at DESC`)
+      .prepare(
+        `SELECT * FROM tasks
+         ORDER BY COALESCE(last_user_input_at, created_at) DESC, created_at DESC`,
+      )
       .all() as unknown as TaskRow[];
     return rows.map((r) => this.toTask(r));
+  }
+
+  touchTaskLastUserInput(
+    taskId: string,
+    at: string = new Date().toISOString(),
+  ): Task | undefined {
+    if (!this.getTask(taskId)) return undefined;
+    this.db
+      .prepare(`UPDATE tasks SET last_user_input_at = ? WHERE task_id = ?`)
+      .run(at, taskId);
+    return this.getTask(taskId);
   }
 
   updateTaskStatus(taskId: string, status: TaskStatus): void {
@@ -771,6 +808,7 @@ export class Store {
       agentId: r.agent_id || undefined,
       ...(prUrl ? { prUrl } : {}),
       taskType: (r.task_type as Task["taskType"]) || "general",
+      lastUserInputAt: r.last_user_input_at || r.created_at,
     };
   }
 

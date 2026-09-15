@@ -107,7 +107,7 @@ export default function TaskList({
               <div className="task-meta">
                 #{t.taskId.slice(-6)} · {t.provider}
                 {t.model ? `/${t.model}` : ""} · {t.status} ·{" "}
-                {formatTime(t.createdAt)}
+                {formatTime(t.lastUserInputAt ?? t.createdAt)}
               </div>
             </button>
           ))}

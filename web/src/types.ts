@@ -116,6 +116,8 @@ export interface Task {
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
   taskType: "general";
+  /** ISO time of the latest user message; drives sidebar sort. */
+  lastUserInputAt?: string;
 }
 
 export interface TokenUsage {

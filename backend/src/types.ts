@@ -98,6 +98,8 @@ export interface Task {
   prUrl?: string;
   /** Task category; phase 1 only supports general. */
   taskType: TaskType;
+  /** ISO time of the latest user message; drives sidebar sort. */
+  lastUserInputAt: string;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";

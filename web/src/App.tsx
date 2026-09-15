@@ -606,6 +606,7 @@ export default function App() {
           setMainTab("plan");
         }
         await refreshAfterSend(selectedId);
+        void refreshTasks();
         return true;
       } catch (e) {
         setError(String(e));
@@ -613,7 +614,7 @@ export default function App() {
         return false;
       }
     },
-    [refreshAfterSend, refreshDetail, selectedId],
+    [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
   );
 
   const stopAgent = useCallback(async () => {
@@ -729,12 +730,13 @@ export default function App() {
         }
         setMainTab("plan");
         await refreshAfterSend(selectedId);
+        void refreshTasks();
       } catch (e) {
         setError(String(e));
         void refreshDetail(selectedId);
       }
     },
-    [refreshAfterSend, refreshDetail, selectedId],
+    [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
   );
 
   // An unanswered plan question batch (only ever produced by a plan-mode run)

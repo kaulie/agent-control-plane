@@ -1183,6 +1183,10 @@ export class AgentGateway {
         },
         persistAndPublish,
       );
+      const touched = this.store.touchTaskLastUserInput(taskId);
+      if (touched) {
+        this.publish({ type: "task_updated", task: touched });
+      }
     } catch (err) {
       // Don't leave a phantom running/queued run — the UI would show
       // "Agent 工作中" with no worker, and follow-up sends look like no-ops.

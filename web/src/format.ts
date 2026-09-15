@@ -33,6 +33,22 @@ export function formatTime(iso: string): string {
   });
 }
 
+/** Sidebar / list timestamps: date + time (no seconds). */
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const date = d.toLocaleDateString([], {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const time = d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${date} ${time}`;
+}
+
 export function truncate(s: string, n: number): string {
   if (!s) return "";
   return s.length > n ? s.slice(0, n) + "…" : s;

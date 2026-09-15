@@ -336,13 +336,12 @@ function groupConsecutiveRows(rows: Row[]): TimelineItem[] {
   return out;
 }
 
-/** Index of the last row with the given event type, or -1. */
-function lastIndexOfType(rows: Row[], type: string): number {
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i].type === type) return i;
-  }
-  return -1;
-}
+/**
+ * Rows that close a run. In "conversation only" mode these stay visible as the
+ * per-run footer (completed · 耗时 / error / stopped) even though every other
+ * activity row is dropped.
+ */
+const TERMINAL_TYPES = new Set(["run_completed", "run_error", "run_cancelled"]);
 
 /**
  * Drop all but the last row of every run of consecutive assistant rows, so a
@@ -778,13 +777,12 @@ export default function Timeline({
   );
 
   // In "conversation only" mode the thinking / tool-call rows are removed from
-  // the stream instead of being collapsed, so only user + assistant stay. The
-  // last "Completed · 耗时" row always survives as the run summary footer.
+  // the stream instead of being collapsed, so only user + assistant stay. Every
+  // run's closing row (completed · 耗时 / error / stopped) is kept as its footer.
   const visibleRows = useMemo(() => {
     if (!hideProcess) return streamRows;
-    const completedIdx = lastIndexOfType(streamRows, "run_completed");
     const conversation = streamRows.filter(
-      (row, idx) => row.role !== "activity" || idx === completedIdx,
+      (row) => row.role !== "activity" || TERMINAL_TYPES.has(row.type),
     );
     return keepLastAssistant
       ? keepLastConsecutiveAssistant(conversation)
@@ -877,7 +875,7 @@ export default function Timeline({
         </label>
         <label
           className="timeline-toolbar-option"
-          title="只显示你和助手的消息，隐藏中间的 thinking / 工具调用（保留最后的 completed · 耗时 行）"
+          title="只显示你和助手的消息，隐藏中间的 thinking / 工具调用（保留每轮的 completed · 耗时 / 出错 / 停止 行）"
         >
           <input
             type="checkbox"

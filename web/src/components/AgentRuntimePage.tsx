@@ -27,9 +27,8 @@ const INTERVAL_OPTIONS: Array<{ ms: number; label: string }> = [
 interface RangeOption {
   key: string;
   label: string;
-  /** Look-back; undefined = all history or custom. */
+  /** Look-back; undefined = custom range. */
   ms?: number;
-  all?: boolean;
   custom?: boolean;
 }
 
@@ -41,7 +40,6 @@ const RANGE_OPTIONS: RangeOption[] = [
   { key: "24h", label: "24 小时", ms: 24 * 60 * 60_000 },
   { key: "7d", label: "7 天", ms: 7 * 24 * 60 * 60_000 },
   { key: "30d", label: "30 天", ms: 30 * 24 * 60 * 60_000 },
-  { key: "all", label: "全部", all: true },
   { key: "custom", label: "自定义", custom: true },
 ];
 
@@ -196,13 +194,8 @@ function buildQuery(
   rangeKey: string,
   customFrom: string,
   customTo: string,
-):
-  | { windowMs: number }
-  | { all: true }
-  | { from: string; to: string }
-  | null {
+): { windowMs: number } | { from: string; to: string } | null {
   const opt = RANGE_OPTIONS.find((o) => o.key === rangeKey) ?? RANGE_OPTIONS[1];
-  if (opt.all) return { all: true };
   if (opt.custom) {
     const from = localInputToIso(customFrom);
     const to = localInputToIso(customTo);

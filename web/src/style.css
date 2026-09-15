@@ -1801,6 +1801,51 @@ body {
   font-weight: 600;
 }
 
+.update-modal-upgrading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 8px 0 4px;
+}
+
+.update-modal-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: update-modal-spin 0.9s linear infinite;
+}
+
+.update-modal-upgrading-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.update-modal-upgrading-text code {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--bg-3);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.update-modal-upgrading-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@keyframes update-modal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .runtime-fields {
   display: flex;
   flex-wrap: wrap;

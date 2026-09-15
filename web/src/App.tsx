@@ -19,9 +19,9 @@ import {
 } from "./plan-questions";
 import { APP_VERSION } from "./version";
 import {
+  beginUpgrade,
   dismissVersionUpdate,
   pollHealthVersion,
-  reloadForUpdate,
   subscribeVersionUpdate,
   type VersionUpdate,
 } from "./version-check";
@@ -87,6 +87,7 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"timeline" | "plan">("timeline");
   const [selectedPlanRunId, setSelectedPlanRunId] = useState<string | null>(null);
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
+  const [upgradingVersion, setUpgradingVersion] = useState<string | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [createTaskDefaults, setCreateTaskDefaults] = useState<{
     provider?: string;
@@ -920,7 +921,24 @@ export default function App() {
           {error} ✕
         </div>
       )}
-      {versionUpdate && (
+      {upgradingVersion ? (
+        <div className="update-modal-backdrop" role="presentation">
+          <div className="update-modal" role="dialog" aria-labelledby="update-modal-title">
+            <h2 id="update-modal-title" className="update-modal-title">
+              正在升级
+            </h2>
+            <div className="update-modal-upgrading">
+              <span className="update-modal-spinner" aria-hidden="true" />
+              <p className="update-modal-upgrading-text">
+                正在升级到版本 <code>{upgradingVersion}</code>
+              </p>
+              <p className="update-modal-upgrading-hint">
+                服务可用后会自动刷新页面，请稍候…
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : versionUpdate ? (
         <div className="update-modal-backdrop" role="presentation">
           <div className="update-modal" role="dialog" aria-labelledby="update-modal-title">
             <h2 id="update-modal-title" className="update-modal-title">
@@ -934,9 +952,12 @@ export default function App() {
               <button
                 type="button"
                 className="update-modal-btn primary"
-                onClick={() => reloadForUpdate(versionUpdate.serverVersion)}
+                onClick={() => {
+                  setUpgradingVersion(versionUpdate.serverVersion);
+                  beginUpgrade(versionUpdate.serverVersion);
+                }}
               >
-                立即更新
+                更新版本
               </button>
               <button
                 type="button"
@@ -948,7 +969,7 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
       {selectedProjectId && (
         <CreateTaskDialog
           open={showCreateTask}

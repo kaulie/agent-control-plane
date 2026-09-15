@@ -20,6 +20,8 @@ export async function registerRoutes(
     appVersion: string;
     /** Live version for /health (disk VERSION preferred). */
     resolveAppVersion?: () => string;
+    /** Version baked into the running gateway process (env APP_VERSION). */
+    processAppVersion?: string;
     deployQueue: DeployQueue;
     /** When false, deploy enqueues immediately (legacy). Default true. */
     gracefulRestart?: boolean;
@@ -39,6 +41,7 @@ export async function registerRoutes(
       provider: providers.defaultProviderName,
       providers: providers.names(),
       version: v,
+      processVersion: opts.processAppVersion ?? opts.appVersion,
       time: new Date().toISOString(),
     };
   });

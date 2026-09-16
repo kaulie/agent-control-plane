@@ -48,7 +48,6 @@ import {
   parsePlanQuestionBatch,
   type PlanAnswerBatch,
 } from "../plan-question-parser.js";
-import { listPlanDocuments, readPlanDocument } from "../plan-documents.js";
 import { buildTokenUsageSeries } from "../usage/series.js";
 import {
   collectDecisionEvents,
@@ -522,14 +521,6 @@ export class AgentGateway {
 
   maxEventSeq(taskId: string): number {
     return this.store.maxEventSeq(taskId);
-  }
-
-  listPlanDocuments(taskId: string) {
-    return listPlanDocuments(this.store, taskId);
-  }
-
-  getPlanDocument(taskId: string, runId: string) {
-    return readPlanDocument(this.store, taskId, runId);
   }
 
   getQueueLength(taskId: string): number {

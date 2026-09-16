@@ -61,16 +61,9 @@ export default function ProjectSettingsPage({
   const [savedServices, setSavedServices] = useState<DeploymentServiceDraft[]>(
     [],
   );
-  const [knownServices, setKnownServices] = useState<
-    Array<{ serviceId: string; name?: string }>
-  >([]);
   const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [registeringServiceId, setRegisteringServiceId] = useState<
-    string | null
-  >(null);
-  const [registerNotice, setRegisterNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -84,10 +77,9 @@ export default function ProjectSettingsPage({
     setLoading(true);
     setError(null);
     try {
-      const [data, providers, depServices] = await Promise.all([
+      const [data, providers] = await Promise.all([
         api.getProjectSettings(projectId),
         api.listProviders().catch(() => null),
-        api.listDeploymentServices().catch(() => ({ services: [] })),
       ]);
       setView(data);
       setRules(data.project.agent?.rules ?? "");
@@ -100,14 +92,6 @@ export default function ProjectSettingsPage({
       setSavedDefaultModel(data.project.runtime?.defaultModel ?? "");
       applyDeploymentFromView(data);
       if (providers) setEnvDefaultProvider(providers.defaultProvider);
-      setKnownServices(
-        (depServices.services ?? [])
-          .map((s) => ({
-            serviceId: String(s.serviceId ?? "").trim(),
-            ...(typeof s.name === "string" ? { name: s.name } : {}),
-          }))
-          .filter((s) => s.serviceId),
-      );
     } catch (e) {
       setError(String(e));
     } finally {
@@ -123,7 +107,6 @@ export default function ProjectSettingsPage({
     setSaving(true);
     setError(null);
     setNotice(null);
-    setRegisterNotice(null);
     try {
       const data = await api.updateProjectSettings(projectId, {
         agent: { rules },
@@ -158,37 +141,6 @@ export default function ProjectSettingsPage({
       setError(String(e));
     } finally {
       setSaving(false);
-    }
-  };
-
-  const registerDeployment = async (
-    svc: DeploymentServiceDraft,
-  ): Promise<void> => {
-    const serviceId = svc.serviceId.trim();
-    if (!serviceId) return;
-    setRegisteringServiceId(serviceId);
-    setError(null);
-    setNotice(null);
-    setRegisterNotice(null);
-    try {
-      const gracefulRestart = svc.gracefulRestart === true;
-      const result = await api.registerProjectDeployment(projectId, {
-        serviceId,
-        gracefulRestart,
-        ...(gracefulRestart
-          ? {
-              restartNotifyUrl: svc.restartNotifyUrl?.trim() || "",
-              restartPollUrl: svc.restartPollUrl?.trim() || "",
-            }
-          : {}),
-      });
-      setView(result.settings);
-      applyDeploymentFromView(result.settings);
-      setRegisterNotice(result.message);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRegisteringServiceId(null);
     }
   };
 
@@ -228,11 +180,7 @@ export default function ProjectSettingsPage({
           />
           <DeploymentSection
             services={services}
-            knownServices={knownServices}
-            registeringServiceId={registeringServiceId}
-            registerNotice={registerNotice}
             onChange={setServices}
-            onRegister={(svc) => void registerDeployment(svc)}
           />
           <AgentRulesSection
             title="全局 Agent Rules（只读）"

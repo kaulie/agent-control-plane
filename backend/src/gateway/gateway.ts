@@ -43,7 +43,6 @@ import {
   resolvePlanExportDir,
   resolveRuntimeDefaults,
   resolveWorkspaceRoot,
-  upsertDeploymentService,
 } from "../settings.js";
 import { exportPlanDocument } from "../plan-export.js";
 import {
@@ -334,29 +333,6 @@ export class AgentGateway {
       effective: mergeSettings(global, projectSettings),
       cwdRules: cwd ? readCwdRules(cwd) : undefined,
     };
-  }
-
-  /**
-   * Upsert one deployment service into project settings and return the view.
-   */
-  upsertProjectDeploymentService(
-    projectId: string,
-    service: {
-      serviceId: string;
-      gracefulRestart?: boolean;
-      restartNotifyUrl?: string;
-      restartPollUrl?: string;
-    },
-  ): ProjectSettingsView | undefined {
-    const project = this.store.getProject(projectId);
-    if (!project) return undefined;
-    const current = this.store.getProjectSettings(projectId) ?? {};
-    const deployment = upsertDeploymentService(
-      current.deployment,
-      service,
-      project.name,
-    );
-    return this.updateProjectSettings(projectId, { deployment });
   }
 
   updateProjectSettings(

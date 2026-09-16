@@ -5,18 +5,9 @@ export type DeploymentServiceDraft = DeploymentServiceConfig & {
   key: string;
 };
 
-interface KnownService {
-  serviceId: string;
-  name?: string;
-}
-
 interface Props {
   services: DeploymentServiceDraft[];
-  knownServices: KnownService[];
-  registeringServiceId: string | null;
-  registerNotice: string | null;
   onChange: (services: DeploymentServiceDraft[]) => void;
-  onRegister: (service: DeploymentServiceDraft) => void;
 }
 
 function newDraft(serviceId = ""): DeploymentServiceDraft {
@@ -27,14 +18,7 @@ function newDraft(serviceId = ""): DeploymentServiceDraft {
   };
 }
 
-export default function DeploymentSection({
-  services,
-  knownServices,
-  registeringServiceId,
-  registerNotice,
-  onChange,
-  onRegister,
-}: Props) {
+export default function DeploymentSection({ services, onChange }: Props) {
   const updateAt = (
     index: number,
     patch: Partial<DeploymentServiceDraft>,
@@ -65,8 +49,8 @@ export default function DeploymentSection({
       <div className="settings-section-head">
         <h2 className="settings-section-title">Deployment</h2>
         <p className="settings-section-desc">
-          一个项目可绑定多个部署服务契约；每条独立配置 graceful restart，并分别注册到
-          deployment。
+          本项目的部署服务契约（graceful restart 用的 notify / poll URL）。仅保存在本项目设置里；
+          契约的登记与启停由部署平台统一管控，app 不再写入 :4220。
         </p>
       </div>
 
@@ -76,12 +60,6 @@ export default function DeploymentSection({
 
       {services.map((svc, index) => {
         const graceful = svc.gracefulRestart === true;
-        const registering = registeringServiceId === svc.serviceId.trim();
-        const registerDisabled =
-          registering ||
-          !svc.serviceId.trim() ||
-          (graceful &&
-            (!svc.restartNotifyUrl?.trim() || !svc.restartPollUrl?.trim()));
 
         return (
           <div key={svc.key} className="deployment-service-card">
@@ -92,7 +70,6 @@ export default function DeploymentSection({
                   className="settings-path-input"
                   type="text"
                   placeholder="例如 web-cursor"
-                  list="deployment-known-services"
                   value={svc.serviceId}
                   onChange={(e) =>
                     updateAt(index, { serviceId: e.target.value })
@@ -145,19 +122,11 @@ export default function DeploymentSection({
               </div>
             ) : (
               <p className="settings-section-meta">
-                不支持时部署可立即重启；注册会清空该 service 的 notify / poll。
+                不支持时部署可立即重启；本项目的 graceful 契约留空。
               </p>
             )}
 
             <div className="deployment-register-row">
-              <button
-                type="button"
-                className="settings-save deployment-register-btn"
-                disabled={registerDisabled}
-                onClick={() => onRegister(svc)}
-              >
-                {registering ? "注册中…" : "注册到 deployment"}
-              </button>
               <button
                 type="button"
                 className="deployment-remove-btn"
@@ -170,14 +139,6 @@ export default function DeploymentSection({
         );
       })}
 
-      <datalist id="deployment-known-services">
-        {knownServices.map((s) => (
-          <option key={s.serviceId} value={s.serviceId}>
-            {s.name ? `${s.serviceId} · ${s.name}` : s.serviceId}
-          </option>
-        ))}
-      </datalist>
-
       <div className="deployment-register-row">
         <button
           type="button"
@@ -186,36 +147,11 @@ export default function DeploymentSection({
         >
           添加 service
         </button>
-        {knownServices
-          .filter(
-            (k) =>
-              !services.some(
-                (s) =>
-                  s.serviceId.trim().toLowerCase() ===
-                  k.serviceId.toLowerCase(),
-              ),
-          )
-          .slice(0, 6)
-          .map((k) => (
-            <button
-              key={k.serviceId}
-              type="button"
-              className="deployment-add-btn deployment-add-known"
-              onClick={() => addService(k.serviceId)}
-            >
-              + {k.serviceId}
-            </button>
-          ))}
       </div>
 
-      {registerNotice ? (
-        <p className="settings-notice">{registerNotice}</p>
-      ) : (
-        <p className="settings-section-meta">
-          「保存项目设置」写入全部 service；「注册到 deployment」同步单条契约到
-          :4220。
-        </p>
-      )}
+      <p className="settings-section-meta">
+        「保存项目设置」写入本项目全部 service（本地记录）。
+      </p>
     </section>
   );
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 启动 runtime 进程（不构建；换版请用 release.sh + deploy.sh）。
+# 启动 runtime 进程（不构建；换版由部署平台 pipeline 完成）。
 # 日志追加 + 轮转；node 退出码/信号由 supervise-node.sh 记录；开启 Node fatal report。
 set -euo pipefail
 
@@ -31,7 +31,7 @@ fi
 
 # 必须已由 deployment 同步过来的构建产物
 [ -f "${BACKEND_DIR}/dist/index.js" ] || {
-  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先 /Users/gaolei/deployment/web-cursor/bin/release.sh && bin/deploy.sh deployment-<hash>" >&2
+  echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先由部署平台（~/runtime/agent-control-plane-deployment，:4220）完成一次部署" >&2
   exit 1
 }
 

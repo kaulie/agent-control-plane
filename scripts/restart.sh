@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 重启 runtime（不构建；构建请用 deploy.sh）。
+# 重启 runtime（不构建；构建产物由部署平台 pipeline 提供）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

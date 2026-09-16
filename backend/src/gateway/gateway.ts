@@ -79,13 +79,8 @@ export interface GatewayConfig {
   /** Gateway RSS limit in MiB; 0 disables memory-triggered run shedding. */
   agentRssLimitMb?: number;
   /**
-   * Called when deploy-drain is on and the last active run finishes
-   * (runningCount hits 0). Used to release a held deploy request.
-   */
-  onDeployDrainIdle?: () => void;
-  /**
-   * Safety timeout for admission pause (notify/hold). After this, resume the
-   * queue even if restart never arrives. Default 5 min.
+   * Safety timeout for the admission pause a platform restart-notify starts.
+   * After this, resume the queue even if the restart never arrives. Default 5 min.
    */
   deployGracefulWaitMs?: number;
 }
@@ -1460,16 +1455,6 @@ export class AgentGateway {
         runId,
       });
       this.drainGlobalQueue();
-      if (this.admissionPaused && this.runningCount === 0) {
-        try {
-          this.config.onDeployDrainIdle?.();
-        } catch (err) {
-          console.warn(
-            "[deploy-drain] onDeployDrainIdle failed:",
-            err instanceof Error ? err.message : err,
-          );
-        }
-      }
     }
   }
 

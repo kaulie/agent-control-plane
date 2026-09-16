@@ -13,13 +13,13 @@
 | 项目 `gitRepoUrl`（GitHub） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源 | 否（只读配置；用它作 remote） |
 | [`kaulie/agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment) | **独立部署服务**源码（HTTP + SQLite 契约） | 仅在用户要求改部署系统时（在该仓库改） |
 | `~/runtime/agent-control-plane-deployment` | 部署服务安装目录（API `:4220`、packages、sqlite） | 否（install 产物） |
-| `~/runtime/web-cursor` | 被部署的应用 runtime（由服务契约描述） | 禁止手改；经 deployment API 上线 |
+| `~/runtime/web-cursor` | 被部署的应用 runtime（由服务契约描述） | 禁止手改；由部署平台上线 |
 | `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录（只收 deploy rsync + 启停） | 禁止改 |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | 可选本机 clone（**不是**部署源） | 否 |
 
 若 bootstrap / 项目设置里给出了 `gitRepoUrl`，**必须**用该地址作为 `origin`，不要擅自改用本地 path remote。
 
-**开发 vs 上线：** task workspace 只做开发；发版 / 上线只走 `deployment/web-cursor/bin/`，**禁止**在 `agent-workspace/**` 里执行 `release` / `deploy`。
+**开发 vs 上线：** task workspace 只做开发；构建 / 上线**只由部署平台**完成（`~/runtime/agent-control-plane-deployment`），app 仓库内**没有**任何发版 / 部署入口。
 
 ## 标准流程（每 task）
 
@@ -105,27 +105,26 @@ EOF
 
 **不要** `gh pr merge`，除非用户明确要求。
 
-## 合入后上线（非 agent 默认步骤）
+## 合入后上线（非 agent 默认步骤，且不在本仓库）
 
 1. 在 GitHub 上把 PR merge 进 `main`
-2. 用**独立发版脚本**（不在 task workspace、也不依赖常驻 app clone）：
+2. 在**部署平台**触发（platform UI 的「流水线」，或 API）：
 
 ```bash
-~/runtime/agent-control-plane-deployment/bin/release.sh
-# → packages/deployment-<hash>/
-
-# 异步上线：gateway graceful 后转发到部署服务 HTTP API（:4220）
-curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
+# 打包 + 部署（平台从 GitHub ref 取代码自行 build）
+curl -sS -X POST http://127.0.0.1:4220/api/deploy-notify \
   -H 'content-type: application/json' \
-  -d '{"deployment":"deployment-<hash>","serviceId":"web-cursor"}'
-# 或直接调部署服务：
-# curl -sS -X POST http://127.0.0.1:4220/api/deploys -d '{"serviceId":"web-cursor","deployment":"..."}'
+  -d '{"serviceId":"web-cursor","ref":"main"}'
+
+# 或部署平台已构建好的包
+curl -sS -X POST http://127.0.0.1:4220/api/deploys \
+  -H 'content-type: application/json' \
+  -d '{"serviceId":"web-cursor","deployment":"deployment-<hash>"}'
 ```
 
-- `release.sh` / `deploy.sh` 属于上线域工具，**不是** web-cursor 应用本身的一部分。
-- **构建只发生在** `deployment-<hash>/` 内；runtime 不再 build，也不再靠 git reset 换版。
-- 对 runtime 的代码更新 **只允许** 经 `bin/deploy.sh` 的 rsync；禁止手工 cp/rsync/改文件。
-- **禁止**在 `agent-workspace/**` 执行发版 / 上线；仓库内若仍有 `scripts/release.sh` / `deploy.sh`，仅为兼容提示，以 `bin/` 为准。
+- app 仓库**没有**部署入口：`GET/POST /api/ops/deploy*` 已移除，`scripts/deploy.sh` 已删除。
+- 平台按服务契约 rsync 到 runtime 并重启；app 只提供 graceful 契约（`POST /api/ops/restart-notify` + `GET /api/ops/restart-status`）供平台轮询。
+- **禁止**在 `agent-workspace/**` 触发部署，**禁止**手工 cp/rsync/改 runtime 文件。
 
 ## 硬性约束
 
@@ -134,7 +133,7 @@ curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
 3. **分支短命**：做完即 commit + push + 开 PR。
 4. **开发前同步**：开分支或长时间开发前 `git fetch`，并基于最新 `main`。
 5. **冲突在本分支解决**：需要时把 `main` rebase/merge 进自己的分支后再 push。
-6. **部署与开发分离**：开发在 workspace；上线 = `bin/release.sh` → `bin/deploy.sh deployment-<hash>`。
+6. **部署与开发分离**：开发在 workspace；上线 = 部署平台打包 + 部署（app 仓库无部署入口）。
 
 ## 反例（禁止）
 
@@ -145,8 +144,8 @@ curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
 - 直接改 `/Users/gaolei/runtime/**`，或对 runtime 手工 cp/rsync
 - 覆盖 runtime 的 `backend/.env` / `backend/data/`
 - 未配置 / 无视项目 `gitRepoUrl`，擅自换远程
-- 在 task workspace 里跑 `release` / `deploy`，或依赖 workspace 的 git 状态发版
-- 无参 `deploy.sh` 部署「漂浮 main」
+- 在 task workspace 里触发部署，或依赖 workspace 的 git 状态换版
+- 在 app 仓库里新增任何「发起部署」的接口 / 脚本（统一走部署平台）
 - 手改 `deployment-<hash>/` 快照
 
 ## 交付检查清单（止于开 PR）
@@ -158,4 +157,4 @@ curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
 - [ ] 已 `git push -u origin HEAD`
 - [ ] 已 `gh pr create`（或网关开 PR），任务已有 `prUrl`
 - [ ] 未直推 / 未 force push `main`
-- [ ] 未擅自 merge、未擅自 `release.sh`/`deploy.sh`（除非用户另行要求）
+- [ ] 未擅自 merge、未擅自触发部署（除非用户另行要求）

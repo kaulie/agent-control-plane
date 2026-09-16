@@ -89,7 +89,7 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
           `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,
           "- Follow [`BRANCHING.md`](BRANCHING.md): clone **this** GitHub URL into the task workspace, branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
           "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides the project git URL.",
-          "- Do not merge the PR or run release/deploy unless the user asks. After merge: `bin/release.sh` then **async** deploy via `POST /api/ops/deploy` `{\"deployment\":\"deployment-<hash>\"}` (independent deploy-agent). **Never** run `bin/deploy.sh` synchronously inside this agent process — that kills the gateway mid-shell.",
+          "- Do not merge the PR and do not deploy unless the user asks. The app itself has **no** deploy entry point: after the PR is merged into `main`, every deploy goes through the **deployment platform** (`~/runtime/agent-control-plane-deployment`, `:4220` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.",
         ].join("\n")
       : [
           "- Clone the repo you need into that directory (or a subfolder), then develop only there.",

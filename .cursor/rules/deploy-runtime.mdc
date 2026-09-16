@@ -11,50 +11,49 @@ You are the agent behind **Web Cursor**. Follow these rules with no exceptions.
 
 - **Allowed:** `/Users/gaolei/agent-workspace/<taskId>/**` (this task's sandbox — clone/work here; **dev only**)
 - **Forbidden:** `/Users/gaolei/runtime/**` — never create, edit, delete, or build there by hand
-- **Forbidden:** `/Users/gaolei/deployment/web-cursor/deployment-<hash>/**` — frozen packages; never hand-edit
-- **Forbidden:** ad-hoc copying/rsync into runtime (only `bin/deploy.sh` may sync)
+- **Forbidden:** `deployment-<hash>/**` packages under the deployment platform — frozen; never hand-edit
+- **Forbidden:** ad-hoc copying/rsync into runtime (only the **deployment platform** may sync)
 - **Forbidden:** editing another task's directory under `agent-workspace/`
-- **Forbidden:** running `release` / `deploy` from `agent-workspace/**`
-- **Forbidden:** synchronously running `bin/deploy.sh` / `scripts/restart.sh` inside this agent process (self-kill)
+- **Forbidden:** triggering a deploy from `agent-workspace/**`
+- **Forbidden:** running any deploy/restart script synchronously inside this agent process (self-kill)
 
-## Ops tools (not the app)
+## Deploys are platform-side only
 
-Ship tools live outside the app repo and outside task workspaces:
+This app repo has **no deploy entry point** (no deploy API, no release/deploy script).
+Everything is triggered from the independent deployment platform:
 
-- `/Users/gaolei/deployment/web-cursor/bin/release.sh`
-- `/Users/gaolei/deployment/web-cursor/bin/deploy.sh` (called by **deploy-agent**, not by you synchronously)
-- `/Users/gaolei/deployment/web-cursor/ops/` — independent watchdog + deploy-agent
+- `~/runtime/agent-control-plane-deployment` — HTTP `:4220` + Web UI + SQLite service contracts
+- source: https://github.com/kaulie/agent-control-plane-deployment
+- trigger: platform UI（流水线 / Deploys）, or `POST :4220/api/deploy-notify` (pack + deploy) / `POST :4220/api/deploys` (deploy an existing package)
 
-Only change `bin/` / `ops/` when the user asks to change the release/deploy flow.
+Only change the deployment platform when the user asks to change the deploy flow.
 
 ## How to ship
 
 1. Develop in **this task's** `agent-workspace/<taskId>/` clone.
 2. Push branch + open GitHub PR; merge only when the user asks.
-3. After merge:
+3. After merge, deploys happen on the platform (above). The app only answers the
+   platform's graceful-restart contract:
 
 ```bash
-/Users/gaolei/deployment/web-cursor/bin/release.sh
-# then async deploy (returns immediately):
-curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
-  -H 'content-type: application/json' \
-  -d '{"deployment":"deployment-<hash>"}'
-# poll: GET /api/ops/deploy/<requestId>  and/or  GET /api/ops/runtime
+POST /api/ops/restart-notify   # platform: start drain (pause starting new runs)
+GET  /api/ops/restart-status   # platform polls until canRestart / ready / canDeploy
 ```
 
-Do **not** wait on `bin/deploy.sh` in a shell tool call.  
-Do **not** run `npm run build` under runtime. Do **not** `git reset` runtime to change versions.
+Do **not** try to deploy from this repo, do **not** wait on any restart script in a
+shell tool call, do **not** run `npm run build` under runtime, and do **not**
+`git reset` runtime to change versions.
 
 ## Also forbidden
 
 - Touching runtime `backend/data/` or `backend/.env`
 - Using production port **4211** for a local/dev gateway (use e.g. 4212)
-- Parameter-less `deploy.sh` against floating `main`
+- Adding any deploy-triggering endpoint/script to this repo
 
 ## Anti-stuck progress
 
-- Do **not** put typecheck + commit + release/deploy in a single shell invocation.
+- Do **not** put typecheck + commit + deploy in a single shell invocation.
 - Run short steps and **tell the user the outcome after each step**.
-- Before a long release, say it may take tens of seconds and is not hung.
+- Before a long platform deploy/restart, say it may take tens of seconds and is not hung.
 
 Full detail: see `AGENT.md` / `AGENTS.md` / `BRANCHING.md` / `ops/README.md` in the repo root.

@@ -82,13 +82,15 @@ export interface Config {
    */
   agentRssLimitMb: number;
   /**
-   * When true (default), POST /api/ops/deploy waits for running agents and
-   * pauses queued starts. When false, enqueue immediately (legacy behavior).
+   * When true (default), a platform restart-notify pauses starting new/queued
+   * runs until the in-flight agents finish (graceful restart). When false, the
+   * gateway keeps accepting runs while the platform restarts it.
    * Env: GRACEFUL_RESTART=1|0
    */
   gracefulRestart: boolean;
   /**
-   * Max time to hold a graceful deploy before forcing release (default 5 min).
+   * Safety timeout for that admission pause before the queue resumes on its own,
+   * in case the platform restart never arrives (default 5 min).
    * Env: DEPLOY_GRACEFUL_WAIT_MS or DEPLOY_GRACEFUL_WAIT_SEC
    */
   deployGracefulWaitMs: number;

@@ -10,7 +10,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 | Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
 | [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
 | `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
-| `~/runtime/web-cursor` | App runtime — **never** hand-edit; ship via deployment API |
+| `~/runtime/web-cursor` | App runtime — **never** hand-edit; only the deployment platform ships into it |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | Optional local clone — **not** the deploy source |
 
 **Branching (mandatory):** follow [`BRANCHING.md`](BRANCHING.md) — trunk-based, GitHub origin, deliver with `git push` + `gh pr create` (do not merge `main` or deploy unless the user asks).
@@ -32,33 +32,32 @@ gh pr create --base main --title "..." --body "..."
 # write PR URL back to the task (or POST /api/tasks/<taskId>/pull-request)
 ```
 
-## Deploy via independent deployment service
+## Deploys (never from this repo)
 
-After the GitHub PR is **merged** into `main` (and the user asks to ship):
+This repo has **no deploy entry point**: no deploy API, no release/deploy script.
+Deploys are triggered **only** from the independent deployment platform:
 
-```bash
-~/runtime/agent-control-plane-deployment/bin/release.sh
-# → packages/deployment-<hash>/
+- [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) → `~/runtime/agent-control-plane-deployment` (HTTP `:4220`, Web UI + SQLite service contracts)
+- the platform packs `main` (or a given ref) into `packages/deployment-<hash>/`, then rsyncs + restarts via the service contract (`startCmd` / `stopCmd` / `restartCmd` / `healthUrl`)
+- trigger from the platform: its UI（流水线 / Deploys）, or `POST :4220/api/deploy-notify` (pack + deploy) / `POST :4220/api/deploys` (deploy an existing package)
 
-# Prefer gateway (graceful) which forwards to deployment API:
-curl -sS -X POST http://127.0.0.1:4211/api/ops/deploy \
-  -H 'content-type: application/json' \
-  -d '{"deployment":"deployment-<hash>","serviceId":"web-cursor"}'
+What this app still exposes is only the **passive graceful-restart contract** that
+the platform calls when it restarts this service:
 
-# Or call deployment service directly:
-curl -sS -X POST http://127.0.0.1:4220/api/deploys \
-  -H 'content-type: application/json' \
-  -d '{"serviceId":"web-cursor","deployment":"deployment-<hash>"}'
-```
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/ops/restart-notify` | platform asks to drain: pause starting new runs, let in-flight runs finish |
+| `GET` | `/api/ops/restart-status` | platform polls; `canRestart` / `ready` / `canDeploy` true → restart |
 
+Rules:
+
+- **Never** initiate a deploy from this repo or from an agent, and never run a deploy/restart script synchronously inside this agent process.
 - Deployment is a **separate process** under `~/runtime/agent-control-plane-deployment`.
-- Start/stop of the app follows the **service contract** in deployment SQLite (`startCmd` / `stopCmd` / `restartCmd` / `healthUrl`).
-- **Never** run release/deploy from `agent-workspace/**`.
 - Runtime does **not** `npm install` / `build`, and does **not** use git to change versions.
-- `deploy.sh` rsync **must** preserve `backend/.env` and `backend/data/`.
+- A deploy's rsync **must** preserve `backend/.env` and `backend/data/`.
 - Never hand-edit or ad-hoc copy into runtime.
 
-**Self-deploy note:** `deploy.sh` restarts the gateway (all tasks). Expect WS disconnect. Prefer finishing the reply, then deploy, and tell the user the UI may briefly show “后端暂时不可达”.
+**Self-restart note:** a platform deploy restarts the gateway (all tasks). Expect WS disconnect. Prefer finishing the reply before it happens, and tell the user the UI may briefly show “后端暂时不可达”.
 
 ## Ports
 
@@ -73,10 +72,10 @@ Never commit or overwrite `backend/.env` or `backend/data/`.
 
 Users often think a silent long tool call means the agent is dead. Prevent that:
 
-1. **Never** chain typecheck + commit + release/deploy (or other multi-minute steps) in **one** shell command.
+1. **Never** chain typecheck + commit + deploy (or other multi-minute steps) in **one** shell command.
 2. Split into short steps; after each step, **reply in chat** with the result (ok / fail / next).
 3. Prefer commands that print progress (`echo` milestones). Avoid long silent waits without output.
-4. While waiting on release/deploy, say explicitly: “正在构建/同步/重启，大约需要几十秒，不是卡死”.
-5. **Deploy last:** finish the user-visible reply **before** running release/deploy. If interrupted, **系统自检** will resume — give a clear 终态 reply there too.
+4. While waiting on a platform deploy/restart, say explicitly: “正在同步/重启，大约需要几十秒，不是卡死”.
+5. **Deploy last:** if the user asks you to ship, finish the user-visible reply **before** touching the deployment platform. If interrupted, **系统自检** will resume — give a clear 终态 reply there too.
 
 See also: [`BRANCHING.md`](BRANCHING.md), `AGENT.md`, and `.cursor/rules/deploy-runtime.mdc`.

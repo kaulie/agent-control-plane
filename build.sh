@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Project build for the independent release tool
-# (/Users/gaolei/deployment/bin/release.sh).
+# Project build for the independent deployment platform
+# (agent-control-plane-deployment). The platform checks out a git ref and runs
+# this script inside the build tree.
 #
 # Expects to run from a clean source tree (git archive). Produces ./outputs/
-# — a slim runnable snapshot (production deps + build artifacts only) that
-# release freezes into deployment-<hash>/.
+# — a slim runnable snapshot (production deps + build artifacts only) that the
+# platform freezes into deployment-<hash>/.
 #
 # outputs/ intentionally excludes TypeScript sources, docs, tests, and
 # build-time tooling. node_modules is included (production / omit=dev).
@@ -60,7 +61,6 @@ rsync -a web/dist/ outputs/web/dist/
 # Runtime ops scripts (start/stop/restart/watchdog/…).
 rsync -a \
   --exclude 'release.sh' \
-  --exclude 'deploy.sh' \
   scripts/ outputs/scripts/
 
 # MCP helper (already production-installed).

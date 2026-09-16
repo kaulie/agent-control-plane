@@ -9,7 +9,7 @@ import {
   validateIncomingImages,
   type IncomingImage,
 } from "../attachments.js";
-import type { DeployQueue } from "../ops/deploy-queue.js";
+import type { DeploymentApiClient } from "../ops/deployment-api.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -22,8 +22,12 @@ export async function registerRoutes(
     resolveAppVersion?: () => string;
     /** Version baked into the running gateway process (env APP_VERSION). */
     processAppVersion?: string;
-    deployQueue: DeployQueue;
-    /** When false, deploy enqueues immediately (legacy). Default true. */
+    /** Contract-side client for the independent deployment service. */
+    deploymentApi: DeploymentApiClient;
+    /**
+     * When true (default), `/api/ops/restart-notify` pauses starting new runs
+     * until the running agents finish (graceful restart by the platform).
+     */
     gracefulRestart?: boolean;
   },
 ): Promise<void> {
@@ -47,133 +51,21 @@ export async function registerRoutes(
   });
 
   /**
-   * Async deploy: enqueue for the independent deploy-agent.
-   * When GRACEFUL_RESTART=1 (default): if agents are running, hold the request,
-   * pause starting queued runs, and ask the caller to poll restart-status
-   * (max wait: DEPLOY_GRACEFUL_WAIT_MS, default 5 min).
-   * When GRACEFUL_RESTART=0 or force=true: enqueue immediately (legacy).
+   * Deployment-service restart poll contract: the platform polls this until
+   * `canRestart` / `ready` / `canDeploy` is true, then restarts the service.
    */
-  app.post<{
-    Body: {
-      deployment?: string;
-      hash?: string;
-      taskId?: string;
-      requestId?: string;
-      serviceId?: string;
-      force?: boolean;
-    };
-  }>("/api/ops/deploy", async (req, reply) => {
-    const raw = req.body?.deployment?.trim() || req.body?.hash?.trim() || "";
-    if (!raw) {
-      return reply.code(400).send({ error: "deployment or hash is required" });
-    }
-    const force = req.body?.force === true;
-    const useGraceful = gracefulRestart && !force;
-    try {
-      if (useGraceful) {
-        gateway.beginDeployDrain();
-        const snap = gateway.getRestartStatus();
-        if (!snap.canRestart) {
-          let status;
-          const existing = opts.deployQueue.getHeld();
-          if (existing) {
-            status = (await opts.deployQueue.getStatus(existing.requestId))!;
-          } else {
-            status = opts.deployQueue.hold({
-              deployment: raw,
-              runningCount: snap.runningCount,
-              queuedCount: snap.queuedCount,
-              ...(req.body?.taskId?.trim()
-                ? { taskId: req.body.taskId.trim() }
-                : {}),
-              ...(req.body?.requestId?.trim()
-                ? { requestId: req.body.requestId.trim() }
-                : {}),
-              ...(req.body?.serviceId?.trim()
-                ? { serviceId: req.body.serviceId.trim() }
-                : {}),
-            });
-          }
-          return reply.code(202).send({
-            ...status,
-            canRestart: false,
-            admissionPaused: true,
-            gracefulRestart: true,
-            activeRuns: snap.activeRuns,
-            poll: "/api/ops/restart-status",
-          });
-        }
-      }
-
-      if (force || !gracefulRestart) {
-        opts.deployQueue.cancelHeld();
-        if (gateway.isAdmissionPaused()) {
-          gateway.endDeployDrain();
-        }
-      }
-
-      const status = await opts.deployQueue.enqueue({
-        deployment: raw,
-        ...(req.body?.taskId?.trim() ? { taskId: req.body.taskId.trim() } : {}),
-        ...(req.body?.requestId?.trim()
-          ? { requestId: req.body.requestId.trim() }
-          : {}),
-        ...(req.body?.serviceId?.trim()
-          ? { serviceId: req.body.serviceId.trim() }
-          : {}),
-      });
-      return reply.code(202).send({
-        ...status,
-        canRestart: true,
-        gracefulRestart,
-        ...(force
-          ? { forced: true }
-          : !gracefulRestart
-            ? { forced: true, reason: "GRACEFUL_RESTART=0" }
-            : { admissionPaused: gateway.isAdmissionPaused() }),
-      });
-    } catch (err) {
-      return reply
-        .code(400)
-        .send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
   app.get("/api/ops/restart-status", async (_req, reply) => {
     reply.header("Cache-Control", "no-store");
     const snap = gateway.getRestartStatus();
-    const held = opts.deployQueue.getHeld();
-    let deploy = held
-      ? await opts.deployQueue.getStatus(held.requestId)
-      : undefined;
-    const waitUntil = opts.deployQueue.getHeldWaitUntil();
-    const remainingMs =
-      waitUntil && Number.isFinite(Date.parse(waitUntil))
-        ? Math.max(0, Date.parse(waitUntil) - Date.now())
-        : null;
-
-    if (snap.canRestart && opts.deployQueue.getHeld()) {
-      const released = await opts.deployQueue.releaseHeld();
-      if (released) {
-        deploy = released;
-      }
-    }
-
-    const heldAfter = opts.deployQueue.getHeld();
     return {
       ...snap,
       // Deployment-service poll aliases (any true → proceed).
       canDeploy: snap.canRestart,
       ready: snap.canRestart,
       gracefulRestart,
-      maxWaitMs: opts.deployQueue.maxWaitMs,
-      waitUntil: heldAfter ? waitUntil : null,
-      remainingMs: heldAfter ? remainingMs : null,
-      heldDeployment: heldAfter?.deployment ?? deploy?.deployment ?? null,
-      deploy: deploy ?? null,
       pollHint: snap.canRestart
         ? undefined
-        : "稍后再次 GET /api/ops/restart-status；空闲或等待超时后会自动放行已 hold 的部署",
+        : "稍后再次 GET /api/ops/restart-status",
     };
   });
 
@@ -218,37 +110,8 @@ export async function registerRoutes(
     });
   });
 
-  app.post("/api/ops/deploy/cancel-hold", async (_req, reply) => {
-    const cancelled = opts.deployQueue.cancelHeld();
-    const resumed = gateway.endDeployDrain();
-    if (!cancelled && resumed === 0 && !gateway.isAdmissionPaused()) {
-      return reply.code(404).send({
-        error: "no held deploy and admission is not paused",
-      });
-    }
-    return {
-      cancelled,
-      resumedQueuedStarts: resumed,
-      restart: gateway.getRestartStatus(),
-    };
-  });
-
-  app.get<{ Params: { requestId: string } }>(
-    "/api/ops/deploy/:requestId",
-    async (req, reply) => {
-      const status = await opts.deployQueue.getStatus(req.params.requestId);
-      if (!status) {
-        return reply.code(404).send({ error: "deploy request not found" });
-      }
-      return {
-        ...status,
-        runtimeVersion: opts.deployQueue.runtimeVersion(),
-      };
-    },
-  );
-
   app.get("/api/ops/runtime", async () => ({
-    version: opts.deployQueue.runtimeVersion() ?? null,
+    version: version(),
     appVersion: version(),
   }));
 
@@ -405,14 +268,14 @@ export async function registerRoutes(
         return reply.code(404).send({ error: "project not found" });
       }
 
-      const service = await opts.deployQueue.registerServiceGraceful({
+      const service = await opts.deploymentApi.registerServiceGraceful({
         serviceId,
         gracefulRestart,
         ...(gracefulRestart
           ? {
               restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
               restartPollUrl: req.body?.restartPollUrl?.trim() || "",
-              gracefulRestartMaxWaitMs: opts.deployQueue.maxWaitMs,
+              gracefulRestartMaxWaitMs: opts.deploymentApi.maxWaitMs,
             }
           : {}),
       });
@@ -435,7 +298,7 @@ export async function registerRoutes(
 
   app.get("/api/ops/deployment-services", async (_req, reply) => {
     try {
-      const services = await opts.deployQueue.listServices();
+      const services = await opts.deploymentApi.listServices();
       return { services };
     } catch (err) {
       return reply

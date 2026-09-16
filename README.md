@@ -125,8 +125,9 @@ Each Task belongs to a Project (`projectId`). On first boot a default project
 Pull requests and pushes to `main` run [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 `npm ci` → typecheck → build → `npm test`. Compiled `backend/dist` and `web/dist`
 are uploaded as GitHub Actions artifacts and expire after **7 days** (Actions run
-→ Artifacts). This does not deploy; production still uses `release.sh` then
-async `POST /api/ops/deploy`.
+→ Artifacts). This does not deploy: every deploy is triggered from the
+independent deployment platform (`:4220`), which packages the merged `main`
+commit and restarts the service. This repo has no deploy entry point.
 
 ## Project layout
 

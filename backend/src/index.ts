@@ -14,10 +14,12 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
-import { DeployQueue } from "./ops/deploy-queue.js";
+import { DeploymentApiClient } from "./ops/deployment-api.js";
 
 const config = loadConfig();
-const deployQueue = new DeployQueue({
+// Contract-side client only: deploys are triggered from the deployment platform,
+// never from this app.
+const deploymentApi = new DeploymentApiClient({
   apiUrl: config.deploymentApiUrl,
   defaultServiceId: config.deployServiceId,
   maxWaitMs: config.deployGracefulWaitMs,
@@ -144,9 +146,6 @@ if (fs.existsSync(config.webDistDir)) {
   app.log.info(`serving web UI from ${config.webDistDir}`);
 }
 
-/** Filled after gateway + deployQueue exist; releases held deploy when idle. */
-const deployDrainHooks: { onIdle: () => void } = { onIdle: () => {} };
-
 const gateway = new AgentGateway(
   store,
   providers,
@@ -166,40 +165,21 @@ const gateway = new AgentGateway(
     maxConcurrentRuns: config.maxConcurrentRuns,
     agentRssLimitMb: config.agentRssLimitMb,
     deployGracefulWaitMs: config.deployGracefulWaitMs,
-    onDeployDrainIdle: () => deployDrainHooks.onIdle(),
   },
   publish,
 );
-
-deployDrainHooks.onIdle = () => {
-  void deployQueue.releaseHeld().then((released) => {
-    if (released) {
-      app.log.info(
-        `deploy-drain: agents idle; released held deploy ${released.requestId} → ${released.deployment}`,
-      );
-    }
-  }).catch((err) => {
-    app.log.warn(
-      `deploy-drain: releaseHeld failed: ${err instanceof Error ? err.message : err}`,
-    );
-  });
-};
-
-deployQueue.setOnWaitTimeoutRelease((status) => {
-  app.log.warn(
-    `deploy-drain: wait timeout; forced release ${status.requestId} → ${status.deployment}`,
-  );
-});
 
 await registerRoutes(app, gateway, providers, {
   dataDir: config.dataDir,
   appVersion: advertisedVersion(),
   resolveAppVersion: advertisedVersion,
   processAppVersion: config.appVersion,
-  deployQueue,
+  deploymentApi,
   gracefulRestart: config.gracefulRestart,
 });
-app.log.info(`deployment API: ${config.deploymentApiUrl} service=${config.deployServiceId}`);
+app.log.info(
+  `deployment API (contract only): ${config.deploymentApiUrl} service=${config.deployServiceId}`,
+);
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
 );

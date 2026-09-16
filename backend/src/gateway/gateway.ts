@@ -39,7 +39,6 @@ import {
 import { readCwdRules } from "../cwd-rules.js";
 import {
   mergeSettings,
-  migrateLegacyDeployment,
   resolvePlanExportDir,
   resolveRuntimeDefaults,
   resolveWorkspaceRoot,
@@ -315,14 +314,7 @@ export class AgentGateway {
     const project = this.store.getProject(projectId);
     if (!project) return undefined;
     const global = this.store.getGlobalSettings();
-    const rawProject = this.store.getProjectSettings(projectId) ?? {};
-    const migrated = migrateLegacyDeployment(
-      rawProject.deployment,
-      project.name,
-    );
-    const projectSettings = migrated
-      ? { ...rawProject, deployment: migrated }
-      : rawProject;
+    const projectSettings = this.store.getProjectSettings(projectId) ?? {};
     const cwd = projectAgentWorkspaceRoot(
       project.name,
       this.effectiveWorkspaceRoot(),

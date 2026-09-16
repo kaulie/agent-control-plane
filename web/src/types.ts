@@ -26,29 +26,11 @@ export interface WorkspaceConfig {
   root?: string;
 }
 
-export interface DeploymentServiceConfig {
-  serviceId: string;
-  gracefulRestart?: boolean;
-  restartNotifyUrl?: string;
-  restartPollUrl?: string;
-}
-
-export interface DeploymentConfig {
-  services?: DeploymentServiceConfig[];
-  /** @deprecated migrated into services[0] */
-  gracefulRestart?: boolean;
-  /** @deprecated migrated into services[0] */
-  restartNotifyUrl?: string;
-  /** @deprecated migrated into services[0] */
-  restartPollUrl?: string;
-}
-
 export interface AppSettings {
   agent?: AgentRulesConfig;
   plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
-  deployment?: DeploymentConfig;
 }
 
 export interface ProjectSettingsView {

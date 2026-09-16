@@ -39,11 +39,9 @@ import {
 import { readCwdRules } from "../cwd-rules.js";
 import {
   mergeSettings,
-  resolvePlanExportDir,
   resolveRuntimeDefaults,
   resolveWorkspaceRoot,
 } from "../settings.js";
-import { exportPlanDocument } from "../plan-export.js";
 import {
   formatPlanAnswerBatchForAgent,
   isPlanDraftText,
@@ -1296,18 +1294,11 @@ export class AgentGateway {
       });
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
-      const globalSettings = this.store.getGlobalSettings();
-      const projectSettings = project
-        ? (this.store.getProjectSettings(project.projectId) ?? {})
-        : {};
-      const effectiveRules = mergeSettings(globalSettings, projectSettings).agent
-        ?.rules;
       const bootstrapText = buildTaskBootstrapText({
         task,
         project,
         events: historyEvents,
         runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
-        effectiveRules,
       });
 
       // No plan-mode guidance is injected into the conversation: read-only
@@ -1345,43 +1336,6 @@ export class AgentGateway {
         modelCalls: result.modelCalls,
         toolCalls: result.toolCalls,
       });
-
-      if (mode === "plan" && result.status === "finished") {
-        const exportDir = resolvePlanExportDir(globalSettings, projectSettings);
-        if (exportDir) {
-          try {
-            const { events: runEvents } = this.store.listEvents(taskId, {
-              limit: 500,
-            });
-            const exported = exportPlanDocument({
-              exportDir,
-              task,
-              project: project ?? undefined,
-              runId,
-              userText: text,
-              runEvents: runEvents.filter((e) => e.runId === runId),
-              runResult: result.result,
-            });
-            persistAndPublish({
-              eventId: newId("evt"),
-              taskId,
-              runId,
-              agentId,
-              timestamp: new Date().toISOString(),
-              eventType: "plan_exported",
-              payload: {
-                path: exported.filePath,
-                fileName: exported.fileName,
-              },
-            });
-          } catch (err) {
-            console.warn(
-              "[plan-export] failed:",
-              err instanceof Error ? err.message : err,
-            );
-          }
-        }
-      }
 
       this.store.updateTaskStatus(
         taskId,

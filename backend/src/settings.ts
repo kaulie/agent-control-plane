@@ -1,10 +1,6 @@
 import type { AppSettings } from "./types.js";
 import { DEFAULT_AGENT_WORKSPACE_ROOT } from "./config.js";
 
-const GLOBAL_RULES_HEADING = "# Global agent rules";
-const PROJECT_RULES_HEADING = "# Project agent rules";
-const SECTION_SEP = "\n\n---\n\n";
-
 export function parseSettings(raw: string | null | undefined): AppSettings {
   if (!raw?.trim()) return {};
   try {
@@ -26,12 +22,6 @@ export function patchSettings(
   patch: AppSettings,
 ): AppSettings {
   const next: AppSettings = { ...existing };
-  if (patch.agent !== undefined) {
-    next.agent = { ...existing.agent, ...patch.agent };
-  }
-  if (patch.plan !== undefined) {
-    next.plan = { ...existing.plan, ...patch.plan };
-  }
   if (patch.runtime !== undefined) {
     const runtime = { ...existing.runtime, ...patch.runtime };
     if (!runtime.defaultProvider?.trim()) {
@@ -59,31 +49,6 @@ export function patchSettings(
     }
   }
   return next;
-}
-
-export function resolvePlanExportDir(
-  global: AppSettings,
-  project: AppSettings,
-): string | undefined {
-  const dir =
-    project.plan?.exportDir?.trim() || global.plan?.exportDir?.trim() || "";
-  return dir || undefined;
-}
-
-export function resolveEffectiveRules(
-  global: AppSettings,
-  project: AppSettings,
-): string {
-  const parts: string[] = [];
-  const globalRules = global.agent?.rules?.trim();
-  const projectRules = project.agent?.rules?.trim();
-  if (globalRules) {
-    parts.push(`${GLOBAL_RULES_HEADING}\n\n${globalRules}`);
-  }
-  if (projectRules) {
-    parts.push(`${PROJECT_RULES_HEADING}\n\n${projectRules}`);
-  }
-  return parts.join(SECTION_SEP);
 }
 
 export function resolveRuntimeDefaults(
@@ -117,10 +82,6 @@ export function mergeSettings(
   project: AppSettings,
 ): AppSettings {
   const out: AppSettings = {};
-  const rules = resolveEffectiveRules(global, project);
-  if (rules) out.agent = { rules };
-  const exportDir = resolvePlanExportDir(global, project);
-  if (exportDir) out.plan = { exportDir };
   const runtime = resolveRuntimeDefaults(global, project);
   if (runtime.defaultProvider || runtime.defaultModel) {
     out.runtime = runtime;

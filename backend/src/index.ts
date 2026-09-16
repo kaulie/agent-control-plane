@@ -213,6 +213,14 @@ try {
     });
   }
 
+  // Queue first: a message that only ever queued (never started) is resumed
+  // from the queue, so the feedback self-check must see it as already owned
+  // instead of firing a second run for the same user message.
+  const recovered = gateway.recoverQueuedRuns();
+  if (recovered > 0) {
+    app.log.info(`[queue] resumed ${recovered} queued message run(s) after restart`);
+  }
+
   void gateway.runPendingSelfChecks().then((n) => {
     if (n > 0) {
       app.log.info(`[self-check] started ${n} pending feedback run(s)`);
@@ -220,11 +228,6 @@ try {
   }).catch((err) => {
     app.log.error({ err }, "self-check startup failed");
   });
-
-  const recovered = gateway.recoverQueuedRuns();
-  if (recovered > 0) {
-    app.log.info(`[queue] resumed ${recovered} queued message run(s) after restart`);
-  }
 } catch (err) {
   app.log.error(err);
   try {

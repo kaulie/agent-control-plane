@@ -17,6 +17,7 @@ const tests = [
   { file: "scripts/test-run-errors.mjs", via: "node" },
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-queue.mjs", via: "node" },
+  { file: "scripts/test-self-check.mjs", via: "node" },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

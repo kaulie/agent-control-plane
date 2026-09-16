@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { DeploymentServiceConfig, ProjectSettingsView } from "../types";
+import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
-import DeploymentSection, {
-  type DeploymentServiceDraft,
-} from "./settings/DeploymentSection";
 import PlanExportSection from "./settings/PlanExportSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
 
@@ -12,35 +9,6 @@ interface Props {
   projectId: string;
   projectName: string;
   onBack: () => void;
-}
-
-function toDrafts(
-  services: DeploymentServiceConfig[] | undefined,
-): DeploymentServiceDraft[] {
-  return (services ?? []).map((s) => ({
-    ...s,
-    key: `svc-${s.serviceId}-${Math.random().toString(36).slice(2, 8)}`,
-  }));
-}
-
-function draftsEqual(
-  a: DeploymentServiceDraft[],
-  b: DeploymentServiceDraft[],
-): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const x = a[i];
-    const y = b[i];
-    if (
-      x.serviceId !== y.serviceId ||
-      Boolean(x.gracefulRestart) !== Boolean(y.gracefulRestart) ||
-      (x.restartNotifyUrl ?? "") !== (y.restartNotifyUrl ?? "") ||
-      (x.restartPollUrl ?? "") !== (y.restartPollUrl ?? "")
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 export default function ProjectSettingsPage({
@@ -57,21 +25,11 @@ export default function ProjectSettingsPage({
   const [savedDefaultProvider, setSavedDefaultProvider] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [savedDefaultModel, setSavedDefaultModel] = useState("");
-  const [services, setServices] = useState<DeploymentServiceDraft[]>([]);
-  const [savedServices, setSavedServices] = useState<DeploymentServiceDraft[]>(
-    [],
-  );
   const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const applyDeploymentFromView = useCallback((data: ProjectSettingsView) => {
-    const drafts = toDrafts(data.project.deployment?.services);
-    setServices(drafts);
-    setSavedServices(drafts);
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,14 +48,13 @@ export default function ProjectSettingsPage({
       setSavedDefaultProvider(data.project.runtime?.defaultProvider ?? "");
       setDefaultModel(data.project.runtime?.defaultModel ?? "");
       setSavedDefaultModel(data.project.runtime?.defaultModel ?? "");
-      applyDeploymentFromView(data);
       if (providers) setEnvDefaultProvider(providers.defaultProvider);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, [projectId, applyDeploymentFromView]);
+  }, [projectId]);
 
   useEffect(() => {
     void load();
@@ -115,27 +72,12 @@ export default function ProjectSettingsPage({
           defaultProvider: defaultProvider.trim(),
           defaultModel: defaultModel.trim(),
         },
-        deployment: {
-          services: services
-            .filter((s) => s.serviceId.trim())
-            .map((s) => ({
-              serviceId: s.serviceId.trim(),
-              gracefulRestart: s.gracefulRestart === true,
-              ...(s.gracefulRestart
-                ? {
-                    restartNotifyUrl: s.restartNotifyUrl?.trim() || "",
-                    restartPollUrl: s.restartPollUrl?.trim() || "",
-                  }
-                : {}),
-            })),
-        },
       });
       setView(data);
       setSavedRules(rules);
       setSavedExportDir(exportDir);
       setSavedDefaultProvider(defaultProvider);
       setSavedDefaultModel(defaultModel);
-      applyDeploymentFromView(data);
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -148,8 +90,7 @@ export default function ProjectSettingsPage({
     rules !== savedRules ||
     exportDir !== savedExportDir ||
     defaultProvider !== savedDefaultProvider ||
-    defaultModel !== savedDefaultModel ||
-    !draftsEqual(services, savedServices);
+    defaultModel !== savedDefaultModel;
   const globalRules = view?.global.agent?.rules ?? "";
   const effectiveRules = view?.effective.agent?.rules ?? "";
   const globalExportDir = view?.global.plan?.exportDir ?? "";
@@ -177,10 +118,6 @@ export default function ProjectSettingsPage({
               setDefaultModel("");
             }}
             onModelChange={setDefaultModel}
-          />
-          <DeploymentSection
-            services={services}
-            onChange={setServices}
           />
           <AgentRulesSection
             title="全局 Agent Rules（只读）"

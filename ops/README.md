@@ -17,5 +17,5 @@ cd agent-control-plane-deployment
 - app 只提供**被动契约**，供平台 graceful restart 使用：
   - `POST /api/ops/restart-notify` — 平台通知开始 drain（暂停启动新任务）
   - `GET /api/ops/restart-status` — 平台轮询；`canRestart` / `ready` / `canDeploy` 任一为 true 即可重启
-- 契约的**登记**（`PUT :4220/api/services/<serviceId>`）由平台侧统一管控，app 不再提供 `POST /api/projects/:id/deployment/register` 与 `GET /api/ops/deployment-services`，也不读 `DEPLOYMENT_API_URL` / `DEPLOY_SERVICE_ID`。
+- 契约的**登记**（`PUT :4220/api/services/<serviceId>`）与项目级 service 列表都由平台侧统一管控，app 不再提供 `POST /api/projects/:id/deployment/register` 与 `GET /api/ops/deployment-services`，也不读 `DEPLOYMENT_API_URL` / `DEPLOY_SERVICE_ID`，项目设置里没有 Deployment 区块。
 

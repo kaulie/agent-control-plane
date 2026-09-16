@@ -229,6 +229,8 @@ export class AgentGateway {
   private static readonly DEFAULT_WINDOW_MS = 30 * 60 * 1000;
   private static readonly HOUR_MS = 60 * 60 * 1000;
   private static readonly DAY_MS = 24 * 60 * 60 * 1000;
+  /** Custom from/to spans are clamped to this (matches the web UI 30-day cap). */
+  private static readonly MAX_RANGE_SPAN_MS = 30 * AgentGateway.DAY_MS;
 
   constructor(
     private store: Store,
@@ -661,6 +663,10 @@ export class AgentGateway {
     if (Number.isFinite(fromRaw) && Number.isFinite(toRaw)) {
       fromMs = Math.min(fromRaw, toRaw);
       toMs = Math.max(fromRaw, toRaw);
+      // Safety net for direct API callers: never scan more than 30 days.
+      if (toMs - fromMs > AgentGateway.MAX_RANGE_SPAN_MS) {
+        fromMs = toMs - AgentGateway.MAX_RANGE_SPAN_MS;
+      }
     } else if (query?.all) {
       const earliest = this.store.getEarliestConcurrencySampleAt();
       const earliestMs = earliest ? Date.parse(earliest) : NaN;

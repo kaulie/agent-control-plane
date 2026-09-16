@@ -7,14 +7,6 @@ export interface Project {
   updatedAt: string;
 }
 
-export interface AgentRulesConfig {
-  rules?: string;
-}
-
-export interface PlanExportConfig {
-  exportDir?: string;
-}
-
 export interface RuntimeConfig {
   defaultProvider?: string;
   defaultModel?: string;
@@ -27,8 +19,6 @@ export interface WorkspaceConfig {
 }
 
 export interface AppSettings {
-  agent?: AgentRulesConfig;
-  plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
 }

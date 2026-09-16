@@ -2,15 +2,6 @@ export type TaskStatus = "active" | "completed" | "error";
 
 export type TaskType = "general";
 
-export interface AgentRulesConfig {
-  rules?: string;
-}
-
-export interface PlanExportConfig {
-  /** Absolute directory; empty/omit = disabled at this level. */
-  exportDir?: string;
-}
-
 /** Per-project (or global) defaults for which agent runtime to use. */
 export interface RuntimeConfig {
   /** Provider name (`cursor` | `cline`). Empty = fall back to AGENT_PROVIDER. */
@@ -26,8 +17,6 @@ export interface WorkspaceConfig {
 }
 
 export interface AppSettings {
-  agent?: AgentRulesConfig;
-  plan?: PlanExportConfig;
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
 }

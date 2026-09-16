@@ -9,7 +9,6 @@ import {
   validateIncomingImages,
   type IncomingImage,
 } from "../attachments.js";
-import type { DeploymentApiClient } from "../ops/deployment-api.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -22,8 +21,6 @@ export async function registerRoutes(
     resolveAppVersion?: () => string;
     /** Version baked into the running gateway process (env APP_VERSION). */
     processAppVersion?: string;
-    /** Contract-side client for the independent deployment service. */
-    deploymentApi: DeploymentApiClient;
     /**
      * When true (default), `/api/ops/restart-notify` pauses starting new runs
      * until the running agents finish (graceful restart by the platform).
@@ -225,84 +222,6 @@ export async function registerRoutes(
     } catch (err) {
       return reply
         .code(400)
-        .send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  /**
-   * Persist one deployment service on the project and push graceful URLs to the
-   * independent deployment service contract (PUT /api/services/:serviceId).
-   */
-  app.post<{
-    Params: { projectId: string };
-    Body: {
-      serviceId?: string;
-      gracefulRestart?: boolean;
-      restartNotifyUrl?: string;
-      restartPollUrl?: string;
-    };
-  }>("/api/projects/:projectId/deployment/register", async (req, reply) => {
-    try {
-      const project = gateway.getProject(req.params.projectId);
-      if (!project) {
-        return reply.code(404).send({ error: "project not found" });
-      }
-
-      const serviceId = req.body?.serviceId?.trim() || "";
-      if (!serviceId) {
-        return reply.code(400).send({ error: "serviceId is required" });
-      }
-
-      const gracefulRestart = req.body?.gracefulRestart === true;
-      const view = gateway.upsertProjectDeploymentService(req.params.projectId, {
-        serviceId,
-        gracefulRestart,
-        ...(gracefulRestart
-          ? {
-              restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
-              restartPollUrl: req.body?.restartPollUrl?.trim() || "",
-            }
-          : {}),
-      });
-      if (!view) {
-        return reply.code(404).send({ error: "project not found" });
-      }
-
-      const service = await opts.deploymentApi.registerServiceGraceful({
-        serviceId,
-        gracefulRestart,
-        ...(gracefulRestart
-          ? {
-              restartNotifyUrl: req.body?.restartNotifyUrl?.trim() || "",
-              restartPollUrl: req.body?.restartPollUrl?.trim() || "",
-              gracefulRestartMaxWaitMs: opts.deploymentApi.maxWaitMs,
-            }
-          : {}),
-      });
-
-      return {
-        ok: true,
-        serviceId,
-        settings: view,
-        service,
-        message: gracefulRestart
-          ? `已登记到部署服务 ${serviceId}（graceful）`
-          : `已登记到部署服务 ${serviceId}（直接重启，已清空 notify/poll）`,
-      };
-    } catch (err) {
-      return reply
-        .code(400)
-        .send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  app.get("/api/ops/deployment-services", async (_req, reply) => {
-    try {
-      const services = await opts.deploymentApi.listServices();
-      return { services };
-    } catch (err) {
-      return reply
-        .code(502)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });

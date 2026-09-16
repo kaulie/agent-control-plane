@@ -14,16 +14,8 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
-import { DeploymentApiClient } from "./ops/deployment-api.js";
 
 const config = loadConfig();
-// Contract-side client only: deploys are triggered from the deployment platform,
-// never from this app.
-const deploymentApi = new DeploymentApiClient({
-  apiUrl: config.deploymentApiUrl,
-  defaultServiceId: config.deployServiceId,
-  maxWaitMs: config.deployGracefulWaitMs,
-});
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
 function advertisedVersion(): string {
   return readRuntimeVersion(config.productRoot) ?? config.appVersion;
@@ -174,12 +166,8 @@ await registerRoutes(app, gateway, providers, {
   appVersion: advertisedVersion(),
   resolveAppVersion: advertisedVersion,
   processAppVersion: config.appVersion,
-  deploymentApi,
   gracefulRestart: config.gracefulRestart,
 });
-app.log.info(
-  `deployment API (contract only): ${config.deploymentApiUrl} service=${config.deployServiceId}`,
-);
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
 );

@@ -160,22 +160,6 @@ export function normalizeDeploymentConfig(
   };
 }
 
-/** Upsert one service into a deployment config (by serviceId). */
-export function upsertDeploymentService(
-  existing: DeploymentConfig | undefined,
-  service: DeploymentServiceConfig,
-  fallbackServiceId = "default",
-): DeploymentConfig {
-  const normalized = normalizeDeploymentService(service);
-  const current =
-    migrateLegacyDeployment(existing, fallbackServiceId)?.services ?? [];
-  const id = normalized.serviceId.toLowerCase();
-  const next = current.filter((s) => s.serviceId.toLowerCase() !== id);
-  next.push(normalized);
-  next.sort((a, b) => a.serviceId.localeCompare(b.serviceId));
-  return { services: next };
-}
-
 export function parseSettings(raw: string | null | undefined): AppSettings {
   if (!raw?.trim()) return {};
   try {

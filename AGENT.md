@@ -58,7 +58,7 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
 
 App 侧**没有部署入口**，只提供平台回调的 graceful 契约。
 
-环境变量（app）：`DEPLOYMENT_API_URL`、`DEPLOY_SERVICE_ID`、`GRACEFUL_RESTART`、`DEPLOY_GRACEFUL_WAIT_MS`。
+环境变量（app）：`GRACEFUL_RESTART`、`DEPLOY_GRACEFUL_WAIT_MS`。
 
 **项目方 graceful 契约（部署服务回调）：**
 
@@ -67,7 +67,7 @@ App 侧**没有部署入口**，只提供平台回调的 graceful 契约。
 | `POST` | `http://127.0.0.1:4211/api/ops/restart-notify` | 开始 drain（`admissionPaused`） |
 | `GET` | `http://127.0.0.1:4211/api/ops/restart-status` | 轮询；`canRestart`/`canDeploy`/`ready` 任一为 true 即可重启 |
 
-登记到部署服务（部署服务支持这些字段后）：
+登记到部署服务由**部署平台侧统一管控**（app 不再调用 `:4220/api/services/:id`，也不再提供 `GET /api/ops/deployment-services`）。需要手工登记时：
 
 ```bash
 curl -sS -X PUT http://127.0.0.1:4220/api/services/web-cursor \

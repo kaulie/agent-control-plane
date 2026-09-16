@@ -67,13 +67,6 @@ export interface Config {
   gitViaProxyMcp: boolean;
   /** Absolute path to mcp-servers/git-via-proxy/server.mjs */
   gitViaProxyServerPath: string;
-  /**
-   * Independent deployment HTTP API base URL
-   * (default http://127.0.0.1:4220).
-   */
-  deploymentApiUrl: string;
-  /** Service contract id registered in deployment SQLite (default web-cursor). */
-  deployServiceId: string;
   /** Global cap on concurrent agent runs across all tasks/providers. */
   maxConcurrentRuns: number;
   /**
@@ -184,12 +177,6 @@ export function loadConfig(): Config {
     gitViaProxyShell,
     gitViaProxyMcp,
     gitViaProxyServerPath,
-    deploymentApiUrl: (
-      process.env.DEPLOYMENT_API_URL?.trim() ||
-      "http://127.0.0.1:4220"
-    ).replace(/\/$/, ""),
-    deployServiceId:
-      process.env.DEPLOY_SERVICE_ID?.trim() || "web-cursor",
     maxConcurrentRuns: Math.max(
       1,
       Number(process.env.AGENT_MAX_CONCURRENT_RUNS || 2),

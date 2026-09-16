@@ -30,6 +30,8 @@ import { buildTaskBootstrapText } from "../task-context.js";
 import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
+  isUnclosedCause,
+  type UnclosedCause,
 } from "../feedback.js";
 import {
   CANONICAL_DEV_REPO,
@@ -87,7 +89,7 @@ export interface SendMessageInput {
   /** Structured answers to a plan_question_batch (plan mode). */
   planAnswerBatch?: PlanAnswerBatch;
   /** Startup self-check for a run that never received terminal feedback. */
-  selfCheck?: { resumesRunId: string };
+  selfCheck?: { resumesRunId: string; cause?: UnclosedCause };
 }
 
 export interface TaskDetail {
@@ -103,7 +105,7 @@ interface PendingRun {
   imageRefs: StoredImageRef[];
   mode: "agent" | "plan";
   planAnswerBatch?: PlanAnswerBatch;
-  selfCheck?: { resumesRunId: string };
+  selfCheck?: { resumesRunId: string; cause?: UnclosedCause };
 }
 
 export interface SendMessageResult {
@@ -950,7 +952,12 @@ export class AgentGateway {
     );
     const selfCheck =
       p.selfCheck === true && typeof p.resumesRunId === "string"
-        ? { resumesRunId: p.resumesRunId }
+        ? {
+            resumesRunId: p.resumesRunId,
+            ...(isUnclosedCause(p.selfCheckCause)
+              ? { cause: p.selfCheckCause }
+              : {}),
+          }
         : undefined;
     const planAnswerBatch =
       p.planAnswerBatch && typeof p.planAnswerBatch === "object"
@@ -1032,7 +1039,7 @@ export class AgentGateway {
       mode: "agent" | "plan";
       imageRefs: StoredImageRef[];
       planAnswerBatch?: PlanAnswerBatch;
-      selfCheck?: { resumesRunId: string };
+      selfCheck?: { resumesRunId: string; cause?: UnclosedCause };
       queued?: boolean;
     },
     persistAndPublish: (event: AgentEvent) => void,
@@ -1046,6 +1053,7 @@ export class AgentGateway {
     if (input.selfCheck) {
       payload.selfCheck = true;
       payload.resumesRunId = input.selfCheck.resumesRunId;
+      if (input.selfCheck.cause) payload.selfCheckCause = input.selfCheck.cause;
     }
     if (input.imageRefs.length) {
       payload.images = input.imageRefs.map((ref) => ({
@@ -1412,23 +1420,43 @@ export class AgentGateway {
   }
 
   /**
+   * True while this process still owns the run: it is the active run of the
+   * task, or it is sitting in this process's in-memory queue. Such a run will
+   * produce its own terminal outcome, so a self-check would be a duplicate run
+   * of the same user message.
+   */
+  private ownsRun(taskId: string, runId: string): boolean {
+    if (this.activeRuns.get(taskId)?.runId === runId) return true;
+    return (this.pendingRuns.get(taskId) ?? []).some((p) => p.runId === runId);
+  }
+
+  /**
    * After restart: any user message whose run lacks terminal feedback
    * (e.g. server_restart cancel) gets an automatic self-check run.
+   *
+   * Must run *after* `recoverQueuedRuns()`: a message that never started is
+   * resumed by the queue, and must not be answered twice.
    */
   async runPendingSelfChecks(): Promise<number> {
     const pending = findTasksNeedingSelfCheck(this.store);
     let started = 0;
     for (const { taskId, unclosed } of pending) {
+      if (this.ownsRun(taskId, unclosed.runId)) {
+        console.warn(
+          `[self-check] task ${taskId}: skip run ${unclosed.runId} (cause=${unclosed.cause}) — still owned by this process (active run / queue)`,
+        );
+        continue;
+      }
       const text = buildSelfCheckPrompt(unclosed);
       try {
         await this.sendMessage(taskId, {
           text,
           mode: "agent",
-          selfCheck: { resumesRunId: unclosed.runId },
+          selfCheck: { resumesRunId: unclosed.runId, cause: unclosed.cause },
         });
         started += 1;
         console.warn(
-          `[self-check] task ${taskId}: resuming feedback for run ${unclosed.runId}`,
+          `[self-check] task ${taskId}: resuming feedback for run ${unclosed.runId} (cause=${unclosed.cause})`,
         );
       } catch (err) {
         console.warn(

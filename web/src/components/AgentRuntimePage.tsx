@@ -43,6 +43,10 @@ const RANGE_OPTIONS: RangeOption[] = [
   { key: "custom", label: "自定义", custom: true },
 ];
 
+const DAY_MS = 24 * 60 * 60_000;
+/** Hard cap for the custom timeline span (backend clamps to the same limit). */
+const MAX_CUSTOM_SPAN_MS = 30 * DAY_MS;
+
 const GRANULARITY_LABEL: Record<ConcurrencyGranularity, string> = {
   raw: "原始采样",
   minute: "按分钟聚合",
@@ -190,19 +194,79 @@ function buildPolyline(
   return { points, area };
 }
 
+type RangeQuery = { windowMs: number } | { from: string; to: string };
+type RangeQueryResult = { query: RangeQuery } | { error: string };
+
+function formatSpanDays(spanMs: number): string {
+  return String(Math.max(1, Math.ceil(spanMs / DAY_MS)));
+}
+
 function buildQuery(
   rangeKey: string,
   customFrom: string,
   customTo: string,
-): { windowMs: number } | { from: string; to: string } | null {
+): RangeQueryResult {
   const opt = RANGE_OPTIONS.find((o) => o.key === rangeKey) ?? RANGE_OPTIONS[1];
   if (opt.custom) {
     const from = localInputToIso(customFrom);
     const to = localInputToIso(customTo);
-    if (!from || !to) return null;
-    return { from, to };
+    if (!from || !to) return { error: "请填写有效的自定义起止时间" };
+    const fromMs = Date.parse(from);
+    const toMs = Date.parse(to);
+    if (toMs <= fromMs) return { error: "自定义结束时间必须晚于开始时间" };
+    const spanMs = toMs - fromMs;
+    if (spanMs > MAX_CUSTOM_SPAN_MS) {
+      return {
+        error: `自定义时间轴跨度不能超过 30 天（当前约 ${formatSpanDays(spanMs)} 天）`,
+      };
+    }
+    return { query: { from, to } };
   }
-  return { windowMs: opt.ms ?? 30 * 60_000 };
+  return { query: { windowMs: opt.ms ?? 30 * 60_000 } };
+}
+
+/** Local `datetime-local` bounds that keep the custom picker inside the cap. */
+function customBounds(fromLocal: string, toLocal: string): {
+  fromMin?: string;
+  fromMax?: string;
+  toMin?: string;
+  toMax?: string;
+} {
+  const fromIso = localInputToIso(fromLocal);
+  const toIso = localInputToIso(toLocal);
+  const fromMs = fromIso ? Date.parse(fromIso) : NaN;
+  const toMs = toIso ? Date.parse(toIso) : NaN;
+  return {
+    ...(Number.isFinite(toMs)
+      ? {
+          fromMax: isoToLocalInput(new Date(toMs).toISOString()),
+          fromMin: isoToLocalInput(new Date(toMs - MAX_CUSTOM_SPAN_MS).toISOString()),
+        }
+      : {}),
+    ...(Number.isFinite(fromMs)
+      ? {
+          toMin: isoToLocalInput(new Date(fromMs).toISOString()),
+          toMax: isoToLocalInput(new Date(fromMs + MAX_CUSTOM_SPAN_MS).toISOString()),
+        }
+      : {}),
+  };
+}
+
+/** Human-readable span of the current custom range, for the toolbar hint. */
+function customSpanLabel(fromLocal: string, toLocal: string): string | null {
+  const fromIso = localInputToIso(fromLocal);
+  const toIso = localInputToIso(toLocal);
+  if (!fromIso || !toIso) return null;
+  const spanMs = Date.parse(toIso) - Date.parse(fromIso);
+  if (!Number.isFinite(spanMs) || spanMs <= 0) return null;
+  const days = spanMs / DAY_MS;
+  if (days < 1) {
+    const hours = spanMs / (60 * 60_000);
+    return hours >= 1
+      ? `跨度约 ${Math.round(hours * 10) / 10} 小时`
+      : `跨度约 ${Math.round(spanMs / 60_000)} 分钟`;
+  }
+  return `跨度约 ${Math.round(days * 10) / 10} 天`;
 }
 
 /** Live elapsed time since a slot was occupied (ticks every second). */
@@ -276,16 +340,16 @@ export function AgentRuntimePage({ onBack }: Props) {
     let timer: ReturnType<typeof setInterval> | undefined;
 
     const load = (): void => {
-      const query = buildQuery(rangeKey, customFrom, customTo);
-      if (!query) {
+      const result = buildQuery(rangeKey, customFrom, customTo);
+      if ("error" in result) {
         if (!cancelled) {
-          setError("请填写有效的自定义起止时间");
+          setError(result.error);
           setLoading(false);
         }
         return;
       }
       api
-        .getAgentRuntime(query)
+        .getAgentRuntime(result.query)
         .then((res) => {
           if (cancelled) return;
           setData(res);
@@ -384,15 +448,19 @@ export function AgentRuntimePage({ onBack }: Props) {
   const axisStart = new Date(windowStartMs).toISOString();
   const axisEnd = new Date(windowEndMs).toISOString();
 
+  const customRangeBounds = customBounds(customFrom, customTo);
+  const customRangeSpanLabel =
+    rangeKey === "custom" ? customSpanLabel(customFrom, customTo) : null;
+
   const refreshNow = (): void => {
-    const query = buildQuery(rangeKey, customFrom, customTo);
-    if (!query) {
-      setError("请填写有效的自定义起止时间");
+    const result = buildQuery(rangeKey, customFrom, customTo);
+    if ("error" in result) {
+      setError(result.error);
       return;
     }
     setLoading(true);
     api
-      .getAgentRuntime(query)
+      .getAgentRuntime(result.query)
       .then((res) => {
         setData(res);
         setChartNowMs(Date.now());
@@ -473,6 +541,9 @@ export function AgentRuntimePage({ onBack }: Props) {
               <input
                 type="datetime-local"
                 value={customFrom}
+                min={customRangeBounds.fromMin}
+                max={customRangeBounds.fromMax}
+                title="自定义时间轴跨度上限 30 天"
                 onChange={(e) => setCustomFrom(e.target.value)}
               />
             </label>
@@ -481,9 +552,16 @@ export function AgentRuntimePage({ onBack }: Props) {
               <input
                 type="datetime-local"
                 value={customTo}
+                min={customRangeBounds.toMin}
+                max={customRangeBounds.toMax}
+                title="自定义时间轴跨度上限 30 天"
                 onChange={(e) => setCustomTo(e.target.value)}
               />
             </label>
+            <span className="runtime-custom-hint" role="note">
+              跨度上限 30 天
+              {customRangeSpanLabel ? ` · ${customRangeSpanLabel}` : ""}
+            </span>
           </>
         ) : null}
         <button type="button" className="runtime-refresh-now" onClick={refreshNow}>
@@ -496,6 +574,7 @@ export function AgentRuntimePage({ onBack }: Props) {
         满载率 = 当前并发 ÷ 上限。所选时间轴内另给出峰值 / 平均满载率。
         曲线来自 SQLite 全量持久化采样（约每 15 秒一点，永不删除）。
         时间轴超过 1 小时按分钟聚合峰值，超过 24 小时按小时聚合峰值。
+        自定义时间轴的跨度上限为 30 天。
       </p>
 
       {data?.admissionPaused ? (

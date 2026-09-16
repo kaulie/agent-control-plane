@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
-import PlanExportSection from "./settings/PlanExportSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
 
 interface Props {
@@ -17,10 +16,6 @@ export default function ProjectSettingsPage({
   onBack,
 }: Props) {
   const [view, setView] = useState<ProjectSettingsView | null>(null);
-  const [rules, setRules] = useState("");
-  const [savedRules, setSavedRules] = useState("");
-  const [exportDir, setExportDir] = useState("");
-  const [savedExportDir, setSavedExportDir] = useState("");
   const [defaultProvider, setDefaultProvider] = useState("");
   const [savedDefaultProvider, setSavedDefaultProvider] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
@@ -40,10 +35,6 @@ export default function ProjectSettingsPage({
         api.listProviders().catch(() => null),
       ]);
       setView(data);
-      setRules(data.project.agent?.rules ?? "");
-      setSavedRules(data.project.agent?.rules ?? "");
-      setExportDir(data.project.plan?.exportDir ?? "");
-      setSavedExportDir(data.project.plan?.exportDir ?? "");
       setDefaultProvider(data.project.runtime?.defaultProvider ?? "");
       setSavedDefaultProvider(data.project.runtime?.defaultProvider ?? "");
       setDefaultModel(data.project.runtime?.defaultModel ?? "");
@@ -66,16 +57,12 @@ export default function ProjectSettingsPage({
     setNotice(null);
     try {
       const data = await api.updateProjectSettings(projectId, {
-        agent: { rules },
-        plan: { exportDir: exportDir.trim() || undefined },
         runtime: {
           defaultProvider: defaultProvider.trim(),
           defaultModel: defaultModel.trim(),
         },
       });
       setView(data);
-      setSavedRules(rules);
-      setSavedExportDir(exportDir);
       setSavedDefaultProvider(defaultProvider);
       setSavedDefaultModel(defaultModel);
       setNotice("已保存");
@@ -87,14 +74,8 @@ export default function ProjectSettingsPage({
   };
 
   const dirty =
-    rules !== savedRules ||
-    exportDir !== savedExportDir ||
     defaultProvider !== savedDefaultProvider ||
     defaultModel !== savedDefaultModel;
-  const globalRules = view?.global.agent?.rules ?? "";
-  const effectiveRules = view?.effective.agent?.rules ?? "";
-  const globalExportDir = view?.global.plan?.exportDir ?? "";
-  const effectiveExportDir = view?.effective.plan?.exportDir ?? "";
 
   return (
     <div className="settings-page">
@@ -118,50 +99,6 @@ export default function ProjectSettingsPage({
               setDefaultModel("");
             }}
             onModelChange={setDefaultModel}
-          />
-          <AgentRulesSection
-            title="全局 Agent Rules（只读）"
-            description="继承自全局设置，在本项目中作为基础规则。"
-            value={globalRules}
-            mode="readonly"
-          />
-          <AgentRulesSection
-            title="项目 Agent Rules"
-            description="仅作用于当前项目；与全局规则合并后生效（项目段落在后，优先级更高）。"
-            value={rules}
-            mode="edit"
-            onChange={setRules}
-          />
-          <AgentRulesSection
-            title="生效预览"
-            description="合并后的规则（全局 + 项目）。"
-            value={
-              dirty ? buildRulesPreview(globalRules, rules) : effectiveRules
-            }
-            mode="preview"
-          />
-          <PlanExportSection
-            title="全局 Plan 导出目录（只读）"
-            description="继承自全局设置；项目未配置时使用。"
-            value={globalExportDir}
-            mode="readonly"
-          />
-          <PlanExportSection
-            title="项目 Plan 导出目录"
-            description="留空则使用全局目录；填写则覆盖全局。"
-            value={exportDir}
-            mode="edit"
-            onChange={setExportDir}
-          />
-          <PlanExportSection
-            title="生效导出目录"
-            description="实际用于 Plan 文档导出的目录。"
-            value={
-              exportDir !== savedExportDir
-                ? exportDir.trim() || globalExportDir
-                : effectiveExportDir
-            }
-            mode="preview"
           />
           {view?.cwdRules && (
             <AgentRulesSection
@@ -194,13 +131,4 @@ export default function ProjectSettingsPage({
       )}
     </div>
   );
-}
-
-function buildRulesPreview(globalRules: string, projectRules: string): string {
-  const parts: string[] = [];
-  const g = globalRules.trim();
-  const p = projectRules.trim();
-  if (g) parts.push(`# Global agent rules\n\n${g}`);
-  if (p) parts.push(`# Project agent rules\n\n${p}`);
-  return parts.join("\n\n---\n\n");
 }

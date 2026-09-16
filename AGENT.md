@@ -67,7 +67,7 @@ App 侧**没有部署入口**，只提供平台回调的 graceful 契约。
 | `POST` | `http://127.0.0.1:4211/api/ops/restart-notify` | 开始 drain（`admissionPaused`） |
 | `GET` | `http://127.0.0.1:4211/api/ops/restart-status` | 轮询；`canRestart`/`canDeploy`/`ready` 任一为 true 即可重启 |
 
-登记到部署服务由**部署平台侧统一管控**（app 不再调用 `:4220/api/services/:id`，也不再提供 `GET /api/ops/deployment-services`）。需要手工登记时：
+登记到部署服务由**部署平台侧统一管控**（app 不再调用 `:4220/api/services/:id`，不再提供 `GET /api/ops/deployment-services`，项目设置里也不再保存 service 列表）。需要手工登记时：
 
 ```bash
 curl -sS -X PUT http://127.0.0.1:4220/api/services/web-cursor \

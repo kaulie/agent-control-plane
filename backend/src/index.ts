@@ -14,6 +14,13 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
+import {
+  buildShutdownReport,
+  formatPreviousExit,
+  formatShutdownLog,
+  readPreviousExit,
+  readPreviousShutdown,
+} from "./shutdown.js";
 
 const config = loadConfig();
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
@@ -22,6 +29,19 @@ function advertisedVersion(): string {
 }
 const runningFlag = path.join(config.dataDir, "running.flag");
 const crashed = fs.existsSync(runningFlag);
+
+/**
+ * Restart attribution: `node-exit.status` is written by supervise-node.sh and
+ * `last-shutdown.json` by our own shutdown handler, so both "how did the
+ * previous process die" and "why is this one going away" are recorded.
+ */
+const startedAt = Date.now();
+const backendDir = path.dirname(config.dataDir);
+const exitStatusFile = path.join(backendDir, "node-exit.status");
+const lastShutdownFile = path.join(config.dataDir, "last-shutdown.json");
+const previousExit = readPreviousExit(exitStatusFile);
+const previousShutdown = readPreviousShutdown(lastShutdownFile);
+console.log(formatPreviousExit(previousExit, { crashFlagPresent: crashed }));
 
 const crashReportDir = path.join(config.dataDir, "crash-reports");
 function writeCrashReport(kind: string, err: unknown): void {
@@ -167,6 +187,8 @@ await registerRoutes(app, gateway, providers, {
   resolveAppVersion: advertisedVersion,
   processAppVersion: config.appVersion,
   gracefulRestart: config.gracefulRestart,
+  processStartedAt: startedAt,
+  previousShutdown,
 });
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
@@ -239,16 +261,76 @@ try {
   process.exit(1);
 }
 
-const shutdown = (): void => {
+let shuttingDown = false;
+
+/** One bad step must never block a restart: log it and keep going. */
+function bestEffort(step: string, fn: () => void): void {
   try {
-    fs.rmSync(runningFlag, { force: true });
-  } catch {
-    /* ignore */
+    fn();
+  } catch (err) {
+    console.warn(
+      `[shutdown] ${step} failed:`,
+      err instanceof Error ? err.message : err,
+    );
   }
-  gateway.stopRuntimeGuards();
-  providers.dispose();
-  store.close();
-  app.close().then(() => process.exit(0));
+}
+
+const shutdown = (signal: NodeJS.Signals): void => {
+  if (shuttingDown) {
+    console.warn(`[shutdown] ${signal} ignored — already shutting down`);
+    return;
+  }
+  shuttingDown = true;
+
+  // Attribution: a SIGTERM *without* a platform drain is an external kill
+  // (`kill <pid>`, another repo's stop.sh, …) — the case that used to leave no
+  // trace at all in server.log.
+  let drainRequested = false;
+  let runningCount = 0;
+  let queuedCount = 0;
+  try {
+    const snap = gateway.getRestartStatus();
+    drainRequested = snap.admissionPaused;
+    runningCount = snap.runningCount;
+    queuedCount = snap.queuedCount;
+  } catch {
+    /* shutdown must not depend on the gateway being healthy */
+  }
+  const report = buildShutdownReport({
+    signal,
+    pid: process.pid,
+    ppid: process.ppid,
+    startedAt,
+    drainRequested,
+    runningCount,
+    queuedCount,
+  });
+  console.warn(formatShutdownLog(report));
+  bestEffort("write last-shutdown.json", () => {
+    fs.mkdirSync(config.dataDir, { recursive: true });
+    fs.writeFileSync(lastShutdownFile, JSON.stringify(report, null, 2));
+  });
+  bestEffort("remove running.flag", () => fs.rmSync(runningFlag, { force: true }));
+  bestEffort("stop runtime guards", () => gateway.stopRuntimeGuards());
+  bestEffort("dispose providers", () => providers.dispose());
+  bestEffort("close store", () => store.close());
+
+  // Never let a hanging close() look like an outage: bounded exit.
+  const forced = setTimeout(() => {
+    console.warn("[shutdown] app.close() did not settle; exiting anyway");
+    process.exit(0);
+  }, 5000);
+  forced.unref();
+  app.close()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.warn("[shutdown] app.close failed:", err);
+      process.exit(0);
+    });
 };
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+
+// SIGHUP too: supervise-node.sh forwards HUP, and the default disposition kills
+// node without cleanup (leaving running.flag → bogus "crashed" detection).
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => shutdown(signal));
+}

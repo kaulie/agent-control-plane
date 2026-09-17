@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings } from "../types.js";
+import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import {
   resolveAttachmentPath,
@@ -26,6 +27,10 @@ export async function registerRoutes(
      * until the running agents finish (graceful restart by the platform).
      */
     gracefulRestart?: boolean;
+    /** Started-at (ms epoch) of this process — /health reports uptime/pid. */
+    processStartedAt?: number;
+    /** How the previous process exited, when it got the chance to record it. */
+    previousShutdown?: ShutdownReport | null;
   },
 ): Promise<void> {
   const gracefulRestart = opts.gracefulRestart !== false;
@@ -44,6 +49,16 @@ export async function registerRoutes(
       version: v,
       processVersion: opts.processAppVersion ?? opts.appVersion,
       time: new Date().toISOString(),
+      // Restart observability: which process answers, since when, and how its
+      // predecessor died (set only when that process recorded a shutdown).
+      pid: process.pid,
+      startedAt: opts.processStartedAt
+        ? new Date(opts.processStartedAt).toISOString()
+        : null,
+      uptimeSec: opts.processStartedAt
+        ? Math.max(0, Math.round((Date.now() - opts.processStartedAt) / 1000))
+        : null,
+      previousShutdown: opts.previousShutdown ?? null,
     };
   });
 

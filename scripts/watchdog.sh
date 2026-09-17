@@ -12,7 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-/Users/gaolei/runtime/web-cursor}"
 BACKEND_DIR="${RUNTIME_DIR}/backend"
 PAUSED_FLAG="${BACKEND_DIR}/.watchdog-paused"
-PORT="${PORT:-4211}"
+# 与 start.sh 同一套端口解析：SERVICE_PORT → PORT → 4211。
+PORT="${SERVICE_PORT:-${PORT:-4211}}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 INTERVAL="${INTERVAL:-10}"
 

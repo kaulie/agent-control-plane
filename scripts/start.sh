@@ -13,7 +13,9 @@ REPORT_DIR="${BACKEND_DIR}/reports"
 LOG_FILE="${BACKEND_DIR}/server.log"
 LOG_MAX_BYTES="${LOG_MAX_BYTES:-10485760}"   # 10 MiB
 LOG_BACKUPS="${LOG_BACKUPS:-5}"
-PORT="${PORT:-4211}"
+# 监听端口：SERVICE_PORT（部署平台约定）→ PORT（兼容旧用法）→ 4211（线上默认）。
+PORT="${SERVICE_PORT:-${PORT:-4211}}"
+export PORT   # 让 node 子进程与健康检查/端口清理使用同一个端口
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 PAUSED_FLAG="${BACKEND_DIR}/.watchdog-paused"
 

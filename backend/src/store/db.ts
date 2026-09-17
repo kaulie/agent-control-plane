@@ -520,6 +520,7 @@ export class Store {
       projectId: newId("project"),
       name: trimmed,
       ...(gitRepoUrl ? { gitRepoUrl } : {}),
+      ...(department ? { department } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -636,10 +637,13 @@ export class Store {
 
   private toProject(r: ProjectRow): Project {
     const gitRepoUrl = r.git_repo_url?.trim();
+    // 部门住在 settings_json 里：列表/详情一起带上，左栏才能显示“项目所在的部门”。
+    const department = normalizeDepartment(parseSettings(r.settings_json).department);
     return {
       projectId: r.project_id,
       name: r.name,
       ...(gitRepoUrl ? { gitRepoUrl } : {}),
+      ...(department ? { department } : {}),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

@@ -69,6 +69,11 @@ export interface Project {
   name: string;
   /** Git remote/clone URL for this project (https, ssh, or local path). */
   gitRepoUrl?: string;
+  /**
+   * 项目自己的所属部门（存在 `projects.settings_json` 里）。新建项目时必填；
+   * 在这条规则之前建的老项目可能为空，此时不返回该字段。
+   */
+  department?: DepartmentConfig;
   createdAt: string;
   updatedAt: string;
 }

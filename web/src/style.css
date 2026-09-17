@@ -173,6 +173,16 @@ body {
   white-space: nowrap;
 }
 
+/* 左栏「所属部门」：不是路径，用正文字体 + 正常亮度；未设置时标黄。 */
+.project-workspace-dept {
+  font-family: inherit;
+  color: var(--text);
+}
+
+.project-workspace-dept.is-empty {
+  color: var(--amber);
+}
+
 .icon-btn {
   flex-shrink: 0;
   width: 34px;
@@ -1553,6 +1563,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 必填标记（新建项目 → 所属部门）。 */
+.field-required {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--red);
+  font-size: 10px;
+  line-height: 16px;
+  vertical-align: 1px;
 }
 
 /* 小窗口下弹框仍然完整可见（居中靠 .modal-backdrop 的 flex 居中）。 */

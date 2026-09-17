@@ -2,6 +2,9 @@
  * Store-level checks: a project created with a department keeps it (the pick is
  * stored in the project's `settings_json`, so it must land with the same insert).
  *
+ * 「部门必填」是 HTTP 层的规则（见 test-project-api.mjs）；store 这一层保持宽松，
+ * 因为默认项目 / 系统项目以及测试都直接调 store，没有部门的概念。
+ *
  * Usage: npm run build --workspace backend && node backend/scripts/test-project-department.mjs
  */
 import assert from "node:assert/strict";
@@ -23,10 +26,21 @@ assert.deepEqual(store.getProjectSettings(withDepartment.projectId)?.department,
   departmentId: "D0001",
   departmentName: "SRE部门",
 });
+// 列表 / 详情也带部门（左栏「所属部门」直接读项目对象）。
+assert.deepEqual(store.getProject(withDepartment.projectId)?.department, {
+  departmentId: "D0001",
+  departmentName: "SRE部门",
+});
+assert.deepEqual(
+  store.listProjects().find((p) => p.projectId === withDepartment.projectId)?.department,
+  { departmentId: "D0001", departmentName: "SRE部门" },
+);
 
 // 2) 不带部门 => settings 里没有 department 字段（而不是空对象）。
 const plain = store.createProject("Plain Project");
 assert.equal(store.getProjectSettings(plain.projectId)?.department, undefined);
+// 同一个项目从列表里读出来也没有 department（左栏显示「（未设置）」）。
+assert.equal(store.getProject(plain.projectId)?.department, undefined);
 
 // 3) 空字符串 / 只有空白 => 视为未设置，不会写入空部门。
 const empty = store.createProject("Empty Department", {

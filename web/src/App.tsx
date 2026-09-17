@@ -333,7 +333,9 @@ export default function App() {
           void refreshTasks();
         } else if (
           msg.type === "project_created" ||
-          msg.type === "project_updated"
+          msg.type === "project_updated" ||
+          // 部门是通过项目设置改的；左栏要显示它，所以也刷新项目列表。
+          msg.type === "project_settings_updated"
         ) {
           void refreshProjects();
         }

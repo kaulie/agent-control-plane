@@ -3,6 +3,8 @@ export interface Project {
   name: string;
   /** Git remote/clone URL for this project. */
   gitRepoUrl?: string;
+  /** 项目自己的所属部门（新建时必填；老项目可能没有）。 */
+  department?: DepartmentConfig;
   createdAt: string;
   updatedAt: string;
 }

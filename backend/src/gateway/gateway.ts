@@ -8,6 +8,7 @@ import type {
   AgentEvent,
   AgentSuccession,
   AgentSuccessionReason,
+  AgentTimeline,
   AppSettings,
   DepartmentConfig,
   Project,
@@ -62,6 +63,12 @@ import {
   collectDecisionEvents,
   type DecisionContext,
 } from "../decisions/index.js";
+import {
+  agentTimelineNote,
+  buildAgentTimeline,
+  DEFAULT_STALL_MS,
+  type TimelineRunRow,
+} from "../timeline.js";
 
 export type Publish = (message: Record<string, unknown>) => void;
 
@@ -314,6 +321,8 @@ export class AgentGateway {
   private static readonly DAY_MS = 24 * 60 * 60 * 1000;
   /** Custom from/to spans are clamped to this (matches the web UI 30-day cap). */
   private static readonly MAX_RANGE_SPAN_MS = 30 * AgentGateway.DAY_MS;
+  /** Agent 时间线默认窗口（不再手动选范围时看最近 1 小时）。 */
+  private static readonly TIMELINE_DEFAULT_WINDOW_MS = AgentGateway.HOUR_MS;
 
   constructor(
     private store: Store,
@@ -524,6 +533,161 @@ export class AgentGateway {
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {
     return this.store.listAgentSuccessions(taskId);
+  }
+
+  /**
+   * Agent 时间线（`GET /api/agents/:agentId/timeline`）：某段时间内这个 agent 的
+   * idle / thinking / working 状态，加上用户的 input 事件。
+   *
+   * 一个 agent = 绑定在 task 上的一个 SDK agent 实例，所以这里先按 agentId 找到它
+   * 自己的 run（顺带得到 task / project），再把该 task + agentId 的事件折叠成状态段。
+   * 窗口左侧会向前扩到「窗口内最早一轮 run 的起点」，这样跨窗口的 run 在 `from` 那
+   * 一刻的状态也是准确的。
+   */
+  getAgentTimeline(input: {
+    agentId: string;
+    from?: string;
+    to?: string;
+    projectId?: string;
+  }): AgentTimeline | undefined {
+    const agentId = (input.agentId ?? "").trim();
+    if (!agentId) return undefined;
+
+    const projectFilter = input.projectId?.trim() || undefined;
+    const samples = this.store
+      .listAgentRunSamples()
+      .filter((r) => r.agentId === agentId);
+
+    // 最新一轮 run 决定展示用的 task / provider / model；从没跑过的 agent
+    // （task 绑定了 agent 但还没有 run）用 tasks.agent_id 反查它的 task，
+    // 这样时间线是「整段空闲」而不是 404。
+    const newest = samples.length
+      ? samples.reduce((best, r) =>
+          (r.completedAt ?? r.createdAt) > (best.completedAt ?? best.createdAt) ? r : best,
+        )
+      : undefined;
+    const task = newest
+      ? this.store.getTask(newest.taskId)
+      : this.store.listTasks().find((t) => t.agentId?.trim() === agentId);
+    if (!task) return undefined;
+    if (projectFilter && task.projectId !== projectFilter) return undefined;
+    const project = this.store.getProject(task.projectId);
+    const model =
+      [...samples]
+        .sort((a, b) =>
+          (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt),
+        )
+        .find((r) => r.model?.trim())?.model ?? task.model;
+
+    const range = this.resolveTimelineRange(input.from, input.to);
+    const { fromIso, toIso } = range;
+    const fromMs = Date.parse(fromIso);
+    const toMs = Date.parse(toIso);
+
+    // 窗口内（含仍在进行的 run）该 agent 的 run 行。
+    const overlapping = samples.filter((r) => {
+      const start = Date.parse(r.createdAt);
+      const end = r.completedAt ? Date.parse(r.completedAt) : Date.now();
+      return Number.isFinite(start) && end >= fromMs && start <= toMs;
+    });
+    const runs: TimelineRunRow[] = overlapping.map((r) => ({
+      runId: r.runId,
+      status: r.status,
+      createdAt: r.createdAt,
+      ...(r.completedAt ? { completedAt: r.completedAt } : {}),
+      ...(r.durationMs != null ? { durationMs: r.durationMs } : {}),
+      ...(r.model ? { model: r.model } : {}),
+      modelCalls: r.modelCalls,
+      toolCalls: r.toolCalls,
+    }));
+
+    // 事件查询窗口：向左扩到最早一轮 run 的起点（-5s 容差，用户消息可能比 run 行早
+    // 一两毫秒落库），保证 `from` 时刻的状态来自真实事件而不是"默认 idle"。
+    const earliestRunStart = runs.length
+      ? Math.min(...runs.map((r) => Date.parse(r.createdAt)))
+      : fromMs;
+    const widenedFromMs = Math.max(
+      0,
+      Math.min(fromMs, Number.isFinite(earliestRunStart) ? earliestRunStart - 5_000 : fromMs),
+    );
+    const widenedFromIso = new Date(widenedFromMs).toISOString();
+    const runTaskIds = [...new Set(samples.map((r) => r.taskId))];
+    const taskIds = runTaskIds.length ? runTaskIds : [task.taskId];
+
+    const timeline = buildAgentTimeline({
+      fromIso,
+      toIso,
+      groups: this.store.listAgentTimelineStateRows({
+        taskIds,
+        agentId,
+        fromIso: widenedFromIso,
+        toIso,
+      }),
+      markers: this.store.listAgentTimelineMarkerRows({
+        taskIds,
+        agentId,
+        fromIso: widenedFromIso,
+        toIso,
+      }),
+      runs,
+      eventCounts: this.store.countAgentEventsByType({
+        taskIds,
+        agentId,
+        fromIso,
+        toIso,
+      }),
+    });
+
+    return {
+      agentId,
+      agentName: agentDisplayName(agentId),
+      provider: newest?.provider || task.provider,
+      ...(model?.trim() ? { model: model.trim() } : {}),
+      taskId: task.taskId,
+      taskTitle: task.title,
+      projectId: task.projectId,
+      projectName: project?.name ?? task.projectId,
+      ...(project?.department ? { department: project.department } : {}),
+      current: task.agentId?.trim()
+        ? task.agentId.trim() === agentId
+        : newest?.agentId === agentId,
+      from: fromIso,
+      to: toIso,
+      generatedAt: new Date().toISOString(),
+      mode: timeline.mode,
+      segments: timeline.segments,
+      buckets: timeline.buckets,
+      markers: timeline.markers,
+      runs: timeline.runs,
+      totals: timeline.totals,
+      note: agentTimelineNote(DEFAULT_STALL_MS),
+    };
+  }
+
+  /**
+   * 时间线窗口：默认最近 1 小时；给定 from+to 时用绝对区间并把跨度夹到 30 天，
+   * `to` 不越过"现在"（未来区间没有数据）。
+   */
+  private resolveTimelineRange(
+    from?: string,
+    to?: string,
+  ): { fromIso: string; toIso: string } {
+    const nowMs = Date.now();
+    const fromRaw = from ? Date.parse(from) : NaN;
+    const toRaw = to ? Date.parse(to) : NaN;
+    let fromMs: number;
+    let toMs: number;
+    if (Number.isFinite(fromRaw) && Number.isFinite(toRaw)) {
+      fromMs = Math.min(fromRaw, toRaw);
+      toMs = Math.min(Math.max(fromRaw, toRaw), nowMs);
+      if (toMs - fromMs > AgentGateway.MAX_RANGE_SPAN_MS) {
+        fromMs = toMs - AgentGateway.MAX_RANGE_SPAN_MS;
+      }
+    } else {
+      toMs = nowMs;
+      fromMs = nowMs - AgentGateway.TIMELINE_DEFAULT_WINDOW_MS;
+    }
+    return { fromIso: new Date(fromMs).toISOString(), toIso: new Date(toMs).toISOString() };
   }
 
   /**

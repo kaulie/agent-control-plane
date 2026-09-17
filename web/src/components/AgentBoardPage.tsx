@@ -6,6 +6,8 @@ import type { AgentBoard, AgentBoardRow, AgentBoardScope } from "../types";
 interface Props {
   /** 打开某个 task（切到该 task 的对话页）。 */
   onOpenTask: (taskId: string, projectId: string) => void;
+  /** 打开该 agent 的时间线（idle / thinking / working + 用户输入）。 */
+  onOpenTimeline: (agentId: string) => void;
   onBack: () => void;
 }
 
@@ -95,7 +97,11 @@ const STATUS_LABEL: Record<AgentBoardRow["taskStatus"], string> = {
 
 type StatusFilter = "all" | AgentBoardRow["taskStatus"];
 
-export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
+export default function AgentBoardPage({
+  onOpenTask,
+  onOpenTimeline,
+  onBack,
+}: Props) {
   const [data, setData] = useState<AgentBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -474,6 +480,14 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
                             r.supersededReason === "mode_change" ? "（模式切换）" : ""
                           }`
                         : ""}
+                      <button
+                        type="button"
+                        className="board-timeline-link"
+                        title="看这个 agent 的时间线（idle / thinking / working + 用户输入）"
+                        onClick={() => onOpenTimeline(r.agentId)}
+                      >
+                        时间线
+                      </button>
                     </div>
                   </td>
                   <td className="board-cell-dept">

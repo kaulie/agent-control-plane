@@ -66,7 +66,8 @@ export type AppView =
   | "project-settings"
   | "usage-stats"
   | "agent-runtime"
-  | "agent-board";
+  | "agent-board"
+  | "agent-timeline";
 
 export interface ConcurrencySample {
   t: string;
@@ -104,6 +105,111 @@ export interface AgentRuntimeStatus {
   granularity?: ConcurrencyGranularity;
   admissionPaused?: boolean;
   admissionPausedAt?: string;
+}
+
+// ---- Agent 时间线（idle / thinking / working + 用户 input）----
+
+/** agent 某段时间的工作状态。 */
+export type AgentActivityState = "thinking" | "working" | "idle";
+
+/** 一段连续状态；`segments` 首尾相接，正好覆盖 [from, to]。 */
+export interface AgentTimelineSegment {
+  state: AgentActivityState;
+  start: string;
+  end: string;
+  durationMs: number;
+  /** 所属 run（idle 段没有）。 */
+  runId?: string;
+  /** 这一段里最后一条事件的类型。 */
+  lastEvent?: string;
+  /** 被「无事件超过 stall 阈值」截断（后面接的是空闲）。 */
+  stalled?: boolean;
+}
+
+/** 跨度太大时的时间桶（`mode === "buckets"`）。 */
+export interface AgentTimelineBucket {
+  start: string;
+  end: string;
+  thinkingMs: number;
+  workingMs: number;
+  idleMs: number;
+  dominant: AgentActivityState;
+  runCount: number;
+  userInputs: number;
+}
+
+export type AgentTimelineMarkerKind =
+  | "user_input"
+  | "run_start"
+  | "run_end"
+  | "succession"
+  | "stall";
+
+/** 时间线上的瞬时事件（用户输入 / run 起止 / agent 替换 / 疑似停滞）。 */
+export interface AgentTimelineMarker {
+  at: string;
+  kind: AgentTimelineMarkerKind;
+  label?: string;
+  /** 用户输入原文（`user_input`）。 */
+  text?: string;
+  mode?: "agent" | "plan";
+  imageCount?: number;
+  runId?: string;
+  status?: "queued" | "running" | "finished" | "error" | "cancelled";
+}
+
+/** 区间内该 agent 的一轮 run。 */
+export interface AgentTimelineRun {
+  runId: string;
+  status: "queued" | "running" | "finished" | "error" | "cancelled";
+  startedAt: string;
+  completedAt?: string;
+  durationMs: number;
+  thinkingMs: number;
+  workingMs: number;
+  modelCalls: number;
+  toolCalls: number;
+  model?: string;
+  inputText?: string;
+  mode?: "agent" | "plan";
+}
+
+export interface AgentTimelineTotals {
+  spanMs: number;
+  thinkingMs: number;
+  workingMs: number;
+  idleMs: number;
+  activeMs: number;
+  activeRatio: number;
+  runCount: number;
+  userInputCount: number;
+  toolCalls: number;
+  modelCalls: number;
+  eventCounts: Record<string, number>;
+}
+
+/** `GET /api/agents/:agentId/timeline`。 */
+export interface AgentTimeline {
+  agentId: string;
+  agentName: string;
+  provider: string;
+  model?: string;
+  taskId: string;
+  taskTitle: string;
+  projectId: string;
+  projectName: string;
+  department?: DepartmentConfig;
+  current: boolean;
+  from: string;
+  to: string;
+  generatedAt: string;
+  mode: "segments" | "buckets";
+  segments: AgentTimelineSegment[];
+  buckets: AgentTimelineBucket[];
+  markers: AgentTimelineMarker[];
+  runs: AgentTimelineRun[];
+  totals: AgentTimelineTotals;
+  note: string;
 }
 
 export interface Task {

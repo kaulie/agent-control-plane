@@ -2052,3 +2052,155 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Agent 看板（agent board）---- */
+.stats-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stats-filter-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats-filter-inline input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.stats-filter-grow {
+  flex: 1;
+  min-width: 200px;
+}
+
+.stats-filter input[type="search"],
+.stats-filter input[type="text"] {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  min-width: 180px;
+  width: 100%;
+}
+
+.board-interval {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+.agent-board .stats-table.board-table {
+  font-size: 12.5px;
+}
+
+.agent-board .stats-table th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-board .stats-table th:hover {
+  color: var(--text);
+}
+
+.board-head-name {
+  min-width: 260px;
+}
+
+.board-head-task {
+  min-width: 120px;
+}
+
+.board-cell-name {
+  max-width: 320px;
+}
+
+.board-agent-name {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.board-cell-dept,
+.board-cell-project,
+.board-cell-model {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 16px;
+  vertical-align: text-bottom;
+  border: 1px solid transparent;
+}
+
+.board-badge.running {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.board-badge.replaced {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: var(--bg-3);
+}
+
+.board-row-replaced .board-agent-name {
+  color: var(--text-dim);
+}
+
+.board-row-running td {
+  background: color-mix(in srgb, var(--green) 7%, var(--bg));
+}
+
+.board-task-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.board-task-link:hover {
+  text-decoration: underline;
+}
+
+.board-status {
+  margin-left: 7px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.board-status.active {
+  color: var(--green);
+}
+
+.board-status.error {
+  color: var(--red);
+}
+
+.board-runs {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+

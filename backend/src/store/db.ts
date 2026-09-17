@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import type {
   AgentEvent,
+  AgentRunSample,
   AgentSuccession,
   AgentSuccessionReason,
   AppSettings,
@@ -262,6 +263,13 @@ export class Store {
     );
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
+    );
+    // Agent board（`GET /api/agents`）要按 (task, agent) 取「最后活跃时间」：
+    // 没有这个索引时 `MAX(timestamp) GROUP BY task_id, agent_id` 要全表扫 events
+    // （实测 47 万行 ≈ 0.65s，会卡住网关事件循环；建索引后 ≈ 0.13s）。
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_events_agent_time
+         ON events(task_id, agent_id, timestamp)`,
     );
 
     const projectCols = this.db
@@ -1163,6 +1171,102 @@ export class Store {
       createdAt: r.created_at,
       ...(r.completed_at ? { completedAt: r.completed_at } : {}),
       usage: JSON.parse(r.usage_json) as TokenUsage,
+    }));
+  }
+
+  /**
+   * Every run of a task that carries an agent id, with the fields the agent
+   * board aggregates (tokens per run, wall-clock duration, activity).
+   * Grouping/merging stays in the gateway so `tokenVolume` is applied once.
+   */
+  listAgentRunSamples(): AgentRunSample[] {
+    const rows = this.db
+      .prepare(
+        `SELECT run_id, task_id, agent_id, provider, model, status,
+                created_at, completed_at, duration_ms, usage_json,
+                model_calls, tool_calls
+         FROM runs
+         WHERE agent_id IS NOT NULL
+           AND agent_id != ''
+         ORDER BY created_at ASC`,
+      )
+      .all() as unknown as Array<{
+      run_id: string;
+      task_id: string;
+      agent_id: string;
+      provider: string;
+      model: string | null;
+      status: string;
+      created_at: string;
+      completed_at: string | null;
+      duration_ms: number | null;
+      usage_json: string | null;
+      model_calls: number;
+      tool_calls: number;
+    }>;
+    return rows.map((r) => ({
+      runId: r.run_id,
+      taskId: r.task_id,
+      agentId: r.agent_id,
+      provider: r.provider,
+      ...(r.model?.trim() ? { model: r.model.trim() } : {}),
+      status: r.status as RunStatus,
+      createdAt: r.created_at,
+      ...(r.completed_at ? { completedAt: r.completed_at } : {}),
+      ...(r.duration_ms != null ? { durationMs: r.duration_ms } : {}),
+      ...(r.usage_json
+        ? { usage: JSON.parse(r.usage_json) as TokenUsage }
+        : {}),
+      modelCalls: r.model_calls,
+      toolCalls: r.tool_calls,
+    }));
+  }
+
+  /**
+   * Newest event per (task, agent) — the real "最后活跃时间" (a run row is only
+   * written when the run finishes, events stream while it is still running).
+   */
+  listAgentLastEventAt(): Array<{
+    taskId: string;
+    agentId: string;
+    lastAt: string;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT task_id, agent_id, MAX(timestamp) AS last_at
+         FROM events
+         WHERE agent_id IS NOT NULL AND agent_id != ''
+         GROUP BY task_id, agent_id`,
+      )
+      .all() as unknown as Array<{
+      task_id: string;
+      agent_id: string;
+      last_at: string;
+    }>;
+    return rows.map((r) => ({
+      taskId: r.task_id,
+      agentId: r.agent_id,
+      lastAt: r.last_at,
+    }));
+  }
+
+  /** Every succession, oldest first (agent board marks replaced agents). */
+  listAllAgentSuccessions(): AgentSuccession[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM agent_successions ORDER BY created_at ASC`)
+      .all() as unknown as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      successionId: String(r.succession_id),
+      taskId: String(r.task_id),
+      runId: String(r.run_id),
+      provider: String(r.provider),
+      fromAgentId: String(r.from_agent_id),
+      toAgentId: String(r.to_agent_id),
+      reason: r.reason as AgentSuccessionReason,
+      fromMode: String(r.from_mode),
+      toMode: String(r.to_mode),
+      seededMessages: Number(r.seeded_messages) || 0,
+      createdAt: String(r.created_at),
     }));
   }
 

@@ -53,3 +53,13 @@ export function truncate(s: string, n: number): string {
   if (!s) return "";
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
+
+/**
+ * `agent-1234abcd-5678-…` → `agent-1234abcd`（时间线 / Agent 看板共用同一个短号）。
+ * Cline 的 `cls-…` id 不符合该 pattern，超长时退化为截断。
+ */
+export function shortAgentId(id: string): string {
+  const m = id.match(/^(?:agent-)?([0-9a-f]{8})/i);
+  if (m) return `agent-${m[1].toLowerCase()}`;
+  return id.length > 20 ? `${id.slice(0, 20)}…` : id;
+}

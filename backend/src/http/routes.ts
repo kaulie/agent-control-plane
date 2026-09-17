@@ -351,6 +351,23 @@ export async function registerRoutes(
 
   // ---- tasks ----
 
+  /**
+   * Agent board (`scope=current|all`): every agent with its department
+   * (来自 task 所属 project), project, task, 最后活跃时间, 模型, token 消耗与
+   * 累计工作时长。只读，因此不需要页面版本校验。
+   */
+  app.get<{ Querystring: { scope?: string; projectId?: string } }>(
+    "/api/agents",
+    async (req) => {
+      const scopeRaw = req.query.scope?.trim().toLowerCase();
+      const projectId = req.query.projectId?.trim() || undefined;
+      return gateway.getAgentBoard({
+        scope: scopeRaw === "all" ? "all" : "current",
+        ...(projectId ? { projectId } : {}),
+      });
+    },
+  );
+
   app.get<{ Querystring: { projectId?: string } }>(
     "/api/tasks",
     async (req) => {

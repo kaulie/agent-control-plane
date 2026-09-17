@@ -65,7 +65,8 @@ export type AppView =
   | "global-settings"
   | "project-settings"
   | "usage-stats"
-  | "agent-runtime";
+  | "agent-runtime"
+  | "agent-board";
 
 export interface ConcurrencySample {
   t: string;
@@ -120,6 +121,75 @@ export interface Task {
   taskType: "general";
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt?: string;
+}
+
+export type AgentBoardScope = "current" | "all";
+
+/**
+ * One agent row of the agent board (`GET /api/agents`).
+ *
+ * agent = 绑定在 task 上的一个 SDK agent 实例；同一个 task 因 succession（模式切换 /
+ * 会话不可用）可以换过多个 agent，`scope=all` 时都列出来。
+ */
+export interface AgentBoardRow {
+  agentId: string;
+  /** Agent 名称（SDK 里 agent name 就是 task title）。 */
+  name: string;
+  provider: string;
+  model?: string;
+  projectId: string;
+  projectName: string;
+  /** 所属部门：task 所属 project 的部门。 */
+  department?: DepartmentConfig;
+  taskId: string;
+  taskTitle: string;
+  taskStatus: "active" | "completed" | "error";
+  taskCreatedAt: string;
+  taskWorkspace: string;
+  /** 是否是 task 当前绑定的 agent。 */
+  current: boolean;
+  /** 最后活跃时间（该 agent 最新事件 / run）。 */
+  lastActiveAt?: string;
+  /** 有 run 正在跑。 */
+  running: boolean;
+  tokens: TokenUsage;
+  /** 累计工作时长（该 agent 自己 run 的 duration 之和）。 */
+  durationMs: number;
+  runCount: number;
+  modelCalls: number;
+  toolCalls: number;
+  supersededAt?: string;
+  supersededReason?: AgentSuccessionReason;
+  replacedByAgentId?: string;
+}
+
+export interface AgentBoardTotals {
+  agentCount: number;
+  activeAgentCount: number;
+  runningAgentCount: number;
+  tokens: TokenUsage;
+  durationMs: number;
+  runCount: number;
+  modelCalls: number;
+  toolCalls: number;
+}
+
+export interface AgentBoard {
+  scope: AgentBoardScope;
+  generatedAt: string;
+  rows: AgentBoardRow[];
+  totals: AgentBoardTotals;
+  projects: Array<{
+    projectId: string;
+    name: string;
+    department?: DepartmentConfig;
+  }>;
+  /** 部门筛选项（departmentId 为空 = 未设置部门）。 */
+  departments: Array<{
+    departmentId: string;
+    departmentName: string;
+    agentCount: number;
+  }>;
 }
 
 export interface TokenUsage {

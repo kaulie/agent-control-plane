@@ -614,6 +614,15 @@ export class AgentGateway {
     const runTaskIds = [...new Set(samples.map((r) => r.taskId))];
     const taskIds = runTaskIds.length ? runTaskIds : [task.taskId];
 
+    // 这个 agent 自己的「最近活跃时间」（不限窗口）：窗口里没有事件时前端靠它
+    // 判断「窗口选错了」还是「这个 agent 真的没动过」，并给出「查看那段时间」。
+    const lastActiveAt = latestIso(
+      this.store.maxAgentEventAt({ taskIds, agentId }),
+      newest ? (newest.completedAt ?? newest.createdAt) : undefined,
+      // 从没跑过的 agent：用户最后一条消息就是诚实的活跃时间（同看板口径）。
+      samples.length === 0 ? (task.lastUserInputAt ?? task.createdAt) : undefined,
+    );
+
     const timeline = buildAgentTimeline({
       fromIso,
       toIso,
@@ -651,6 +660,7 @@ export class AgentGateway {
       current: task.agentId?.trim()
         ? task.agentId.trim() === agentId
         : newest?.agentId === agentId,
+      ...(lastActiveAt ? { lastActiveAt } : {}),
       from: fromIso,
       to: toIso,
       generatedAt: new Date().toISOString(),

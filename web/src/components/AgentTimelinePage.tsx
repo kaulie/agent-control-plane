@@ -17,7 +17,12 @@ interface Props {
 }
 
 const AGENT_KEY = "agent-timeline-agent";
-const RANGE_KEY = "agent-timeline-range";
+/**
+ * 时间范围的落盘 key 带版本：v1 时代这里是「挂载即落盘」，等于用户什么都没选也
+ * 被记成一个固定窗口，于是切到活跃时间在窗口外的 agent 就只剩一条全 idle 的灰带。
+ * 换 key 让那些隐式记下来的值失效，默认回到「跟着 agent 最近活跃时间走」。
+ */
+const RANGE_KEY = "agent-timeline-range-v2";
 const CUSTOM_FROM_KEY = "agent-timeline-custom-from";
 const CUSTOM_TO_KEY = "agent-timeline-custom-to";
 const AUTO_KEY = "agent-timeline-auto-refresh";
@@ -146,6 +151,39 @@ function fitRangeKey(lastActiveAt: string | undefined): string | null {
   if (age <= 24 * 3600_000) return "24h";
   if (age <= 7 * DAY_MS) return "7d";
   return "30d";
+}
+
+/**
+ * 窗口里一条事件都没有（后端会补一段覆盖整窗的 idle，所以「有段」不等于「有数据」）。
+ * 这种时候画出来的是「全空闲 + 全 0」，必须告诉用户是窗口选错了，而不是这个 agent 在闲。
+ */
+function isEmptyWindow(data: AgentTimeline): boolean {
+  return (
+    Object.keys(data.totals.eventCounts ?? {}).length === 0 &&
+    data.runs.length === 0 &&
+    data.markers.length === 0
+  );
+}
+
+/** 某个时间点是否落在这次查询的窗口内。 */
+function windowCovers(data: AgentTimeline, iso: string | undefined): boolean {
+  if (!iso) return true; // 不知道就不提示
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return true;
+  return at >= Date.parse(data.from) && at <= Date.parse(data.to);
+}
+
+/**
+ * 以 agent 最近一次活跃时间为终点的一段窗口（往前 24 小时，往后留 5 分钟，
+ * 并夹到「现在」）：窗口里什么都没有时用它自动放宽 / 做「查看那段时间」跳转。
+ */
+function activityWindow(lastActiveAt: string): { from: string; to: string } | null {
+  const at = Date.parse(lastActiveAt);
+  if (!Number.isFinite(at)) return null;
+  const to = Math.min(at + 5 * 60_000, Date.now());
+  const from = Math.max(0, to - 24 * 60 * 60_000);
+  if (to - from < 60_000) return null;
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
 
 /** `datetime-local` ↔ ISO（本地时区）。 */
@@ -418,6 +456,8 @@ export default function AgentTimelinePage({
   const [customTo, setCustomTo] = useState(() => readStored(CUSTOM_TO_KEY));
   const [auto, setAuto] = useState(() => readBool(AUTO_KEY, true));
   const [intervalMs, setIntervalMs] = useState(() => readIntervalMs());
+  /** 自动放宽过窗口的 agent 最近活跃时间（用于页面上一句说明）。 */
+  const [widened, setWidened] = useState<string | null>(null);
   const [data, setData] = useState<AgentTimeline | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -453,18 +493,48 @@ export default function AgentTimelinePage({
 
   useEffect(() => {
     if (agentId) store(AGENT_KEY, agentId);
+    // 换了 agent：上一轮的「自动放宽窗口」说明不再适用。
+    setWidened(null);
   }, [agentId]);
-  useEffect(() => {
-    store(RANGE_KEY, rangeKey);
-  }, [rangeKey]);
+  // 时间范围**只在用户明确选过之后**才落盘：默认（自适应）状态下每次都跟着 agent
+  // 的最近活跃时间走。以前这里是「挂载即落盘」，于是第二次进页面就变成了固定窗口
+  // ——切到一个活跃时间在窗口外的 agent，页面就只有一条全 idle 的灰带和一堆 0。
 
-  // 自适应窗口：只在用户还没自己选过范围时生效（agent 切换 / 首次加载）。
+  /**
+   * 自适应窗口（用户还没手动选过范围时）：
+   * 1) 刚切到某个 agent：挑一个能包住它「最近活跃时间」的预设窗口；
+   * 2) 预设窗口（最长 30 天）也包不住、或者查出来这个窗口里一条事件都没有：
+   *    按「最近活跃那一段」自定义一个窗口。
+   * 原则：页面不能把「窗口选错了」显示成「这个 agent 很闲」。
+   */
+  const widenedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!autoFit) return;
+    if (!autoFit || !agentId) return;
     const row = agents?.find((a) => a.agentId === agentId);
-    const key = row ? fitRangeKey(row.lastActiveAt) : null;
-    if (key && key !== rangeKey) setRangeKey(key);
-  }, [agents, agentId, autoFit, rangeKey]);
+    const forThisAgent = data?.agentId === agentId;
+    const lastActiveAt =
+      row?.lastActiveAt ?? (forThisAgent ? data?.lastActiveAt : undefined);
+    if (!lastActiveAt || !Number.isFinite(Date.parse(lastActiveAt))) return;
+
+    if (!forThisAgent || !data) {
+      // 还在等这个 agent 的第一次结果：先把预设窗口对准它的活跃时间。
+      // （已经放宽成自定义窗口时不动它，否则会「放宽 → 又被预设改回去」。）
+      const key = fitRangeKey(lastActiveAt);
+      if (key && key !== rangeKey && rangeKey !== "custom") setRangeKey(key);
+      return;
+    }
+    if (!isEmptyWindow(data)) return; // 有数据：窗口是好的
+    if (windowCovers(data, lastActiveAt)) return; // 没数据，但窗口本来就盖住活跃时间
+    const mark = `${agentId}|${data.from}|${data.to}`;
+    if (widenedRef.current.has(mark)) return; // 这个窗口已经放宽过一次，别反复切
+    widenedRef.current.add(mark);
+    const w = activityWindow(lastActiveAt);
+    if (!w) return;
+    setWidened(lastActiveAt);
+    setCustomFrom(isoToLocalInput(w.from));
+    setCustomTo(isoToLocalInput(w.to));
+    setRangeKey("custom");
+  }, [autoFit, agentId, agents, data, rangeKey]);
 
   useEffect(() => {
     // 换了 agent / 时间范围：先把上一份结果清掉，避免"新标题 + 旧色带"的错觉。
@@ -474,6 +544,8 @@ export default function AgentTimelinePage({
 
   const pickRange = useCallback((key: string): void => {
     setAutoFit(false);
+    store(RANGE_KEY, key);
+    setWidened(null);
     if (key === "custom") setRangeKey("custom");
     else setRangeKey(key);
   }, []);
@@ -553,10 +625,36 @@ export default function AgentTimelinePage({
     }
   };
 
+  /** 「查看那段时间」：把窗口挪到该 agent 最近活跃的那一段（显式选择，会被记住）。 */
+  const jumpToActivity = useCallback((lastActiveAt: string): void => {
+    const w = activityWindow(lastActiveAt);
+    if (!w) return;
+    setAutoFit(false);
+    store(RANGE_KEY, "custom");
+    setWidened(null);
+    setCustomFrom(isoToLocalInput(w.from));
+    setCustomTo(isoToLocalInput(w.to));
+    setRangeKey("custom");
+  }, []);
+
   const selected = useMemo(
     () => agents?.find((a) => a.agentId === agentId),
     [agents, agentId],
   );
+
+  /**
+   * 这个窗口里一条事件都没有 —— 要么窗口选错了（活跃时间在窗口外），要么这个 agent
+   * 本来就没跑过。两种情况都得说出来，不能让页面静悄悄地显示一堆 0。
+   */
+  const emptyHint = useMemo(() => {
+    if (!data || !isEmptyWindow(data)) return null;
+    const lastActiveAt = data.lastActiveAt ?? selected?.lastActiveAt;
+    const covered = windowCovers(data, lastActiveAt);
+    return {
+      lastActiveAt,
+      outside: Boolean(lastActiveAt) && !covered,
+    };
+  }, [data, selected]);
 
   /** 下拉里按 project 分组，标签带上 task 与最后活跃时间。 */
   const grouped = useMemo(() => {
@@ -646,9 +744,14 @@ export default function AgentTimelinePage({
           </select>
         </label>
         <label className="stats-filter">
-          <span>时间范围</span>
+          <span>时间范围{autoFit ? "（自动）" : ""}</span>
           <select
             value={rangeKey}
+            title={
+              autoFit
+                ? "自动：跟着该 agent 的最近活跃时间走（手动选一次之后固定下来）"
+                : "手动选择的时间范围（清空 localStorage 后恢复自动）"
+            }
             onChange={(e) => {
               const next = e.target.value;
               if (next === "custom") onPickCustom();
@@ -745,10 +848,50 @@ export default function AgentTimelinePage({
             </>
           )}
           {selected?.running && <span className="board-badge running">正在运行</span>}
+          {data.lastActiveAt && (
+            <span className="board-badge" title={data.lastActiveAt}>
+              最近活跃 {relativeTime(data.lastActiveAt)}
+            </span>
+          )}
         </div>
       )}
 
       <p className="stats-note">{data?.note ?? "按事件判定 agent 的工作状态（idle / thinking / working）。"}</p>
+
+      {widened && (
+        <div className="timeline-hint">
+          <span>
+            时间范围是自动的：这个 agent 最近活跃在 {formatDateTime(widened)}（
+            {relativeTime(widened)}），窗口已放宽到包含那一段。
+          </span>
+        </div>
+      )}
+
+      {emptyHint && !widened && (
+        <div className="timeline-hint">
+          <span>
+            这个时间范围里没有该 agent 的事件。
+            {emptyHint.lastActiveAt
+              ? emptyHint.outside
+                ? `它最近活跃在 ${formatDateTime(emptyHint.lastActiveAt)}（${relativeTime(
+                    emptyHint.lastActiveAt,
+                  )}），不在这个窗口里。`
+                : `它的最近活跃时间是 ${formatDateTime(
+                    emptyHint.lastActiveAt,
+                  )}，但窗口内没有落任何事件（可能还没真正跑过）。`
+              : ""}
+          </span>
+          {emptyHint.outside && emptyHint.lastActiveAt && (
+            <button
+              type="button"
+              className="runtime-refresh-now"
+              onClick={() => jumpToActivity(emptyHint.lastActiveAt as string)}
+            >
+              查看那段时间
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="stats-error" onClick={() => setError(null)}>

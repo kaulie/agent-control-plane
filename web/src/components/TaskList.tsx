@@ -29,6 +29,7 @@ export default function TaskList({
   onCreate,
 }: Props) {
   const selectedProject = projects.find((p) => p.projectId === selectedProjectId);
+  const department = selectedProject?.department;
 
   return (
     <aside className="task-list">
@@ -84,6 +85,27 @@ export default function TaskList({
             >
               🔗
             </button>
+          </div>
+        </div>
+        <div className="project-workspace">
+          <div className="project-workspace-label">所属部门</div>
+          <div className="project-workspace-row">
+            <div
+              className={`project-workspace-path project-workspace-dept ${
+                department ? "" : "is-empty"
+              }`}
+              title={
+                department
+                  ? `部门 ID：${department.departmentId ?? "—"}${
+                      department.departmentName ? `（${department.departmentName}）` : ""
+                    } · 在「项目设置 → 所属部门」修改`
+                  : "该项目没有部门；新建项目时部门必填，可在「项目设置 → 所属部门」补上"
+              }
+            >
+              {department
+                ? (department.departmentName || department.departmentId)
+                : "（未设置）"}
+            </div>
           </div>
         </div>
         <button className="new-project" onClick={onCreateProject}>

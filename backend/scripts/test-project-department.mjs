@@ -26,10 +26,21 @@ assert.deepEqual(store.getProjectSettings(withDepartment.projectId)?.department,
   departmentId: "D0001",
   departmentName: "SRE部门",
 });
+// 列表 / 详情也带部门（左栏「所属部门」直接读项目对象）。
+assert.deepEqual(store.getProject(withDepartment.projectId)?.department, {
+  departmentId: "D0001",
+  departmentName: "SRE部门",
+});
+assert.deepEqual(
+  store.listProjects().find((p) => p.projectId === withDepartment.projectId)?.department,
+  { departmentId: "D0001", departmentName: "SRE部门" },
+);
 
 // 2) 不带部门 => settings 里没有 department 字段（而不是空对象）。
 const plain = store.createProject("Plain Project");
 assert.equal(store.getProjectSettings(plain.projectId)?.department, undefined);
+// 同一个项目从列表里读出来也没有 department（左栏显示「（未设置）」）。
+assert.equal(store.getProject(plain.projectId)?.department, undefined);
 
 // 3) 空字符串 / 只有空白 => 视为未设置，不会写入空部门。
 const empty = store.createProject("Empty Department", {

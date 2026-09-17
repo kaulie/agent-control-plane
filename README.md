@@ -112,7 +112,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/health` | liveness |
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
-| GET | `/api/projects` | list Projects |
+| GET | `/api/projects` | list Projects（含各自的 `department`，供左栏「所属部门」显示） |
 | POST | `/api/projects` | create Project `{ name, department, gitRepoUrl? }`；`department` **必填**（缺失 → 400），与项目同一次写入 |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |

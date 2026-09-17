@@ -51,6 +51,11 @@ const settingsOf = async (projectId) =>
     (await app.inject({ method: "GET", url: `/api/projects/${projectId}/settings` }))
       .body,
   );
+/** 左栏（项目列表）就是读这里：项目必须自带部门。 */
+const listedProject = async (projectId) => {
+  const list = JSON.parse((await app.inject({ method: "GET", url: "/api/projects" })).body);
+  return list.find((p) => p.projectId === projectId);
+};
 
 // 1) 没有部门 => 400，不落库。
 const missing = await create({ name: "No Department" });
@@ -107,6 +112,39 @@ const noGit = await create({ name: "No Git", department: { departmentId: "D0001"
 assert.equal(noGit.statusCode, 201);
 assert.equal(JSON.parse(noGit.body).gitRepoUrl, undefined);
 
+// 7) 左栏用的项目列表（GET /api/projects）自带部门，创建响应里也有。
+assert.deepEqual(project.department, {
+  departmentId: "D0001",
+  departmentName: "SRE部门",
+});
+assert.deepEqual((await listedProject(project.projectId)).department, {
+  departmentId: "D0001",
+  departmentName: "SRE部门",
+});
+
+// 8) 在项目设置里改了部门 → 列表立刻跟着变（左栏显示的就是它）。
+await app.inject({
+  method: "PATCH",
+  url: `/api/projects/${project.projectId}/settings`,
+  payload: { department: { departmentId: "D0002", departmentName: "工程效能部门" } },
+});
+assert.deepEqual((await listedProject(project.projectId)).department, {
+  departmentId: "D0002",
+  departmentName: "工程效能部门",
+});
+
+// 9) 老项目（settings_json 为 NULL）在列表里就是"没有 department 字段"。
+const legacyId = "project-legacy";
+store.db
+  .prepare(
+    `INSERT INTO projects (project_id, name, workspace_root, git_repo_url, settings_json, created_at, updated_at)
+     VALUES (?, ?, NULL, NULL, NULL, ?, ?)`,
+  )
+  .run(legacyId, "Legacy", new Date().toISOString(), new Date().toISOString());
+const legacy = await listedProject(legacyId);
+assert.equal(legacy.department, undefined);
+assert.equal(legacy.name, "Legacy");
+
 await app.close();
 fs.rmSync(dataDir, { recursive: true, force: true });
-console.log("PASS: POST /api/projects requires + stores department");
+console.log("PASS: POST /api/projects requires + stores department, list carries it");

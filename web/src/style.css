@@ -173,6 +173,16 @@ body {
   white-space: nowrap;
 }
 
+/* 左栏「所属部门」：不是路径，用正文字体 + 正常亮度；未设置时标黄。 */
+.project-workspace-dept {
+  font-family: inherit;
+  color: var(--text);
+}
+
+.project-workspace-dept.is-empty {
+  color: var(--amber);
+}
+
 .icon-btn {
   flex-shrink: 0;
   width: 34px;

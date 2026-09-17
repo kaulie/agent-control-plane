@@ -14,6 +14,7 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
+import { OrganizationClient } from "./organization.js";
 import {
   buildShutdownReport,
   formatPreviousExit,
@@ -189,6 +190,11 @@ await registerRoutes(app, gateway, providers, {
   gracefulRestart: config.gracefulRestart,
   processStartedAt: startedAt,
   previousShutdown,
+  // Department catalogue for project settings (best-effort, never blocks boot).
+  organization: new OrganizationClient({
+    baseUrl: config.organizationApiUrl,
+    timeoutMs: config.organizationTimeoutMs,
+  }),
 });
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
@@ -209,6 +215,9 @@ app.log.info(
   `git-via-proxy: url=${config.gitViaProxyUrl || "(off)"} shell=${config.gitViaProxyShell ? "on" : "off"} mcp=${
     mcpWanted && assertMcpServerPresent(config.gitViaProxyServerPath) ? "on" : "off"
   }`,
+);
+app.log.info(
+  `organization service: ${config.organizationApiUrl} (project 所属部门, timeout=${config.organizationTimeoutMs}ms)`,
 );
 
 try {

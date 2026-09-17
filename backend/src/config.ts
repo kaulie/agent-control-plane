@@ -19,6 +19,40 @@ export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 export const DEFAULT_PORT = 4211;
 
 /**
+ * Organization service (department / person catalogue). Local runtime contract:
+ * port 4244, `GET /api/v1/departments`.
+ */
+export const DEFAULT_ORGANIZATION_API_URL = "http://127.0.0.1:4244";
+
+/** How long we wait for the organization service before degrading to "不可用". */
+export const DEFAULT_ORGANIZATION_TIMEOUT_MS = 3000;
+
+/**
+ * Base URL of the organization service (`ORGANIZATION_API_URL`), trailing
+ * slashes stripped so `base + "/api/v1/departments"` never doubles up.
+ */
+export function resolveOrganizationApiUrl(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const raw = env.ORGANIZATION_API_URL?.trim();
+  return (raw || DEFAULT_ORGANIZATION_API_URL).replace(/\/+$/, "");
+}
+
+/** Timeout for organization-service calls; invalid values fall back to default. */
+export function resolveOrganizationTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.ORGANIZATION_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_ORGANIZATION_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  console.warn(
+    `[config] ignoring invalid ORGANIZATION_TIMEOUT_MS="${raw}"; using ${DEFAULT_ORGANIZATION_TIMEOUT_MS}`,
+  );
+  return DEFAULT_ORGANIZATION_TIMEOUT_MS;
+}
+
+/**
  * Startup port, resolved from the environment:
  *
  *   SERVICE_PORT  →  PORT (legacy)  →  DEFAULT_PORT
@@ -98,8 +132,12 @@ export interface Config {
   gitViaProxyShell: boolean;
   /** When true and URL set: inject git-via-proxy MCP into Cursor agents. */
   gitViaProxyMcp: boolean;
-  /** Absolute path to mcp-servers/git-via-proxy/server.mjs */
+  /** Absolute path to mcp-servers/git-via-proxy/server.mjs. */
   gitViaProxyServerPath: string;
+  /** Base URL of the organization service (department catalogue). */
+  organizationApiUrl: string;
+  /** Timeout for organization-service calls (ms). */
+  organizationTimeoutMs: number;
   /** Global cap on concurrent agent runs across all tasks/providers. */
   maxConcurrentRuns: number;
   /**
@@ -210,6 +248,8 @@ export function loadConfig(): Config {
     gitViaProxyShell,
     gitViaProxyMcp,
     gitViaProxyServerPath,
+    organizationApiUrl: resolveOrganizationApiUrl(process.env),
+    organizationTimeoutMs: resolveOrganizationTimeoutMs(process.env),
     maxConcurrentRuns: Math.max(
       1,
       Number(process.env.AGENT_MAX_CONCURRENT_RUNS || 2),

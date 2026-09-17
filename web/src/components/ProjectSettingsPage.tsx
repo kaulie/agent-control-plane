@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
+import DepartmentSection from "./settings/DepartmentSection";
 
 interface Props {
   projectId: string;
@@ -20,6 +21,10 @@ export default function ProjectSettingsPage({
   const [savedDefaultProvider, setSavedDefaultProvider] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [savedDefaultModel, setSavedDefaultModel] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [departmentName, setDepartmentName] = useState("");
+  const [savedDepartmentId, setSavedDepartmentId] = useState("");
+  const [savedDepartmentName, setSavedDepartmentName] = useState("");
   const [envDefaultProvider, setEnvDefaultProvider] = useState("cursor");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,6 +44,10 @@ export default function ProjectSettingsPage({
       setSavedDefaultProvider(data.project.runtime?.defaultProvider ?? "");
       setDefaultModel(data.project.runtime?.defaultModel ?? "");
       setSavedDefaultModel(data.project.runtime?.defaultModel ?? "");
+      setDepartmentId(data.project.department?.departmentId ?? "");
+      setDepartmentName(data.project.department?.departmentName ?? "");
+      setSavedDepartmentId(data.project.department?.departmentId ?? "");
+      setSavedDepartmentName(data.project.department?.departmentName ?? "");
       if (providers) setEnvDefaultProvider(providers.defaultProvider);
     } catch (e) {
       setError(String(e));
@@ -61,10 +70,19 @@ export default function ProjectSettingsPage({
           defaultProvider: defaultProvider.trim(),
           defaultModel: defaultModel.trim(),
         },
+        // Empty id+name clears the department (see patchSettings).
+        department: {
+          departmentId: departmentId.trim(),
+          departmentName: departmentName.trim(),
+        },
       });
       setView(data);
       setSavedDefaultProvider(defaultProvider);
       setSavedDefaultModel(defaultModel);
+      setSavedDepartmentId(data.project.department?.departmentId ?? "");
+      setSavedDepartmentName(data.project.department?.departmentName ?? "");
+      setDepartmentId(data.project.department?.departmentId ?? "");
+      setDepartmentName(data.project.department?.departmentName ?? "");
       setNotice("已保存");
     } catch (e) {
       setError(String(e));
@@ -75,7 +93,9 @@ export default function ProjectSettingsPage({
 
   const dirty =
     defaultProvider !== savedDefaultProvider ||
-    defaultModel !== savedDefaultModel;
+    defaultModel !== savedDefaultModel ||
+    departmentId !== savedDepartmentId ||
+    departmentName !== savedDepartmentName;
 
   return (
     <div className="settings-page">
@@ -99,6 +119,14 @@ export default function ProjectSettingsPage({
               setDefaultModel("");
             }}
             onModelChange={setDefaultModel}
+          />
+          <DepartmentSection
+            departmentId={departmentId}
+            departmentName={departmentName}
+            onChange={({ departmentId: nextId, departmentName: nextName }) => {
+              setDepartmentId(nextId);
+              setDepartmentName(nextName);
+            }}
           />
           {view?.cwdRules && (
             <AgentRulesSection

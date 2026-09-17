@@ -1,4 +1,4 @@
-import type { AppSettings } from "./types.js";
+import type { AppSettings, DepartmentConfig } from "./types.js";
 import { DEFAULT_AGENT_WORKSPACE_ROOT } from "./config.js";
 
 export function parseSettings(raw: string | null | undefined): AppSettings {
@@ -48,7 +48,40 @@ export function patchSettings(
       delete next.workspace;
     }
   }
+  if (patch.department !== undefined) {
+    // Selecting "（未设置）" sends both empty → drop the field entirely.
+    const department = normalizeDepartment(patch.department);
+    if (department) {
+      next.department = department;
+    } else {
+      delete next.department;
+    }
+  }
   return next;
+}
+
+/** Trimmed department config, or undefined when nothing was picked. */
+export function normalizeDepartment(
+  config: DepartmentConfig | undefined,
+): DepartmentConfig | undefined {
+  const departmentId = config?.departmentId?.trim() || "";
+  const departmentName = config?.departmentName?.trim() || "";
+  if (!departmentId && !departmentName) return undefined;
+  return {
+    ...(departmentId ? { departmentId } : {}),
+    ...(departmentName ? { departmentName } : {}),
+  };
+}
+
+/**
+ * The project's own department wins outright; a global setting only acts as a
+ * default (an id from one side never gets paired with a name from the other).
+ */
+export function resolveDepartment(
+  global: AppSettings,
+  project: AppSettings,
+): DepartmentConfig | undefined {
+  return normalizeDepartment(project.department) ?? normalizeDepartment(global.department);
 }
 
 export function resolveRuntimeDefaults(
@@ -88,6 +121,10 @@ export function mergeSettings(
   }
   if (global.workspace?.root?.trim()) {
     out.workspace = { root: resolveWorkspaceRoot(global) };
+  }
+  const department = resolveDepartment(global, project);
+  if (department) {
+    out.department = department;
   }
   return out;
 }

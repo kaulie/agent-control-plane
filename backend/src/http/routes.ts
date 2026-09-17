@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
-import type { AppSettings } from "../types.js";
+import type { AppSettings, DepartmentList } from "../types.js";
 import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import {
@@ -31,6 +31,8 @@ export async function registerRoutes(
     processStartedAt?: number;
     /** How the previous process exited, when it got the chance to record it. */
     previousShutdown?: ShutdownReport | null;
+    /** Organization service (department catalogue) for project settings. */
+    organization?: { list(opts?: { refresh?: boolean }): Promise<DepartmentList> };
   },
 ): Promise<void> {
   const gracefulRestart = opts.gracefulRestart !== false;
@@ -240,6 +242,36 @@ export async function registerRoutes(
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  // ---- organization (department catalogue) ----
+
+  /**
+   * Departments for the project-settings picker, sourced from the organization
+   * service. When that service is unreachable we still answer 200 with
+   * `available: false` so the page keeps the already-stored value and just
+   * shows a hint instead of failing the whole settings load.
+   * `?refresh=1` bypasses the short-lived cache.
+   */
+  app.get<{ Querystring: { refresh?: string } }>(
+    "/api/org/departments",
+    async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      if (!opts.organization) {
+        return reply.code(200).send({
+          available: false,
+          items: [],
+          types: [],
+          source: "",
+          fetchedAt: new Date().toISOString(),
+          error: "organization client is not configured",
+        } satisfies DepartmentList);
+      }
+      const refresh = ["1", "true", "yes"].includes(
+        (req.query.refresh ?? "").trim().toLowerCase(),
+      );
+      return opts.organization.list({ refresh });
+    },
+  );
 
   // ---- projects ----
 

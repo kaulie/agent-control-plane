@@ -16,9 +16,45 @@ export interface WorkspaceConfig {
   root?: string;
 }
 
+/**
+ * Owning department of a project/task. The catalogue lives in the organization
+ * service (`GET /api/v1/departments`); we only keep the picked id plus a name
+ * snapshot so the UI can still render a label when that service is down.
+ */
+export interface DepartmentConfig {
+  /** Department id as returned by the organization service (e.g. `D0001`). */
+  departmentId?: string;
+  /** Display name at pick time. */
+  departmentName?: string;
+}
+
+/** One department row from the organization service. */
+export interface DepartmentInfo {
+  id: string;
+  name: string;
+  /** Free-form category, e.g. 研发 / 测试 / 产品. */
+  type?: string;
+}
+
+/**
+ * Result of asking the organization service for its departments. `available:
+ * false` means the service could not be reached — the UI then keeps whatever
+ * was already stored instead of silently dropping the setting.
+ */
+export interface DepartmentList {
+  available: boolean;
+  items: DepartmentInfo[];
+  types: string[];
+  /** Where the rows came from (base URL), for the "来源" hint. */
+  source: string;
+  fetchedAt: string;
+  error?: string;
+}
+
 export interface AppSettings {
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
+  department?: DepartmentConfig;
 }
 
 export interface ProjectSettingsView {

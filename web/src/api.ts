@@ -3,6 +3,7 @@ import type {
   AgentRuntimeStatus,
   AppSettings,
   AuthStatus,
+  DepartmentList,
   ModelInfo,
   Project,
   ProjectSettingsView,
@@ -213,6 +214,16 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<ProjectSettingsView>(r)),
+
+  /**
+   * Department catalogue for project settings. Sourced from the organization
+   * service; `available: false` + `error` means it could not be reached (the
+   * settings page then keeps the stored value instead of failing).
+   */
+  listDepartments: (opts?: { refresh?: boolean }) =>
+    fetch(`${BASE}/org/departments${opts?.refresh ? "?refresh=1" : ""}`).then((r) =>
+      j<DepartmentList>(r),
+    ),
 };
 
 export type { TokenUsage };

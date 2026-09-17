@@ -29,6 +29,16 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
   2. 或直接 `SERVICE_PORT=4212 bash scripts/start.sh`
 - 永远不要占用 `4211`，避免与线上冲突。
 
+## 外部服务依赖
+
+- 项目「所属部门」的可选值来自 **organization 服务**（源码 [organization](https://github.com/kaulie/organization)，本机 `~/runtime/organization`，`:4244`）：
+  `GET /api/v1/departments` → `{ items: [{ id, name, type }], types }`。
+- 网关只做**只读代理 + 短缓存**：`GET /api/org/departments`（`backend/src/organization.ts`，成功缓存 30s、失败缓存 5s，`?refresh=1` 强制刷新）。
+  该服务不可达时返回 `available:false`（HTTP 200），项目设置页保留已存值并提示「组织服务不可达」，不会阻塞设置页加载。
+- 配置：`ORGANIZATION_API_URL`（默认 `http://127.0.0.1:4244`）、`ORGANIZATION_TIMEOUT_MS`（默认 3000ms）。
+- 存储：项目设置 `department: { departmentId, departmentName }` 落在 `projects.settings_json`；
+  只存 ID + 名称快照，不校验 ID 是否仍存在（部门被改名/删除时保留旧值并标注）。
+
 ## 版本与发版
 
 - 开发：在 task 分支 commit / push / GitHub PR（仅在 workspace）。

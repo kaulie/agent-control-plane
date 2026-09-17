@@ -18,9 +18,37 @@ export interface WorkspaceConfig {
   root?: string;
 }
 
+/**
+ * Owning department of a project. Catalogue comes from the organization service
+ * (`GET /api/org/departments`); we store the id plus the name at pick time.
+ */
+export interface DepartmentConfig {
+  departmentId?: string;
+  departmentName?: string;
+}
+
+/** One department row returned by the organization service (via the gateway). */
+export interface DepartmentInfo {
+  id: string;
+  name: string;
+  /** Free-form category, e.g. 研发 / 测试 / 产品. */
+  type?: string;
+}
+
+export interface DepartmentList {
+  /** false when the organization service could not be reached. */
+  available: boolean;
+  items: DepartmentInfo[];
+  types: string[];
+  source: string;
+  fetchedAt: string;
+  error?: string;
+}
+
 export interface AppSettings {
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
+  department?: DepartmentConfig;
 }
 
 export interface ProjectSettingsView {

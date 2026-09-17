@@ -109,17 +109,21 @@ npm run dev:web       # frontend :5174
    use the “时间线” link on an Agent board row) and a time range (15 min … 30
    days, or a custom range) to see what that agent was doing —
    **thinking** (model-side events), **working** (tool-side events) and
-   **idle** (no events). The state is drawn as **one thin stepped line at three
-   heights** (top = thinking, middle = working, bottom = idle, `web/src/
-   timeline-line.ts`): each state is a horizontal run at its own level and every
-   state change is a short vertical jump, so the whole window reads as a single
-   line bouncing up and down instead of a filled band. Stretches with no events
+   **idle** (no events). The state is drawn as **three flat, disconnected dotted
+   rails at three heights** (top = thinking, middle = working, bottom = idle,
+   `web/src/timeline-line.ts`): every state is its own horizontal dotted line and
+   the rails are **never joined by vertical connectors** — the x position is the
+   time and the height is the state, so no line has to drag itself up and down.
+   Each rail is labelled on the left axis (`thinking 模型侧` / `working 工具侧` /
+   `idle 无事件`), the three heights are only 12 apart (was 20) and the line is
+   painted as dots (`stroke-dasharray: 0.1 4.6` + round caps), so the whole band
+   stays light instead of reading as a filled band. Stretches with no events
    for too long are overlaid with an amber dashed line. The user's input events
    are drawn on their own lane and listed in a table, plus a per-run breakdown
    (thinking/working time, tool & model calls, the message that triggered it).
-   Hover any segment/run/marker for exact times (the line keeps per-segment hit
+   Hover any segment/run/marker for exact times (the rails keep per-segment hit
    areas); wide ranges are aggregated into time buckets, which are drawn on the
-   line at their dominant state.
+   rails at their dominant state.
    The range is **automatic by default**: it follows the selected agent's own
    last activity (`lastActiveAt`, not limited by the window), so picking an agent
    that has not run for a day never lands on an empty window. If even the longest
@@ -204,8 +208,8 @@ backend/src/
   usage/          pricing + CostCalculator
   http/ ws/       REST + WebSocket
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
-  timeline-line.ts  状态折线的几何（idle / thinking / working → 三个高度的折线）
+  timeline-line.ts  状态点线的几何（idle / thinking / working → 三条互不相连的水平线）
   board-format.ts   看板数字口径文案（per-agent vs 整个 task，两处都写清）
-web/scripts/     前端纯逻辑测试（折线几何 + SVG 渲染，由 backend 的 run-tests 统一起跑）
+web/scripts/     前端纯逻辑测试（点线几何 + SVG 渲染，由 backend 的 run-tests 统一起跑）
 workspace/        default sandbox for the local agent
 ```

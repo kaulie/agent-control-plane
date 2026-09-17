@@ -2293,13 +2293,16 @@ body {
   font-size: 11px;
 }
 
-/* 状态线：thinking = 模型侧（蓝，最高）/ working = 工具侧（绿，中间）/ idle = 无事件（灰，最低）。
-   三条细线拼成一条随时间上下跳动的折线，不是铺满的色带。 */
+/* 状态点线：thinking = 模型侧（蓝，最高）/ working = 工具侧（绿，中间）/ idle = 无事件（灰，最低）。
+   三条线各占一个高度、**互不相连**（没有上下跳线）：x = 时间、y = 状态；
+   线本身画成**点线** —— round linecap + 极小 dash = 一串圆点，整条带又扁又轻。 */
 .timeline-line {
   fill: none;
-  stroke-width: 2.2;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+  /* 0.1 长的 dash 配上 round linecap 就是直径 2.4 的圆点，点距 4.7 */
+  stroke-dasharray: 0.1 4.6;
 }
 
 .timeline-line.thinking {
@@ -2314,12 +2317,31 @@ body {
   stroke: color-mix(in srgb, var(--text-dim) 55%, transparent);
 }
 
-/* 三个高度上的基准虚线：方便看出这条线跳了几档 */
+/* 左侧纵轴：三条点线的名字 + 含义，颜色跟线一致（不用再靠图例猜高度）。
+   字号比时间刻度小一号：三档只差 12，字再大就会和上下的标签贴到一起。 */
+.timeline-axis-label {
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.timeline-axis-label.thinking {
+  fill: #6f8cff;
+}
+
+.timeline-axis-label.working {
+  fill: var(--green);
+}
+
+.timeline-axis-label.idle {
+  fill: var(--text-dim);
+}
+
+/* 三档高度的基准线：细虚线（和圆点区分开），方便看出这一段落在哪一档 */
 .timeline-guide {
   stroke: var(--border);
   stroke-width: 1;
-  stroke-dasharray: 2 7;
-  opacity: 0.55;
+  stroke-dasharray: 3 7;
+  opacity: 0.4;
 }
 
 .timeline-guide.thinking {
@@ -2420,11 +2442,18 @@ body {
   border-radius: 2px;
 }
 
-/* 状态图例画成「细线」：和折线本身一个样子 */
+/* 状态图例也画成「点线」：和图上那三条线一个样子（圆点 + 间距） */
 .timeline-swatch.state {
-  height: 3px;
-  width: 16px;
-  border-radius: 2px;
+  width: 18px;
+  height: 4px;
+  border-radius: 0;
+  background-image: radial-gradient(
+    circle at center,
+    currentColor 1.4px,
+    transparent 1.5px
+  );
+  background-size: 4.6px 4px;
+  background-repeat: repeat-x;
 }
 
 .timeline-legend-note {
@@ -2433,16 +2462,15 @@ body {
 }
 
 .timeline-swatch.thinking {
-  background: #6f8cff;
+  color: #6f8cff;
 }
 
 .timeline-swatch.working {
-  background: var(--green);
+  color: var(--green);
 }
 
 .timeline-swatch.idle {
-  background: #262b36;
-  border: 1px solid var(--border);
+  color: color-mix(in srgb, var(--text-dim) 75%, transparent);
 }
 
 .timeline-swatch.run {

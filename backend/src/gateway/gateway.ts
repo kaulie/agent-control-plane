@@ -5,6 +5,7 @@ import type {
   AgentSuccession,
   AgentSuccessionReason,
   AppSettings,
+  DepartmentConfig,
   Project,
   ProjectSettingsView,
   RunRecord,
@@ -259,7 +260,7 @@ export class AgentGateway {
 
   createProject(
     name: string,
-    options?: { gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
   ): Project {
     const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });

@@ -113,7 +113,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
 | GET | `/api/projects` | list Projects |
-| POST | `/api/projects` | create Project `{ name }` |
+| POST | `/api/projects` | create Project `{ name, gitRepoUrl?, department? }`（`department` 会作为项目设置一起落库） |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |
 | GET | `/api/projects/:id/settings` | Project settings (`runtime` / `department` + 只读 `cwdRules`) |

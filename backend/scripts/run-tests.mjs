@@ -17,6 +17,7 @@ const tests = [
   { file: "scripts/test-organization.mjs", via: "tsx" },
   { file: "scripts/test-decisions.mjs", via: "tsx" },
   { file: "scripts/test-settings.mjs", via: "node" },
+  { file: "scripts/test-project-department.mjs", via: "node" },
   { file: "scripts/test-run-errors.mjs", via: "node" },
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-queue.mjs", via: "node" },

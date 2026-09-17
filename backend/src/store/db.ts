@@ -8,6 +8,7 @@ import type {
   AgentSuccessionReason,
   AppSettings,
   CostInfo,
+  DepartmentConfig,
   EventType,
   Project,
   RunRecord,
@@ -18,7 +19,12 @@ import type {
   TokenUsage,
   UsageRunSample,
 } from "../types.js";
-import { parseSettings, patchSettings, serializeSettings } from "../settings.js";
+import {
+  normalizeDepartment,
+  parseSettings,
+  patchSettings,
+  serializeSettings,
+} from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
 
 export const DEFAULT_PROJECT_ID = "project-default";
@@ -501,12 +507,15 @@ export class Store {
 
   createProject(
     name: string,
-    options?: { gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
   ): Project {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("project name is required");
     const now = new Date().toISOString();
     const gitRepoUrl = options?.gitRepoUrl?.trim() || null;
+    // 新建项目时可同时带上「所属部门」；它与项目设置共用 settings_json，
+    // 这里一次性写入，避免“项目已建但部门丢了”的中间态。
+    const department = normalizeDepartment(options?.department);
     const project: Project = {
       projectId: newId("project"),
       name: trimmed,
@@ -516,14 +525,15 @@ export class Store {
     };
     this.db
       .prepare(
-        `INSERT INTO projects (project_id, name, workspace_root, git_repo_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (project_id, name, workspace_root, git_repo_url, settings_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         project.projectId,
         project.name,
         null,
         gitRepoUrl,
+        serializeSettings(department ? { department } : {}),
         project.createdAt,
         project.updatedAt,
       );

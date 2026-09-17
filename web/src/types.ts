@@ -202,6 +202,9 @@ export interface AgentTimeline {
   current: boolean;
   /** 这个 agent 自己的最近活跃时间（不受查询窗口限制）。 */
   lastActiveAt?: string;
+  /** 这个 agent 自己的累计（不受窗口限制）：窗口内的「run 轮次」会小很多。 */
+  agentRunCount: number;
+  agentCompletedRounds: number;
   from: string;
   to: string;
   generatedAt: string;
@@ -231,7 +234,23 @@ export interface Task {
   lastUserInputAt?: string;
 }
 
-export type AgentBoardScope = "current" | "all";
+/**
+ * 看板的行范围：`current` = 每个 task 当前那个 agent；`all` = 所有 agent 实例
+ * （含被 succession 替换掉的）；`task` = 每个 task 一行，数字跨它历史上所有 agent。
+ */
+export type AgentBoardScope = "current" | "all" | "task";
+
+/** 一个 task 的累计（跨它历史上所有 agent 实例）。 */
+export interface AgentBoardTaskTotals {
+  completedRounds: number;
+  runCount: number;
+  totalTokens: number;
+  durationMs: number;
+  modelCalls: number;
+  toolCalls: number;
+  /** 这个 task 历史上换过多少个 agent 实例。 */
+  agentCount: number;
+}
 
 /**
  * One agent row of the agent board (`GET /api/agents`).
@@ -275,6 +294,14 @@ export interface AgentBoardRow {
   supersededAt?: string;
   supersededReason?: AgentSuccessionReason;
   replacedByAgentId?: string;
+  /** 这个 task 的累计（跨所有 agent 实例）——per-agent 的数字会明显更小。 */
+  taskTotals?: AgentBoardTaskTotals;
+  /** = taskTotals.agentCount。 */
+  agentCount?: number;
+  /** scope=task 的行：整行代表 task，不是某一个 agent。 */
+  taskScope?: boolean;
+  /** task 行：当前绑定的 agent。 */
+  currentAgentId?: string;
 }
 
 export interface AgentBoardTotals {

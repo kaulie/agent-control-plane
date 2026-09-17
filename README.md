@@ -95,8 +95,16 @@ npm run dev:web       # frontend :5174
    its own name (the agent instance, independent of the task title), department
    (the task's project department), project, task title, completed conversation
    rounds, last activity, model, token spend and accumulated working duration. It
-   can list only the current agent per task or every agent (including the ones
-   replaced by a succession), and clicking a task cell jumps to that task.
+   can list only the current agent per task, every agent (including the ones
+   replaced by a succession), or **one row per task** summed over every agent the
+   task ever had, and clicking a task cell jumps to that task.
+   A task does not keep one agent forever: a succession (mode change / unusable
+   session) swaps in a new SDK agent, and each agent only owns its own runs — so a
+   single agent row shows a much smaller number than the task's real workload
+   (token-tune: 2 rounds on the current agent vs 38 across its 7 agents). Every
+   agent row therefore carries the task's own totals (`taskTotals`) and shows
+   `task 累计 …（N 个 agent）` next to its own rounds; the **task 汇总** scope is
+   the place to read a task's cumulative numbers.
 7. The 🕒 button in the header opens the **Agent timeline**: pick an agent (or
    use the “时间线” link on an Agent board row) and a time range (15 min … 30
    days, or a custom range) to see what that agent was doing —
@@ -149,8 +157,8 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
 | POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
-| GET | `/api/agents` | **Agent 看板**：列出每个 agent（`?scope=current\|all`，默认只列当前 agent；`?projectId=` 过滤），带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长 |
-| GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」） |
+| GET | `/api/agents` | **Agent 看板**：`?scope=current\|all\|task`（默认 `current` = 每个 task 当前那个 agent；`all` = 连同被 succession 替换掉的 agent；`task` = 每个 task 一行、数字跨它历史上**所有** agent 相加）、`?projectId=` 过滤。每行带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长；另带 `taskTotals`（`completedRounds` / `runCount` / `totalTokens` / `durationMs` / `modelCalls` / `toolCalls` / `agentCount`）—— per-agent 的数字在 succession 之后会明显小于 task 的真实工作量，所以两个口径都给。`scope=task` 的行另有 `taskScope: true` / `currentAgentId`（`agentId` 为空，因为整行代表 task） |
+| GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」）+ `agentRunCount` / `agentCompletedRounds`（这个 agent 自己的累计，同样不限窗口：页面上的「run 轮次」只算窗口内） |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
@@ -197,6 +205,7 @@ backend/src/
   http/ ws/       REST + WebSocket
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
   timeline-line.ts  状态折线的几何（idle / thinking / working → 三个高度的折线）
+  board-format.ts   看板数字口径文案（per-agent vs 整个 task，两处都写清）
 web/scripts/     前端纯逻辑测试（折线几何 + SVG 渲染，由 backend 的 run-tests 统一起跑）
 workspace/        default sandbox for the local agent
 ```

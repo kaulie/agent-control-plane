@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorText } from "../api";
+import { roundsTitle, taskRollupText } from "../board-format";
 import { formatDateTime, formatDuration, formatTokens, shortAgentId } from "../format";
 import type { AgentBoard, AgentBoardRow, AgentBoardScope } from "../types";
 
@@ -56,7 +57,8 @@ function readIntervalMs(): number {
 
 function readScope(): AgentBoardScope {
   try {
-    return localStorage.getItem(SCOPE_KEY) === "all" ? "all" : "current";
+    const v = localStorage.getItem(SCOPE_KEY);
+    return v === "all" || v === "task" ? v : "current";
   } catch {
     return "current";
   }
@@ -106,6 +108,8 @@ export default function AgentBoardPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<AgentBoardScope>(() => readScope());
+  /** scope=task：一行 = 整个 task（数字跨它历史上所有 agent 实例）。 */
+  const isTaskScope = scope === "task";
   const [projectId, setProjectId] = useState<string>("");
   const [departmentId, setDepartmentId] = useState<string>("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -222,17 +226,21 @@ export default function AgentBoardPage({
   };
 
   /** 合计跟随筛选结果（后端 totals 是全量，筛选后要重新算）。 */
-  const shown = useMemo(
-    () => ({
+  const shown = useMemo(() => {
+    const byTask = new Map<string, AgentBoardRow>();
+    for (const r of rows) if (!byTask.has(r.taskId)) byTask.set(r.taskId, r);
+    return {
       tokens: rows.reduce((n, r) => n + r.tokens.totalTokens, 0),
       durationMs: rows.reduce((n, r) => n + r.durationMs, 0),
       runs: rows.reduce((n, r) => n + r.runCount, 0),
       rounds: rows.reduce((n, r) => n + r.completedRounds, 0),
       running: rows.filter((r) => r.running).length,
       current: rows.filter((r) => r.current).length,
-    }),
-    [rows],
-  );
+      /** 涉及多少个 task / 这些 task 一共换过多少个 agent 实例。 */
+      tasks: byTask.size,
+      agents: [...byTask.values()].reduce((n, r) => n + (r.agentCount ?? 0), 0),
+    };
+  }, [rows]);
 
   const sortMark = (key: SortKey): string =>
     sortKey === key ? (sortAsc ? " ▲" : " ▼") : "";
@@ -297,6 +305,14 @@ export default function AgentBoardPage({
         {data ? ` 数据时间：${formatDateTime(data.generatedAt)}。` : ""}
       </p>
 
+      <p className="stats-note">
+        ⚠️ 同一个 task 会因 succession（模式切换 / 会话不可用）换过多个 agent，每个
+        agent 只拥有自己那些 run —— 所以单看一行，数字会比 task 的真实工作量小很多
+        （task 行「轮次」列里的「task 累计 …」就是整条 task 的数，含它换过的所有
+        agent）。想看 task 的累计，把范围切到「<b>task 汇总</b>」：每个 task 一行，
+        轮次 / token / 时长都跨它历史上所有 agent 相加。
+      </p>
+
       <div className="stats-filters">
         <label className="stats-filter">
           <span>范围</span>
@@ -306,6 +322,7 @@ export default function AgentBoardPage({
           >
             <option value="current">当前 agent（每个 task 一个）</option>
             <option value="all">全部 agent（含已接替）</option>
+            <option value="task">task 汇总（每个 task 一行）</option>
           </select>
         </label>
         <label className="stats-filter">
@@ -360,22 +377,33 @@ export default function AgentBoardPage({
 
       <div className="stats-summary">
         <div className="stats-card">
-          <div className="stats-card-label">Agent 数（筛选中）</div>
-          <div className="stats-card-value">{rows.length}</div>
+          <div className="stats-card-label">
+            {isTaskScope ? "Task 数（筛选中）" : "Agent 数（筛选中）"}
+          </div>
+          <div className="stats-card-value">{isTaskScope ? shown.tasks : rows.length}</div>
           {data && rows.length !== data.rows.length && (
             <div className="stats-card-caption">共 {data.totals.agentCount} 个</div>
           )}
         </div>
         <div className="stats-card">
-          <div className="stats-card-label">当前 agent</div>
-          <div className="stats-card-value stats-card-value-sm">{shown.current}</div>
+          <div className="stats-card-label">
+            {isTaskScope ? "涉及 agent 实例" : "当前 agent"}
+          </div>
+          <div className="stats-card-value stats-card-value-sm">
+            {isTaskScope ? shown.agents : shown.current}
+          </div>
+          {isTaskScope && (
+            <div className="stats-card-caption">这些 task 历史上换过的总数</div>
+          )}
         </div>
         <div className="stats-card">
           <div className="stats-card-label">运行中</div>
           <div className="stats-card-value stats-card-value-sm">{shown.running}</div>
         </div>
         <div className="stats-card">
-          <div className="stats-card-label">累计完成对话轮次</div>
+          <div className="stats-card-label">
+            累计完成对话轮次{isTaskScope ? "（task 口径）" : ""}
+          </div>
           <div className="stats-card-value stats-card-value-sm">{shown.rounds}</div>
           <div className="stats-card-caption">
             {data && rows.length !== data.rows.length
@@ -418,8 +446,12 @@ export default function AgentBoardPage({
       ) : rows.length === 0 ? (
         <div className="stats-empty">
           {data && data.rows.length > 0
-            ? "当前筛选条件下没有 agent。"
-            : "还没有 agent：创建 task 并让它跑起来后，这里会按 agent 列出。"}
+            ? isTaskScope
+              ? "当前筛选条件下没有 task。"
+              : "当前筛选条件下没有 agent。"
+            : isTaskScope
+              ? "还没有 task：创建 task 并让它跑起来后，这里会按 task 汇总。"
+              : "还没有 agent：创建 task 并让它跑起来后，这里会按 agent 列出。"}
         </div>
       ) : (
         <div className="stats-scroll">
@@ -430,7 +462,8 @@ export default function AgentBoardPage({
                   className="board-head-name"
                   onClick={() => toggleSort("agentName")}
                 >
-                  Agent 名称{sortMark("agentName")}
+                  {isTaskScope ? "Task（汇总）" : "Agent 名称"}
+                  {sortMark("agentName")}
                 </th>
                 <th onClick={() => toggleSort("department")}>
                   所属部门{sortMark("department")}
@@ -438,9 +471,12 @@ export default function AgentBoardPage({
                 <th onClick={() => toggleSort("project")}>
                   所属 Project{sortMark("project")}
                 </th>
-                <th className="board-head-task">所属 Task</th>
+                <th className="board-head-task">
+                  {isTaskScope ? "Task ID / 状态" : "所属 Task"}
+                </th>
                 <th className="board-head-rounds" onClick={() => toggleSort("rounds")}>
-                  累计完成对话轮次{sortMark("rounds")}
+                  累计完成对话轮次{isTaskScope ? "（task 口径）" : ""}
+                  {sortMark("rounds")}
                 </th>
                 <th onClick={() => toggleSort("lastActive")}>
                   最后活跃时间{sortMark("lastActive")}
@@ -463,32 +499,71 @@ export default function AgentBoardPage({
                   }`}
                 >
                   <td className="board-cell-name">
-                    <div className="stats-agent">
-                      {r.running && <span className="board-badge running">运行中</span>}
-                      {!r.current && <span className="board-badge replaced">已接替</span>}
-                      <span
-                        className="board-agent-name"
-                        title={`${r.agentName}\n${r.agentId}\n${r.provider} SDK agent 实例`}
-                      >
-                        {r.agentName}
-                      </span>
-                    </div>
-                    <div className="stats-agent-sub" title={r.agentId}>
-                      {r.provider} · {shortAgentId(r.agentId)}
-                      {r.supersededAt
-                        ? ` · 接替于 ${formatDateTime(r.supersededAt)}${
-                            r.supersededReason === "mode_change" ? "（模式切换）" : ""
-                          }`
-                        : ""}
-                      <button
-                        type="button"
-                        className="board-timeline-link"
-                        title="看这个 agent 的时间线（idle / thinking / working + 用户输入）"
-                        onClick={() => onOpenTimeline(r.agentId)}
-                      >
-                        时间线
-                      </button>
-                    </div>
+                    {r.taskScope ? (
+                      <>
+                        <div className="stats-agent">
+                          {r.running && <span className="board-badge running">运行中</span>}
+                          <button
+                            type="button"
+                            className="board-task-link"
+                            title={`${r.taskTitle}\n${r.taskId}\n点击打开这个 task`}
+                            onClick={() => onOpenTask(r.taskId, r.projectId)}
+                          >
+                            {r.taskTitle || `#${r.taskId.slice(-6)}`}
+                          </button>
+                        </div>
+                        <div className="stats-agent-sub">
+                          汇总 {r.agentCount ?? 0} 个 agent 实例
+                          {r.currentAgentId ? (
+                            <>
+                              {" · 当前 "}
+                              <span className="board-agent-name">
+                                {shortAgentId(r.currentAgentId)}
+                              </span>
+                              <button
+                                type="button"
+                                className="board-timeline-link"
+                                title="看当前 agent 的时间线（idle / thinking / working + 用户输入）"
+                                onClick={() => onOpenTimeline(r.currentAgentId as string)}
+                              >
+                                时间线
+                              </button>
+                            </>
+                          ) : (
+                            " · 当前没有绑定 agent"
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="stats-agent">
+                          {r.running && <span className="board-badge running">运行中</span>}
+                          {!r.current && <span className="board-badge replaced">已接替</span>}
+                          <span
+                            className="board-agent-name"
+                            title={`${r.agentName}\n${r.agentId}\n${r.provider} SDK agent 实例`}
+                          >
+                            {r.agentName}
+                          </span>
+                        </div>
+                        <div className="stats-agent-sub" title={r.agentId}>
+                          {r.provider} · {shortAgentId(r.agentId)}
+                          {r.supersededAt
+                            ? ` · 接替于 ${formatDateTime(r.supersededAt)}${
+                                r.supersededReason === "mode_change" ? "（模式切换）" : ""
+                              }`
+                            : ""}
+                          <button
+                            type="button"
+                            className="board-timeline-link"
+                            title="看这个 agent 的时间线（idle / thinking / working + 用户输入）"
+                            onClick={() => onOpenTimeline(r.agentId)}
+                          >
+                            时间线
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </td>
                   <td className="board-cell-dept">
                     {r.department
@@ -499,25 +574,42 @@ export default function AgentBoardPage({
                     {r.projectName}
                   </td>
                   <td className="board-cell-task">
-                    <button
-                      type="button"
-                      className="board-task-link"
-                      title={`${r.taskTitle}\n${r.taskId}\n点击打开这个 task`}
-                      onClick={() => onOpenTask(r.taskId, r.projectId)}
-                    >
-                      {r.taskTitle || `#${r.taskId.slice(-6)}`}
-                    </button>
-                    <span className="board-task-id">#{r.taskId.slice(-6)}</span>
-                    <span className={`board-status ${r.taskStatus}`}>
-                      {STATUS_LABEL[r.taskStatus]}
-                    </span>
+                    {r.taskScope ? (
+                      <>
+                        <span className="board-task-id" title={r.taskId}>
+                          #{r.taskId.slice(-6)}
+                        </span>
+                        <span className={`board-status ${r.taskStatus}`}>
+                          {STATUS_LABEL[r.taskStatus]}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="board-task-link"
+                          title={`${r.taskTitle}\n${r.taskId}\n点击打开这个 task`}
+                          onClick={() => onOpenTask(r.taskId, r.projectId)}
+                        >
+                          {r.taskTitle || `#${r.taskId.slice(-6)}`}
+                        </button>
+                        <span className="board-task-id">#{r.taskId.slice(-6)}</span>
+                        <span className={`board-status ${r.taskStatus}`}>
+                          {STATUS_LABEL[r.taskStatus]}
+                        </span>
+                      </>
+                    )}
                   </td>
-                  <td
-                    className="stats-num"
-                    title={`完成 ${r.completedRounds} 轮（status = finished）\n共 ${r.runCount} 次 run（含取消 / 出错 / 进行中）`}
-                  >
+                  <td className="stats-num" title={roundsTitle(r)}>
                     {r.completedRounds}
                     <span className="board-runs"> · 共 {r.runCount} runs</span>
+                    {/* per-agent 的数字会明显小于 task 的真实工作量：把 task 累计摆在明面上 */}
+                    {taskRollupText(r) && (
+                      <span className="board-runs board-task-rollup">
+                        {" "}
+                        · {taskRollupText(r)}
+                      </span>
+                    )}
                   </td>
                   <td
                     className="stats-num"
@@ -539,13 +631,25 @@ export default function AgentBoardPage({
                       "en-US",
                     )} · cache read ${r.tokens.cacheReadTokens.toLocaleString(
                       "en-US",
-                    )} · cache write ${r.tokens.cacheWriteTokens.toLocaleString("en-US")}`}
+                    )} · cache write ${r.tokens.cacheWriteTokens.toLocaleString("en-US")}${
+                      !r.taskScope && r.taskTotals
+                        ? `\ntask 累计（所有 agent 相加）：${formatTokens(
+                            r.taskTotals.totalTokens,
+                          )} tokens`
+                        : ""
+                    }`}
                   >
                     {formatTokens(r.tokens.totalTokens)}
                   </td>
                   <td
                     className="stats-num"
-                    title={`${r.runCount} runs · ${formatDuration(r.durationMs)} · model calls ${r.modelCalls} · tool calls ${r.toolCalls}`}
+                    title={`${r.runCount} runs · ${formatDuration(r.durationMs)} · model calls ${r.modelCalls} · tool calls ${r.toolCalls}${
+                      !r.taskScope && r.taskTotals
+                        ? `\ntask 累计（所有 agent 相加）：${formatDuration(
+                            r.taskTotals.durationMs,
+                          )} · ${r.taskTotals.completedRounds} 轮`
+                        : ""
+                    }`}
                   >
                     {formatDuration(r.durationMs)}
                     <span className="board-runs"> · {r.runCount} runs</span>
@@ -555,7 +659,9 @@ export default function AgentBoardPage({
             </tbody>
             <tfoot>
               <tr className="stats-total-row">
-                <td className="stats-total-row-label">合计（{rows.length} 个 agent）</td>
+                <td className="stats-total-row-label">
+                  合计（{isTaskScope ? `${shown.tasks} 个 task` : `${rows.length} 个 agent`}）
+                </td>
                 <td />
                 <td />
                 <td />

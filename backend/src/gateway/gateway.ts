@@ -4,8 +4,10 @@ import type {
   AgentBoard,
   AgentBoardRow,
   AgentBoardScope,
+  AgentBoardTaskTotals,
   AgentBoardTotals,
   AgentEvent,
+  AgentRunSample,
   AgentSuccession,
   AgentSuccessionReason,
   AgentTimeline,
@@ -661,6 +663,10 @@ export class AgentGateway {
         ? task.agentId.trim() === agentId
         : newest?.agentId === agentId,
       ...(lastActiveAt ? { lastActiveAt } : {}),
+      // 这个 agent 自己的累计（不限窗口）：页面的「run 轮次」只算窗口内，
+      // 光看它会以为这个 agent 只跑过这么几轮。
+      agentRunCount: samples.length,
+      agentCompletedRounds: samples.filter((r) => r.status === "finished").length,
       from: fromIso,
       to: toIso,
       generatedAt: new Date().toISOString(),
@@ -715,7 +721,8 @@ export class AgentGateway {
     scope?: AgentBoardScope;
     projectId?: string;
   }): AgentBoard {
-    const scope: AgentBoardScope = opts?.scope === "all" ? "all" : "current";
+    const scope: AgentBoardScope =
+      opts?.scope === "all" || opts?.scope === "task" ? opts.scope : "current";
     const projectFilter = opts?.projectId?.trim() || undefined;
 
     const projects = this.store.listProjects();
@@ -736,14 +743,9 @@ export class AgentGateway {
     }
 
     const aggs = new Map<string, AgentAgg>();
-    for (const run of this.store.listAgentRunSamples()) {
-      if (!taskById.has(run.taskId)) continue;
-      const key = agentKey(run.taskId, run.agentId);
-      let agg = aggs.get(key);
-      if (!agg) {
-        agg = { taskId: run.taskId, agentId: run.agentId, ...emptyAgentAgg() };
-        aggs.set(key, agg);
-      }
+    // task 级汇总：跨该 task 历史上所有 agent 实例（含没有 agent_id 的老 run）。
+    const taskAggs = new Map<string, AgentAgg>();
+    const accumulate = (agg: AgentAgg, run: AgentRunSample): void => {
       agg.runCount += 1;
       if (run.status === "finished") agg.completedRounds += 1;
       agg.durationMs += Math.max(0, run.durationMs ?? 0);
@@ -762,6 +764,43 @@ export class AgentGateway {
       // Samples arrive in created_at order → last assignment is the newest model.
       if (run.model?.trim()) agg.model = run.model.trim();
       if (run.provider?.trim()) agg.provider = run.provider.trim();
+    };
+
+    for (const run of this.store.listAgentRunSamples()) {
+      if (!taskById.has(run.taskId)) continue;
+      let taskAgg = taskAggs.get(run.taskId);
+      if (!taskAgg) {
+        taskAgg = { taskId: run.taskId, agentId: "", ...emptyAgentAgg() };
+        taskAggs.set(run.taskId, taskAgg);
+      }
+      accumulate(taskAgg, run);
+      // 没有 agent 的老 run 只进 task 汇总，不能变成一行 agent。
+      if (!run.agentId) continue;
+      const key = agentKey(run.taskId, run.agentId);
+      let agg = aggs.get(key);
+      if (!agg) {
+        agg = { taskId: run.taskId, agentId: run.agentId, ...emptyAgentAgg() };
+        aggs.set(key, agg);
+      }
+      accumulate(agg, run);
+    }
+
+    // 每个 task 有过多少个 agent 实例（含当前绑定的，以及从没跑过的）。
+    const agentIdsByTask = new Map<string, Set<string>>();
+    const addAgentId = (taskId: string, agentId: string): void => {
+      if (!agentId) return;
+      const set = agentIdsByTask.get(taskId);
+      if (set) set.add(agentId);
+      else agentIdsByTask.set(taskId, new Set([agentId]));
+    };
+    for (const agg of aggs.values()) addAgentId(agg.taskId, agg.agentId);
+    for (const task of tasks) {
+      const bound = task.agentId?.trim();
+      if (bound) addAgentId(task.taskId, bound);
+      else {
+        const fallback = newestAgentIdForTask(aggs, task.taskId);
+        if (fallback) addAgentId(task.taskId, fallback);
+      }
     }
 
     const entries: AgentAgg[] = [];
@@ -772,18 +811,31 @@ export class AgentGateway {
       seen.add(key);
       entries.push(aggs.get(key) ?? { taskId, agentId, ...emptyAgentAgg() });
     };
-    for (const task of tasks) {
-      const bound = task.agentId?.trim();
-      if (scope === "current") {
-        // Fall back to the newest run's agent when the task row is unbound.
-        const agentId = bound || newestAgentIdForTask(aggs, task.taskId);
-        if (agentId) push(task.taskId, agentId);
-        continue;
+    if (scope === "task") {
+      // 每个 task 一行：数字来自 taskAggs（跨该 task 的所有 agent 实例）。
+      for (const task of tasks) {
+        if (!agentIdsByTask.has(task.taskId)) continue;
+        const agg = taskAggs.get(task.taskId) ?? {
+          taskId: task.taskId,
+          agentId: "",
+          ...emptyAgentAgg(),
+        };
+        entries.push(agg);
       }
-      for (const agg of aggs.values()) {
-        if (agg.taskId === task.taskId) push(agg.taskId, agg.agentId);
+    } else {
+      for (const task of tasks) {
+        const bound = task.agentId?.trim();
+        if (scope === "current") {
+          // Fall back to the newest run's agent when the task row is unbound.
+          const agentId = bound || newestAgentIdForTask(aggs, task.taskId);
+          if (agentId) push(task.taskId, agentId);
+          continue;
+        }
+        for (const agg of aggs.values()) {
+          if (agg.taskId === task.taskId) push(agg.taskId, agg.agentId);
+        }
+        if (bound) push(task.taskId, bound);
       }
-      if (bound) push(task.taskId, bound);
     }
     return this.buildAgentBoard({
       scope,
@@ -793,6 +845,8 @@ export class AgentGateway {
       lastEventAt,
       replacedBy,
       projects,
+      taskAggs,
+      agentIdsByTask,
     });
   }
 
@@ -805,10 +859,45 @@ export class AgentGateway {
     lastEventAt: Map<string, string>;
     replacedBy: Map<string, AgentSuccession>;
     projects: Project[];
+    taskAggs: Map<string, AgentAgg>;
+    agentIdsByTask: Map<string, Set<string>>;
   }): AgentBoard {
-    const { scope, entries, tasks, projectById, lastEventAt, replacedBy, projects } =
-      input;
+    const {
+      scope,
+      entries,
+      tasks,
+      projectById,
+      lastEventAt,
+      replacedBy,
+      projects,
+      taskAggs,
+      agentIdsByTask,
+    } = input;
     const taskById = new Map(tasks.map((t) => [t.taskId, t]));
+
+    /** task 累计（跨所有 agent 实例）+ 它有过几个 agent。 */
+    const taskTotalsOf = (taskId: string): AgentBoardTaskTotals => {
+      const agg = taskAggs.get(taskId);
+      const agentCount = agentIdsByTask.get(taskId)?.size ?? 0;
+      return {
+        completedRounds: agg?.completedRounds ?? 0,
+        runCount: agg?.runCount ?? 0,
+        totalTokens: agg?.tokens.totalTokens ?? 0,
+        durationMs: agg?.durationMs ?? 0,
+        modelCalls: agg?.modelCalls ?? 0,
+        toolCalls: agg?.toolCalls ?? 0,
+        agentCount,
+      };
+    };
+    /** task 的「最后活跃」：它所有 agent 里最新的那个。 */
+    const taskLastActiveAt = (taskId: string): string | undefined => {
+      const ids = agentIdsByTask.get(taskId);
+      const values: Array<string | undefined> = [
+        ...(ids ? [...ids].map((id) => lastEventAt.get(agentKey(taskId, id))) : []),
+        taskAggs.get(taskId)?.lastRunAt,
+      ];
+      return latestIso(...values);
+    };
     // Legacy tasks can have runs without `tasks.agent_id` (pre-backfill): the
     // newest agent that ran is the current one.
     const newestByTask = new Map<string, { agentId: string; at: string }>();
@@ -823,6 +912,49 @@ export class AgentGateway {
       const task = taskById.get(agg.taskId);
       if (!task) continue;
       const project = projectById.get(task.projectId);
+      const taskTotals = taskTotalsOf(agg.taskId);
+      const common = {
+        projectId: task.projectId,
+        projectName: project?.name ?? task.projectId,
+        ...(project?.department ? { department: project.department } : {}),
+        taskId: task.taskId,
+        taskTitle: task.title,
+        taskStatus: task.status,
+        taskCreatedAt: task.createdAt,
+        taskWorkspace: task.workspace,
+        taskTotals,
+        agentCount: taskTotals.agentCount,
+      };
+
+      if (scope === "task") {
+        // 一行 = 整个 task（数字跨它历史上所有 agent 实例，`agentId` 为空）。
+        const lastActiveAt =
+          taskLastActiveAt(task.taskId) ??
+          (agg.runCount === 0 ? (task.lastUserInputAt ?? task.createdAt) : undefined);
+        const currentAgentId =
+          task.agentId?.trim() || agentIdsByTask.get(task.taskId)?.values().next().value;
+        const model = task.model?.trim() || agg.model;
+        rows.push({
+          agentId: "",
+          agentName: task.title || `#${task.taskId.slice(-6)}`,
+          provider: task.provider,
+          ...(model ? { model } : {}),
+          ...common,
+          current: false,
+          ...(currentAgentId ? { currentAgentId } : {}),
+          ...(lastActiveAt ? { lastActiveAt } : {}),
+          running: agg.running,
+          tokens: { ...agg.tokens },
+          durationMs: agg.durationMs,
+          runCount: agg.runCount,
+          completedRounds: agg.completedRounds,
+          modelCalls: agg.modelCalls,
+          toolCalls: agg.toolCalls,
+          taskScope: true,
+        });
+        continue;
+      }
+
       const key = agentKey(agg.taskId, agg.agentId);
       const succession = replacedBy.get(key);
       const lastActiveAt = latestIso(
@@ -837,14 +969,7 @@ export class AgentGateway {
         agentName: agentDisplayName(agg.agentId),
         provider: agg.provider ?? task.provider,
         ...(model ? { model } : {}),
-        projectId: task.projectId,
-        projectName: project?.name ?? task.projectId,
-        ...(project?.department ? { department: project.department } : {}),
-        taskId: task.taskId,
-        taskTitle: task.title,
-        taskStatus: task.status,
-        taskCreatedAt: task.createdAt,
-        taskWorkspace: task.workspace,
+        ...common,
         current: task.agentId?.trim()
           ? task.agentId.trim() === agg.agentId
           : newestByTask.get(agg.taskId)?.agentId === agg.agentId,

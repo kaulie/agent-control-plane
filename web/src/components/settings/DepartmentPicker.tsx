@@ -13,6 +13,11 @@ interface Props {
   /** Name snapshot of the current selection (used when the row is gone). */
   departmentName: string;
   onChange: (next: DepartmentSelection) => void;
+  /**
+   * 部门作为必填项（新建项目）。只影响文案与占位项，真正的拦截在
+   * ProjectDialog 的提交校验 + `POST /api/projects`（两处都做）。
+   */
+  required?: boolean;
   /** Optional paragraph rendered under the status line. */
   hint?: string;
 }
@@ -30,6 +35,7 @@ export default function DepartmentPicker({
   departmentId,
   departmentName,
   onChange,
+  required = false,
   hint,
 }: Props) {
   const [list, setList] = useState<DepartmentList | null>(null);
@@ -66,7 +72,10 @@ export default function DepartmentPicker({
   return (
     <>
       <label className="runtime-field runtime-field-wide">
-        <span className="runtime-field-label">部门</span>
+        <span className="runtime-field-label">
+          部门
+          {required && <span className="field-required">必填</span>}
+        </span>
         <select
           className="runtime-select"
           value={departmentId}
@@ -81,7 +90,7 @@ export default function DepartmentPicker({
             });
           }}
         >
-          <option value="">（未设置）</option>
+          <option value="">{required ? "（请选择部门）" : "（未设置）"}</option>
           {items.map((d) => (
             <option key={d.id} value={d.id}>
               {departmentLabel(d)}
@@ -112,7 +121,9 @@ export default function DepartmentPicker({
           <>
             <span>
               组织服务不可达{list?.error ? `（${list.error}）` : ""}
-              ；可以留空，稍后在项目设置里再选。
+              {required
+                ? "；部门为必填，请恢复组织服务后重试。"
+                : "；可以留空，稍后在项目设置里再选。"}
             </span>
             <button
               type="button"
@@ -128,6 +139,7 @@ export default function DepartmentPicker({
               共 {items.length} 个部门
               {list?.source ? ` · 来源 ${list.source}` : ""}
               {list?.types?.length ? ` · 类型：${list.types.join(" / ")}` : ""}
+              {required && items.length === 0 ? "；没有可选部门，无法创建。" : ""}
             </span>
             <button
               type="button"

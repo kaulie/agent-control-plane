@@ -2,6 +2,9 @@
  * Store-level checks: a project created with a department keeps it (the pick is
  * stored in the project's `settings_json`, so it must land with the same insert).
  *
+ * 「部门必填」是 HTTP 层的规则（见 test-project-api.mjs）；store 这一层保持宽松，
+ * 因为默认项目 / 系统项目以及测试都直接调 store，没有部门的概念。
+ *
  * Usage: npm run build --workspace backend && node backend/scripts/test-project-department.mjs
  */
 import assert from "node:assert/strict";

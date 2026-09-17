@@ -26,7 +26,7 @@ const tests = [
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },
-  // 时间线的折线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码
+  // 时间线的点线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码
   // （不需要前端构建）。渲染检查要显式指向 web 的 tsconfig，否则 JSX 走的是
   // backend 的经典 runtime，组件里没 import React 就会炸。
   { file: "../web/scripts/test-timeline-line.mjs", via: "tsx" },

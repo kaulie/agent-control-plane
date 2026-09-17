@@ -70,6 +70,16 @@ const STATE_DESC: Record<AgentActivityState, string> = {
   idle: "没有事件：等待用户、排队、run 之间，或超过阈值没有任何事件",
 };
 
+/**
+ * 左侧纵轴上的短注解：轴上只放得下几个字，所以取 3 个字；完整口径在 `STATE_DESC`
+ * （tooltip）和下面的图例里。
+ */
+const STATE_AXIS_HINT: Record<AgentActivityState, string> = {
+  thinking: "模型侧",
+  working: "工具侧",
+  idle: "无事件",
+};
+
 const RUN_STATUS_LABEL: Record<string, string> = {
   queued: "排队中",
   running: "进行中",
@@ -86,18 +96,30 @@ const MARKER_LABEL: Record<string, string> = {
   stall: "疑似停滞",
 };
 
-const CHART = {
+/**
+ * 时间线图的布局常量（导出是为了让渲染检查能直接断言几何，见
+ * `web/scripts/test-timeline-render.mjs`）。
+ *
+ * 整张图刻意做得**很扁**：三条状态线每档只差 12（原来是 20，加起来 24 高）；
+ * 左边留出 `padL` 写纵轴标签（三条线的名字 + 含义），右边 6。
+ */
+export const TIMELINE_CHART = {
   width: 1000,
-  height: 156,
-  padL: 6,
+  height: 104,
+  /** 左侧纵轴标签（thinking / working / idle 的含义）占的宽度。 */
+  padL: 96,
   padR: 6,
-  /** 状态折线的三个高度：thinking 最高、working 中间、idle 最低（上下跳动的一条线）。 */
-  levels: { thinking: 12, working: 32, idle: 52 },
-  runY: 68,
-  runH: 12,
-  inputY: 90,
-  inputH: 16,
-  axisY: 118,
+  /**
+   * 状态线三档高度：thinking 最高、working 中间、idle 最低。
+   * 每档只差 12（原来是 20）—— 三条线挨得近，纵轴上的标签也刚好不打架
+   * （标签 10px 的墨高约 10.1，留 2 的空隙）。
+   */
+  levels: { thinking: 9, working: 21, idle: 33 },
+  runY: 42,
+  runH: 9,
+  inputY: 56,
+  inputH: 8,
+  axisY: 82,
 };
 
 function readStored(key: string): string {
@@ -256,7 +278,8 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * 状态折线（上 thinking / 中 working / 下 idle）+ run 区间 + 用户输入 marker + 时间轴。
+ * 状态线（三条互不相连的水平点线：上 thinking / 中 working / 下 idle，含义写在左侧纵轴上）
+ * + run 区间 + 用户输入 marker + 时间轴。
  *
  * 导出是为了能直接把这段 SVG 渲染出来检查（见 `web/scripts/test-timeline-render.mjs`）。
  */
@@ -270,13 +293,13 @@ export function TimelineBand({
   const fromMs = Date.parse(data.from);
   const toMs = Date.parse(data.to);
   const spanMs = Math.max(1, toMs - fromMs);
-  const innerW = CHART.width - CHART.padL - CHART.padR;
+  const innerW = TIMELINE_CHART.width - TIMELINE_CHART.padL - TIMELINE_CHART.padR;
   const x = (t: number): number =>
-    CHART.padL + ((Math.min(Math.max(t, fromMs), toMs) - fromMs) / spanMs) * innerW;
+    TIMELINE_CHART.padL + ((Math.min(Math.max(t, fromMs), toMs) - fromMs) / spanMs) * innerW;
   const tips = Array.from({ length: 7 }, (_, i) => fromMs + (spanMs * i) / 6);
 
   /**
-   * 这一段 / 这一桶 → 折线的一段 + hover 文案。段模式和桶模式共用后面的折线绘制：
+   * 这一段 / 这一桶 → 点线的一段 + hover 文案。段模式和桶模式共用后面的点线绘制：
    * 桶模式用桶的 `dominant`（占比最高的状态）作为高度，明细留在 tooltip 里。
    */
   const steps = useMemo(() => {
@@ -322,12 +345,12 @@ export function TimelineBand({
     // x() 只依赖 from/to，data 变了才会重算。
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const shape = useMemo(() => buildStateLine(steps, CHART.levels), [steps]);
+  const shape = useMemo(() => buildStateLine(steps, TIMELINE_CHART.levels), [steps]);
 
   return (
     <svg
       className="timeline-chart"
-      viewBox={`0 0 ${CHART.width} ${CHART.height}`}
+      viewBox={`0 0 ${TIMELINE_CHART.width} ${TIMELINE_CHART.height}`}
       role="img"
       aria-label="agent 状态时间线"
       onMouseLeave={() => onHover(null)}
@@ -339,13 +362,13 @@ export function TimelineBand({
             className="timeline-chart-grid"
             x1={x(t)}
             x2={x(t)}
-            y1={CHART.levels.thinking}
-            y2={CHART.axisY - 4}
+            y1={TIMELINE_CHART.levels.thinking}
+            y2={TIMELINE_CHART.axisY - 4}
           />
           <text
             className="timeline-chart-axis"
             x={x(t)}
-            y={CHART.axisY + 12}
+            y={TIMELINE_CHART.axisY + 12}
             textAnchor={t === fromMs ? "start" : t === toMs ? "end" : "middle"}
           >
             {formatAxisTick(new Date(t).toISOString(), spanMs)}
@@ -353,19 +376,38 @@ export function TimelineBand({
         </g>
       ))}
 
-      {/* 三条状态的基准高度：细虚线，方便看出这条线跳了几档 */}
+      {/*
+        左侧纵轴：把三条横线的含义写在轴上（颜色跟线一致），
+        不用再靠下面的图例去猜哪个高度是什么。
+      */}
+      {TIMELINE_LINE_ORDER.map((state) => (
+        <text
+          key={`label-${state}`}
+          className={`timeline-axis-label ${state}`}
+          x={TIMELINE_CHART.padL - 8}
+          y={TIMELINE_CHART.levels[state] + 3.3}
+          textAnchor="end"
+        >
+          {`${STATE_LABEL[state]} ${STATE_AXIS_HINT[state]}`}
+        </text>
+      ))}
+
+      {/* 三条状态线各自的基准高度：细虚线，和点线区分开（方便看出这一段在哪一档） */}
       {TIMELINE_LINE_ORDER.map((state) => (
         <line
           key={`guide-${state}`}
           className={`timeline-guide ${state}`}
-          x1={CHART.padL}
-          x2={CHART.width - CHART.padR}
-          y1={CHART.levels[state]}
-          y2={CHART.levels[state]}
+          x1={TIMELINE_CHART.padL}
+          x2={TIMELINE_CHART.width - TIMELINE_CHART.padR}
+          y1={TIMELINE_CHART.levels[state]}
+          y2={TIMELINE_CHART.levels[state]}
         />
       ))}
 
-      {/* 状态折线：同一状态连续段连成水平细线，状态变化处一根竖直跳线（颜色跟新状态） */}
+      {/*
+        状态线：三条**互不相连**的水平点线（点状 = CSS 里的 dasharray + round linecap）。
+        状态变化处**不画竖直跳线** —— x 就是时间、高度就是状态。
+      */}
       {shape.paths.map((p) => (
         <path key={p.state} className={`timeline-line ${p.state}`} d={p.d} />
       ))}
@@ -382,15 +424,15 @@ export function TimelineBand({
         />
       ))}
 
-      {/* 命中区：折线本身是一个整体，逐段的 hover / tooltip 还得靠透明矩形 */}
+      {/* 命中区：三条点线是各自独立的 path，逐段的 hover / tooltip 还得靠透明矩形 */}
       {steps.map((s, i) => (
         <rect
           key={`hit-${i}-${s.x0}`}
           className="timeline-hit"
           x={s.x0}
-          y={CHART.levels.thinking - 6}
+          y={TIMELINE_CHART.levels.thinking - 6}
           width={Math.max(0.7, s.x1 - s.x0)}
-          height={CHART.levels.idle - CHART.levels.thinking + 12}
+          height={TIMELINE_CHART.levels.idle - TIMELINE_CHART.levels.thinking + 12}
           onMouseEnter={() => onHover(s.hover)}
         >
           <title>{s.title}</title>
@@ -413,9 +455,9 @@ export function TimelineBand({
             key={r.runId}
             className={`timeline-run ${r.status}`}
             x={sx}
-            y={CHART.runY}
+            y={TIMELINE_CHART.runY}
             width={Math.max(0.7, ex - sx)}
-            height={CHART.runH}
+            height={TIMELINE_CHART.runH}
             rx={2}
             onMouseEnter={() =>
               onHover(
@@ -450,8 +492,8 @@ export function TimelineBand({
               className={isInput ? "timeline-marker-input" : "timeline-marker-stall"}
               points={
                 isInput
-                  ? `${mx},${CHART.inputY} ${mx - 4},${CHART.inputY + 8} ${mx + 4},${CHART.inputY + 8}`
-                  : `${mx},${CHART.inputY + 8} ${mx - 4},${CHART.inputY} ${mx + 4},${CHART.inputY}`
+                  ? `${mx},${TIMELINE_CHART.inputY} ${mx - 4},${TIMELINE_CHART.inputY + 8} ${mx + 4},${TIMELINE_CHART.inputY + 8}`
+                  : `${mx},${TIMELINE_CHART.inputY + 8} ${mx - 4},${TIMELINE_CHART.inputY} ${mx + 4},${TIMELINE_CHART.inputY}`
               }
             />
             {isInput ? (
@@ -459,16 +501,16 @@ export function TimelineBand({
                 className="timeline-marker-input-line"
                 x1={mx}
                 x2={mx}
-                y1={CHART.levels.idle}
-                y2={CHART.inputY}
+                y1={TIMELINE_CHART.levels.idle}
+                y2={TIMELINE_CHART.inputY}
               />
             ) : (
               <line
                 className="timeline-marker-stall-line"
                 x1={mx}
                 x2={mx}
-                y1={CHART.levels.thinking}
-                y2={CHART.inputY}
+                y1={TIMELINE_CHART.levels.thinking}
+                y2={TIMELINE_CHART.inputY}
               />
             )}
             <title>{title}</title>
@@ -1010,11 +1052,11 @@ export default function AgentTimelinePage({
         )}
         <div className="timeline-hover" aria-live="polite">
           {hover ??
-            "悬停折线 / run 条 / 三角标记可看这一段的起止、时长与判定依据；点 task 名可跳回该对话。"}
+            "悬停点线 / run 条 / 三角标记可看这一段的起止、时长与判定依据；点 task 名可跳回该对话。"}
         </div>
         <div className="timeline-legend">
           <span className="timeline-legend-item timeline-legend-note">
-            折线高度 = 状态（上 thinking · 中 working · 下 idle），一条线上下跳
+            点线 = 状态，含义见左侧纵轴（上 thinking 模型侧 · 中 working 工具侧 · 下 idle 无事件）；三条线之间不画连接线
           </span>
           <span className="timeline-legend-item">
             <i className="timeline-swatch state thinking" />

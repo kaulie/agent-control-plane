@@ -71,11 +71,17 @@ export default function ProjectDialog({
 
   const showName = mode === "create" || mode === "rename";
   const showGit = mode === "create" || mode === "gitRepoUrl";
+  /** 新建项目时部门必填：没选就不给点「创建」。 */
+  const missingDepartment = mode === "create" && !departmentId.trim();
 
   const submit = async (): Promise<void> => {
     const trimmedName = name.trim();
     if (showName && !trimmedName) {
       setError("项目名称不能为空");
+      return;
+    }
+    if (missingDepartment) {
+      setError("请选择所属部门（必填）");
       return;
     }
     setSaving(true);
@@ -151,13 +157,18 @@ export default function ProjectDialog({
         {mode === "create" && (
           <div className="modal-field-stack">
             <DepartmentPicker
+              required
               departmentId={departmentId}
               departmentName={departmentName}
               onChange={({ departmentId: id, departmentName: nm }) => {
                 setDepartmentId(id);
                 setDepartmentName(nm);
               }}
-              hint="留空也可以；创建后可在「项目设置 → 所属部门」里随时修改。"
+              hint={
+                missingDepartment
+                  ? "部门为必填项：选中后「创建」才会可用。"
+                  : "创建后可在「项目设置 → 所属部门」里修改。"
+              }
             />
           </div>
         )}
@@ -166,7 +177,11 @@ export default function ProjectDialog({
           <button type="button" className="modal-cancel" onClick={onClose}>
             取消
           </button>
-          <button type="submit" className="settings-save" disabled={saving}>
+          <button
+            type="submit"
+            className="settings-save"
+            disabled={saving || missingDepartment}
+          >
             {saving ? "保存中…" : mode === "create" ? "创建" : "保存"}
           </button>
         </div>

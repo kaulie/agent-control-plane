@@ -290,13 +290,18 @@ export async function registerRoutes(
     if (!name) {
       return reply.code(400).send({ error: "name is required" });
     }
+    // 部门是项目的必填属性：这里拦死，避免绕过 UI 建出“无部门”的项目。
+    // （内部调用（系统项目等）走 store，不经过这个路由。）
+    const department = normalizeDepartment(req.body?.department);
+    if (!department) {
+      return reply.code(400).send({ error: "department is required" });
+    }
     try {
-      const department = normalizeDepartment(req.body?.department);
       const project = gateway.createProject(name, {
         ...(req.body?.gitRepoUrl?.trim()
           ? { gitRepoUrl: req.body.gitRepoUrl.trim() }
           : {}),
-        ...(department ? { department } : {}),
+        department,
       });
       reply.code(201);
       return project;

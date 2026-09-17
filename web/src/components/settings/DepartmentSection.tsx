@@ -32,6 +32,11 @@ export default function DepartmentSection({
           departmentId={departmentId}
           departmentName={departmentName}
           onChange={onChange}
+          hint={
+            departmentId
+              ? undefined
+              : "该项目还没有部门（新建项目时部门必填）；可以在这里补上。"
+          }
         />
       </div>
     </section>

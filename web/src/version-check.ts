@@ -11,6 +11,16 @@ export const UPGRADE_POLL_MS = UPGRADE_POLL_SECONDS * 1_000;
 /** Stop auto-refreshing after this long and let the user reload by hand. */
 const UPGRADE_MAX_WAIT_MS = 10 * 60_000;
 
+/**
+ * Request header every frontend request carries so the gateway can verify the
+ * page is running the version the project actually serves. Must stay in sync
+ * with `backend/src/http/ui-version.ts`.
+ */
+export const UI_VERSION_HEADER = "x-ui-version";
+
+/** Gateway error code for "your page is stale — refresh first". */
+export const UI_VERSION_MISMATCH_CODE = "ui-version-mismatch";
+
 export type VersionUpdate = {
   clientVersion: string;
   serverVersion: string;
@@ -49,6 +59,9 @@ type HealthSnapshot = {
 
 let pending: VersionUpdate | null = null;
 const listeners = new Set<Listener>();
+
+/** Last version `/health` reported; drives the pre-write guard. */
+let lastServerVersion: string | null = null;
 
 let upgradeTarget: string | null = null;
 let upgradeTimer: number | null = null;
@@ -111,10 +124,10 @@ async function fetchHealthSnapshot(): Promise<HealthSnapshot | null> {
     const res = await fetch("/health", { cache: "no-store" });
     if (!res.ok) return null;
     const body = (await res.json()) as HealthSnapshot;
-    return {
-      version: body.version ?? res.headers.get("X-App-Version"),
-      processVersion: body.processVersion,
-    };
+    const version =
+      (body.version ?? res.headers.get("X-App-Version"))?.trim() ?? null;
+    if (version) lastServerVersion = version;
+    return { version, processVersion: body.processVersion };
   } catch {
     return null;
   }
@@ -304,4 +317,96 @@ export async function pollHealthVersion(): Promise<void> {
   const health = await fetchHealthSnapshot();
   if (!health) return;
   checkServerVersion(health.version);
+}
+
+// ---------------------------------------------------------------------------
+// Write guard: a stale page must not persist edits.
+//
+// Two layers, same rule (page version === version the project serves):
+//   1. `checkUiVersionForWrite()` — asked before the request is sent at all;
+//   2. the gateway itself — the same header is verified for every write and
+//      answers `ui-version-mismatch`, so the guard cannot be bypassed.
+// Both funnel into `reportStaleWrite()`, which surfaces the "刷新页面" prompt.
+// ---------------------------------------------------------------------------
+
+/** Result of the pre-flight check that runs before every frontend write. */
+export type UiVersionCheck =
+  | { ok: true; serverVersion: string | null }
+  | { ok: false; serverVersion: string; clientVersion: string };
+
+/**
+ * Is this page the version the project currently serves?
+ *
+ * Always re-reads `/health` (no-store): the tab may have been idle across a
+ * deploy, and a cached answer would let a write through to a version it was not
+ * rendered for. Only fresh evidence rejects — when the gateway is unreachable we
+ * do not block, the request's own failure is the better error.
+ */
+export async function checkUiVersionForWrite(): Promise<UiVersionCheck> {
+  const health = await fetchHealthSnapshot();
+  const serverVersion = health?.version?.trim() ?? null;
+  if (!serverVersion || serverVersion === APP_VERSION) {
+    return { ok: true, serverVersion };
+  }
+  return { ok: false, serverVersion, clientVersion: APP_VERSION };
+}
+
+/** A write that was refused because the page is stale (never applied). */
+export type StaleWriteNotice = {
+  /** UI build that tried to write. */
+  clientVersion: string;
+  /** Version the project serves now; null when the gateway did not say. */
+  serverVersion: string | null;
+  /** Who refused it: our pre-flight, or the gateway's own guard. */
+  source: "client" | "server";
+  at: number;
+};
+
+let staleWrite: StaleWriteNotice | null = null;
+const staleWriteListeners = new Set<(notice: StaleWriteNotice | null) => void>();
+
+function emitStaleWrite(): void {
+  for (const fn of staleWriteListeners) fn(staleWrite);
+}
+
+/**
+ * Records a refused write so the UI can say "必须先刷新页面" instead of leaving
+ * the user staring at a failed save. Also re-arms the update prompt for the
+ * version we just learned about (a rejection is stronger evidence than a poll).
+ */
+export function reportStaleWrite(input: {
+  clientVersion?: string | null;
+  serverVersion?: string | null;
+  source: "client" | "server";
+}): StaleWriteNotice {
+  const serverVersion = input.serverVersion?.trim() || null;
+  if (serverVersion) lastServerVersion = serverVersion;
+  const notice: StaleWriteNotice = {
+    clientVersion: input.clientVersion?.trim() || APP_VERSION,
+    serverVersion,
+    source: input.source,
+    at: Date.now(),
+  };
+  staleWrite = notice;
+  if (serverVersion) checkServerVersion(serverVersion);
+  console.warn("[write-guard] rejected a stale-page write", notice);
+  emitStaleWrite();
+  return notice;
+}
+
+/** User acknowledged the notice; writes stay blocked until the page is current. */
+export function clearStaleWrite(): void {
+  if (!staleWrite) return;
+  staleWrite = null;
+  emitStaleWrite();
+}
+
+export function subscribeStaleWrite(
+  fn: (notice: StaleWriteNotice | null) => void,
+): () => void {
+  staleWriteListeners.add(fn);
+  fn(staleWrite);
+  return () => {
+    staleWriteListeners.delete(fn);
+  };
 }

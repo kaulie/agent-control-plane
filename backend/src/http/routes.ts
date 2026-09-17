@@ -11,6 +11,7 @@ import {
   validateIncomingImages,
   type IncomingImage,
 } from "../attachments.js";
+import { registerUiVersionGuard } from "./ui-version.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -39,6 +40,11 @@ export async function registerRoutes(
   const gracefulRestart = opts.gracefulRestart !== false;
   const version = (): string =>
     opts.resolveAppVersion?.() ?? opts.appVersion;
+
+  // Every frontend write must prove it comes from the version this project
+  // currently serves; a stale page gets 409/428 `ui-version-mismatch` instead
+  // of writing (see ./ui-version.ts).
+  registerUiVersionGuard(app, { serverVersion: version });
 
   app.get("/health", async (_req, reply) => {
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate");

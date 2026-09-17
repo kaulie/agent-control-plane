@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, errorText } from "../api";
 import type { AppSettings } from "../types";
 import WorkspaceRootSection from "./settings/WorkspaceRootSection";
 
@@ -48,7 +48,7 @@ export default function GlobalSettingsPage({ onBack }: Props) {
       setSavedWorkspaceRoot(workspaceRoot);
       setNotice("已保存");
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

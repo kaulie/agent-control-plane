@@ -44,8 +44,17 @@ await registerRoutes(app, gateway, providers, {
   // organization 服务不在测试里跑；部门列表不可用不影响创建（值来自前端选择）。
 });
 
+/** 前端每个写请求都带的“页面版本”（见 backend/src/http/ui-version.ts）。 */
+const UI_VERSION = "0.0.0-test";
+const uiHeaders = { "x-ui-version": UI_VERSION };
+
 const create = (payload) =>
-  app.inject({ method: "POST", url: "/api/projects", payload });
+  app.inject({
+    method: "POST",
+    url: "/api/projects",
+    payload,
+    headers: uiHeaders,
+  });
 const settingsOf = async (projectId) =>
   JSON.parse(
     (await app.inject({ method: "GET", url: `/api/projects/${projectId}/settings` }))
@@ -127,6 +136,7 @@ await app.inject({
   method: "PATCH",
   url: `/api/projects/${project.projectId}/settings`,
   payload: { department: { departmentId: "D0002", departmentName: "工程效能部门" } },
+  headers: uiHeaders,
 });
 assert.deepEqual((await listedProject(project.projectId)).department, {
   departmentId: "D0002",

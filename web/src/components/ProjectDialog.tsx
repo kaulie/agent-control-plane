@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { errorText } from "../api";
 import type { DepartmentConfig } from "../types";
 import DepartmentPicker from "./settings/DepartmentPicker";
 
@@ -99,7 +100,7 @@ export default function ProjectDialog({
       });
       onClose();
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

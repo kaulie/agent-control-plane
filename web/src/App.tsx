@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { api, errorText } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
@@ -23,13 +23,16 @@ import {
 import { APP_VERSION } from "./version";
 import {
   beginUpgrade,
+  clearStaleWrite,
   dismissVersionUpdate,
   finishUpgrade,
   pollHealthVersion,
   reloadForUpdate,
+  subscribeStaleWrite,
   subscribeUpgrade,
   subscribeVersionUpdate,
   UPGRADE_POLL_SECONDS,
+  type StaleWriteNotice,
   type UpgradeState,
   type VersionUpdate,
 } from "./version-check";
@@ -95,6 +98,8 @@ export default function App() {
   // Plan 只是 run 的一种模式：主界面不再有 Plan tab，也不再有 Plan 文档面板。
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
+  /** 写操作因「页面版本 ≠ 项目版本」被拒绝时的提示（必须先刷新页面）。 */
+  const [staleWrite, setStaleWrite] = useState<StaleWriteNotice | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
   /** 项目相关的弹框（新建 / 重命名 / Git 地址），全部居中显示。 */
   const [projectDialog, setProjectDialog] = useState<ProjectDialogMode | null>(
@@ -264,6 +269,9 @@ export default function App() {
   }, [refreshProjects, refreshTasks]);
 
   useEffect(() => subscribeVersionUpdate(setVersionUpdate), []);
+
+  // 写操作被拒绝（页面版本过期）时的提示：必须先刷新页面。
+  useEffect(() => subscribeStaleWrite(setStaleWrite), []);
 
   // Live state of the "正在升级中，请等待" overlay (polled /health progress).
   useEffect(() => subscribeUpgrade(setUpgradeState), []);
@@ -618,7 +626,7 @@ export default function App() {
         void refreshTasks();
         return true;
       } catch (e) {
-        setError(String(e));
+        setError(errorText(e));
         void refreshDetail(selectedId);
         return false;
       }
@@ -633,7 +641,7 @@ export default function App() {
     try {
       await api.stopTask(selectedId);
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
       setStopping(false);
     }
   }, [selectedId, running, stopping]);
@@ -648,7 +656,7 @@ export default function App() {
         setQueueLength(res.queueLength);
         await refreshDetail(selectedId);
       } catch (e) {
-        setError(String(e));
+        setError(errorText(e));
       } finally {
         setCancellingQueuedRunId(null);
       }
@@ -718,7 +726,7 @@ export default function App() {
         await refreshAfterSend(selectedId);
         void refreshTasks();
       } catch (e) {
-        setError(String(e));
+        setError(errorText(e));
         void refreshDetail(selectedId);
       }
     },
@@ -862,7 +870,53 @@ export default function App() {
           {error} ✕
         </div>
       )}
-      {upgradeState ? (
+      {staleWrite ? (
+        <div className="update-modal-backdrop" role="presentation">
+          <div
+            className="update-modal"
+            role="dialog"
+            aria-labelledby="stale-write-modal-title"
+          >
+            <h2 id="stale-write-modal-title" className="update-modal-title">
+              页面版本已过期，本次提交被拒绝
+            </h2>
+            <p className="update-modal-body">
+              当前页面版本为 <code>{staleWrite.clientVersion}</code>，
+              {staleWrite.serverVersion ? (
+                <>
+                  {" "}
+                  项目当前版本为 <code>{staleWrite.serverVersion}</code>。
+                </>
+              ) : (
+                " 无法确认与项目当前版本是否一致。"
+              )}{" "}
+              为避免用旧界面覆盖新版本的数据，写操作已被拒绝（未提交）。
+              <strong>请先刷新页面，再重新提交。</strong>
+            </p>
+            <div className="update-modal-actions">
+              <button
+                type="button"
+                className="update-modal-btn primary"
+                onClick={() => {
+                  const target = staleWrite.serverVersion;
+                  clearStaleWrite();
+                  if (target) beginUpgrade(target);
+                  else reloadForUpdate();
+                }}
+              >
+                立即刷新
+              </button>
+              <button
+                type="button"
+                className="update-modal-btn"
+                onClick={() => clearStaleWrite()}
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : upgradeState ? (
         <div className="update-modal-backdrop" role="presentation">
           <div
             className="update-modal"

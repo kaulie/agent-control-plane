@@ -39,6 +39,21 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
 - 存储：项目设置 `department: { departmentId, departmentName }` 落在 `projects.settings_json`；
   只存 ID + 名称快照，不校验 ID 是否仍存在（部门被改名/删除时保留旧值并标注）。
 
+## 写操作必须校验页面版本（重要）
+
+前端发起的所有写操作，都必须证明「发起写的页面版本」与「项目当前版本」一致，否则拒绝落地。
+
+- 前端：`web/src/api.ts` 里所有写（POST/PATCH/PUT/DELETE）统一走 `write()` —— 提交前先 `GET /health`
+  比对 `APP_VERSION`，并带上 `x-ui-version` 头；不一致时**不发请求**，直接抛 `StaleUiVersionError`。
+- 网关：`backend/src/http/ui-version.ts` 用 `onRequest` 钩子校验**所有** `/api/*` 写请求的
+  `x-ui-version`（与磁盘 `VERSION` = `/health` 的 `version` 比对）：缺失 → `428`，不一致 → `409`；
+  body 为 `{ code: "ui-version-mismatch", clientVersion, serverVersion, mustRefresh: true, error }`；
+  钩子在 handler 之前执行，被拒绝的写**不会生效**。
+- 例外（不校验）：非写方法、非 `/api/` 路径、`/api/ops/*`（部署平台的 graceful 契约，不是浏览器发的）。
+- 前端拿到拒绝（预检或网关）后弹「页面版本已过期，本次提交被拒绝」，主按钮「立即刷新」（`beginUpgrade`）。
+- 新增写接口无需额外配置（钩子按「方法 + 路径前缀」自动覆盖），但**不要**绕过 `api.ts` 的 `write()` 直接 `fetch`。
+- 自测：`node backend/scripts/test-ui-version-guard.mjs`（已加入 `npm test`）。
+
 ## 版本与发版
 
 - 开发：在 task 分支 commit / push / GitHub PR（仅在 workspace）。

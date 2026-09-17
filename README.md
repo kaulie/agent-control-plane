@@ -62,13 +62,20 @@ npm start
 
 ```bash
 npm run dev
-# open http://localhost:5174  (Vite proxies /api and /ws to the backend on :4211)
+# open http://localhost:5174  (Vite proxies /api and /ws to the backend port)
+```
+
+The gateway port resolves as **`SERVICE_PORT` → `PORT` → `4211`**; the Vite dev
+proxy follows the same order, so changing the port only requires setting it once:
+
+```bash
+SERVICE_PORT=4212 npm run dev      # backend + proxy both on 4212
 ```
 
 If you prefer to run the two halves in separate terminals:
 
 ```bash
-npm run dev:backend   # backend :4211
+npm run dev:backend   # backend :4211 (or $SERVICE_PORT)
 npm run dev:web       # frontend :5174
 ```
 

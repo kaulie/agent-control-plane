@@ -18,10 +18,15 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
 
 ## 端口规范（重要）
 
-- **线上（runtime）端口固定为 `4211`**，开发阶段必须避开，改用其它端口（例如 `4212`）。
-- 切换开发端口需要**同时改两处**：
-  1. `backend/.env` → `PORT=4212`
-  2. `web/vite.config.ts` → 代理目标改成 `http://127.0.0.1:4212` 与 `ws://127.0.0.1:4212`
+- 启动端口按 **`SERVICE_PORT` → `PORT`（旧用法）→ `4211`（默认）** 解析；两者都读不到/非法时回退默认。
+  - 后端：`backend/src/config.ts` 的 `resolvePort()`（`SERVICE_PORT` 优先，`PORT` 兼容保留）。
+  - 脚本：`scripts/start.sh` / `stop.sh` / `watchdog.sh` 用同一套解析，`start.sh` 会把端口导出给 node，
+    保证「监听端口」与「健康检查 / 端口清理」始终一致。
+  - 开发代理：`web/vite.config.ts` 也按同一优先级取后端端口，改端口不再需要手改代理目标。
+- **线上（runtime）默认端口为 `4211`**，开发阶段必须避开，改用其它端口（例如 `SERVICE_PORT=4212` 或 `PORT=4212`）。
+- 切换开发端口（二选一即可，代理会自动跟随）：
+  1. `backend/.env` → `SERVICE_PORT=4212`（或 `PORT=4212`）
+  2. 或直接 `SERVICE_PORT=4212 bash scripts/start.sh`
 - 永远不要占用 `4211`，避免与线上冲突。
 
 ## 版本与发版

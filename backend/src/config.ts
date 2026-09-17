@@ -15,6 +15,38 @@ export const CANONICAL_DEV_REPO = "/Users/gaolei/Projects/deepseek_web_cursor";
 /** Per-project agent sandboxes live under this root. */
 export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 
+/** Fallback listen port when no usable env var is set (runtime contract: 4211). */
+export const DEFAULT_PORT = 4211;
+
+/**
+ * Startup port, resolved from the environment:
+ *
+ *   SERVICE_PORT  →  PORT (legacy)  →  DEFAULT_PORT
+ *
+ * Anything empty or not a valid TCP port is ignored (with a warning) instead of
+ * turning into NaN / 0, so a typo never takes the gateway down on boot.
+ */
+export function resolvePort(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const candidates: Array<[string, string | undefined]> = [
+    ["SERVICE_PORT", env.SERVICE_PORT],
+    ["PORT", env.PORT],
+  ];
+  for (const [name, raw] of candidates) {
+    const trimmed = raw?.trim();
+    if (!trimmed) continue;
+    const parsed = Number(trimmed);
+    if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) {
+      return parsed;
+    }
+    console.warn(
+      `[config] ignoring invalid ${name}="${trimmed}" (expected 1-65535); falling back`,
+    );
+  }
+  return DEFAULT_PORT;
+}
+
 /**
  * Project-level local workspace:
  * `<agentWorkspaceRoot>/<project-name>/`.
@@ -35,6 +67,7 @@ export function projectAgentWorkspaceRoot(
 export interface Config {
   /** Git short SHA baked into web build; exposed via /health and X-App-Version. */
   appVersion: string;
+  /** Listen port: SERVICE_PORT → PORT → 4211 (see resolvePort). */
   port: number;
   host: string;
   apiKey: string | undefined;
@@ -157,7 +190,7 @@ export function loadConfig(): Config {
 
   return {
     appVersion: process.env.APP_VERSION?.trim() || "dev",
-    port: Number(process.env.PORT || 4211),
+    port: resolvePort(process.env),
     host: process.env.HOST || "127.0.0.1",
     apiKey: process.env.CURSOR_API_KEY || undefined,
     agentWorkspaceRoot,

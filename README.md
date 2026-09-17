@@ -127,6 +127,20 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/stats/token-usage` | 按 provider/model 粒度、按时间统计总 token 消耗量（`?granularity=hour\|day\|week&projectId=&from=&to=`；缺省按天） |
 | WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
 
+### 写操作必须校验页面版本
+
+前端发起的所有写操作都要证明「发起写的页面版本」与「项目当前版本」一致，否则**拒绝落地**：
+
+- 前端每个写请求都带 `x-ui-version`（= 构建时注入的 `__APP_VERSION__`）；提交前先 `GET /health`
+  比对，不一致时**不发请求**，直接提示「请先刷新页面」（`web/src/api.ts` 的 `write()`）。
+- 网关侧 `backend/src/http/ui-version.ts` 用 `onRequest` 钩子校验**所有** `/api/*` 写请求，
+  与 `version()`（磁盘 `VERSION`，即 `/health` 的 `version`）比对：
+  - 缺 `x-ui-version` → `428`；值不一致 → `409`；
+  - body：`{ code: "ui-version-mismatch", clientVersion, serverVersion, mustRefresh: true, error }`；
+  - 钩子先于 handler 执行，被拒绝的写**不会生效**（前端弹「页面版本已过期，本次提交被拒绝」+「立即刷新」）。
+- 不校验：非写方法、非 `/api/` 路径、`/api/ops/*`（部署平台的 graceful 契约，非浏览器发起）。
+- `curl` 手工调写接口时要自己带：`-H "x-ui-version: $(cat VERSION)"`（在 runtime 目录下执行）。
+
 Each Task belongs to a Project (`projectId`). On first boot a default project
 `Default` (`project-default`) is created and existing tasks are attached to it.
 

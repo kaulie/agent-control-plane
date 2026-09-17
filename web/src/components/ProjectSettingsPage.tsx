@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, errorText } from "../api";
 import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
@@ -85,7 +85,7 @@ export default function ProjectSettingsPage({
       setDepartmentName(data.project.department?.departmentName ?? "");
       setNotice("已保存");
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

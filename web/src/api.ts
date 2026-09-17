@@ -16,6 +16,13 @@ import type {
   UsageGranularity,
   UsageTimeZone,
 } from "./types";
+import { APP_VERSION } from "./version";
+import {
+  checkUiVersionForWrite,
+  reportStaleWrite,
+  UI_VERSION_HEADER,
+  UI_VERSION_MISMATCH_CODE,
+} from "./version-check";
 
 const BASE = "/api";
 
@@ -31,6 +38,93 @@ async function j<T>(res: Response): Promise<T> {
     throw new Error(msg);
   }
   return (await res.json()) as T;
+}
+
+/** Human-readable text for anything thrown by the API layer. */
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Thrown when a write was refused because this page is not the version the
+ * project currently serves. The write was NOT applied — refresh and retry.
+ */
+export class StaleUiVersionError extends Error {
+  readonly code = UI_VERSION_MISMATCH_CODE;
+  readonly mustRefresh = true;
+  constructor(
+    readonly clientVersion: string,
+    readonly serverVersion: string | null,
+  ) {
+    super(
+      serverVersion
+        ? `页面版本（${clientVersion}）与项目当前版本（${serverVersion}）不一致，本次提交已被拒绝。请先刷新页面，再重新提交。`
+        : `页面版本已过期，无法确认与项目当前版本一致，本次提交已被拒绝。请先刷新页面，再重新提交。`,
+    );
+    this.name = "StaleUiVersionError";
+  }
+}
+
+/** Gateway rejection body for a stale-page write. */
+type UiVersionMismatchBody = {
+  code?: string;
+  clientVersion?: string | null;
+  serverVersion?: string | null;
+};
+
+/** Reads the guard's 409/428 answer; null when this is some other error. */
+async function readUiVersionMismatch(
+  res: Response,
+): Promise<UiVersionMismatchBody | null> {
+  if (res.status !== 409 && res.status !== 428) return null;
+  try {
+    const body = (await res.clone().json()) as UiVersionMismatchBody;
+    return body.code === UI_VERSION_MISMATCH_CODE ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Single funnel for every frontend write.
+ *
+ * Checks the page version *before* sending (nothing is submitted from a stale
+ * tab), stamps the UI version on the request, and turns the gateway's own
+ * `ui-version-mismatch` rejection into the same "refresh first" outcome — the
+ * server check is the authoritative one, this is the fast path.
+ */
+async function write<T>(
+  path: string,
+  init: { method: "POST" | "PATCH" | "PUT" | "DELETE"; body?: unknown },
+): Promise<T> {
+  const check = await checkUiVersionForWrite();
+  if (!check.ok) {
+    reportStaleWrite({
+      clientVersion: check.clientVersion,
+      serverVersion: check.serverVersion,
+      source: "client",
+    });
+    throw new StaleUiVersionError(check.clientVersion, check.serverVersion);
+  }
+
+  const res = await fetch(`${BASE}${path}`, {
+    method: init.method,
+    headers: {
+      "content-type": "application/json",
+      [UI_VERSION_HEADER]: APP_VERSION,
+    },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+
+  const rejected = await readUiVersionMismatch(res);
+  if (rejected) {
+    const clientVersion = rejected.clientVersion?.trim() || APP_VERSION;
+    const serverVersion = rejected.serverVersion?.trim() || null;
+    reportStaleWrite({ clientVersion, serverVersion, source: "server" });
+    throw new StaleUiVersionError(clientVersion, serverVersion);
+  }
+
+  return j<T>(res);
 }
 
 export const api = {
@@ -53,19 +147,10 @@ export const api = {
   createProject: (
     name: string,
     options?: { gitRepoUrl?: string; department?: DepartmentConfig },
-  ) =>
-    fetch(`${BASE}/projects`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, ...options }),
-    }).then((r) => j<Project>(r)),
+  ) => write<Project>("/projects", { method: "POST", body: { name, ...options } }),
 
   renameProject: (projectId: string, name: string) =>
-    fetch(`${BASE}/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    }).then((r) => j<Project>(r)),
+    write<Project>(`/projects/${projectId}`, { method: "PATCH", body: { name } }),
 
   updateProject: (
     projectId: string,
@@ -73,12 +158,7 @@ export const api = {
       name?: string;
       gitRepoUrl?: string | null;
     },
-  ) =>
-    fetch(`${BASE}/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => j<Project>(r)),
+  ) => write<Project>(`/projects/${projectId}`, { method: "PATCH", body }),
 
   listTasks: (projectId?: string) => {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
@@ -91,12 +171,7 @@ export const api = {
     projectId?: string;
     provider?: string;
     model?: string;
-  }) =>
-    fetch(`${BASE}/tasks`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => j<Task>(r)),
+  }) => write<Task>("/tasks", { method: "POST", body }),
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 
@@ -165,16 +240,18 @@ export const api = {
     mode?: "agent" | "plan",
     planAnswerBatch?: import("./plan-questions").PlanAnswerBatch,
   ) =>
-    fetch(`${BASE}/tasks/${id}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        message,
-        ...(images?.length ? { images } : {}),
-        ...(mode ? { mode } : {}),
-        ...(planAnswerBatch ? { planAnswerBatch } : {}),
-      }),
-    }).then((r) => j<{ runId: string; queued?: boolean; queueLength?: number }>(r)),
+    write<{ runId: string; queued?: boolean; queueLength?: number }>(
+      `/tasks/${id}/messages`,
+      {
+        method: "POST",
+        body: {
+          message,
+          ...(images?.length ? { images } : {}),
+          ...(mode ? { mode } : {}),
+          ...(planAnswerBatch ? { planAnswerBatch } : {}),
+        },
+      },
+    ),
 
   listAgentSuccessions: (taskId: string) =>
     fetch(`${BASE}/tasks/${taskId}/agent-successions`).then((r) =>
@@ -182,27 +259,21 @@ export const api = {
     ),
 
   stopTask: (id: string) =>
-    fetch(`${BASE}/tasks/${id}/stop`, {
+    write<{ runId: string; stopped: boolean }>(`/tasks/${id}/stop`, {
       method: "POST",
-    }).then((r) => j<{ runId: string; stopped: boolean }>(r)),
+    }),
 
   cancelQueuedRun: (taskId: string, runId: string) =>
-    fetch(
-      `${BASE}/tasks/${taskId}/runs/${encodeURIComponent(runId)}/cancel`,
+    write<{ runId: string; queueLength: number; cancelled: boolean }>(
+      `/tasks/${taskId}/runs/${encodeURIComponent(runId)}/cancel`,
       { method: "POST" },
-    ).then((r) =>
-      j<{ runId: string; queueLength: number; cancelled: boolean }>(r),
     ),
 
   getGlobalSettings: () =>
     fetch(`${BASE}/settings/global`).then((r) => j<AppSettings>(r)),
 
   updateGlobalSettings: (body: AppSettings) =>
-    fetch(`${BASE}/settings/global`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => j<AppSettings>(r)),
+    write<AppSettings>("/settings/global", { method: "PATCH", body }),
 
   getProjectSettings: (projectId: string) =>
     fetch(`${BASE}/projects/${projectId}/settings`).then((r) =>
@@ -210,11 +281,10 @@ export const api = {
     ),
 
   updateProjectSettings: (projectId: string, body: AppSettings) =>
-    fetch(`${BASE}/projects/${projectId}/settings`, {
+    write<ProjectSettingsView>(`/projects/${projectId}/settings`, {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => j<ProjectSettingsView>(r)),
+      body,
+    }),
 
   /**
    * Department catalogue for project settings. Sourced from the organization

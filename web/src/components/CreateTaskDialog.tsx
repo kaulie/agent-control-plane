@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, errorText } from "../api";
 import type { ModelInfo, ProviderInfo } from "../types";
 
 interface Props {
@@ -82,7 +82,7 @@ export default function CreateTaskDialog({
       });
       onClose();
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

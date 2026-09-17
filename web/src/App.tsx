@@ -7,6 +7,10 @@ import UsageBar from "./components/UsageBar";
 import UsageStatsPage from "./components/UsageStatsPage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
+import ProjectDialog, {
+  type ProjectDialogMode,
+  type ProjectDialogResult,
+} from "./components/ProjectDialog";
 import Timeline from "./components/Timeline";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
@@ -92,6 +96,10 @@ export default function App() {
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  /** 项目相关的弹框（新建 / 重命名 / Git 地址），全部居中显示。 */
+  const [projectDialog, setProjectDialog] = useState<ProjectDialogMode | null>(
+    null,
+  );
   const [createTaskDefaults, setCreateTaskDefaults] = useState<{
     provider?: string;
     model?: string;
@@ -502,47 +510,48 @@ export default function App() {
     [refreshTasks, selectTask, selectedProjectId],
   );
 
-  const createProject = useCallback(async () => {
-    const name = window.prompt("Project name:");
-    if (!name?.trim()) return;
-    try {
-      const project = await api.createProject(name.trim());
-      await refreshProjects();
-      await selectProject(project.projectId);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [refreshProjects, selectProject]);
-
-  const renameProject = useCallback(async () => {
-    if (!selectedProjectId) return;
-    const current = projects.find((p) => p.projectId === selectedProjectId);
-    const name = window.prompt("Rename project:", current?.name ?? "");
-    if (!name?.trim()) return;
-    try {
-      await api.renameProject(selectedProjectId, name.trim());
-      await refreshProjects();
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [projects, refreshProjects, selectedProjectId]);
-
-  const setProjectGitRepoUrl = useCallback(async () => {
-    if (!selectedProjectId) return;
-    const current = projects.find((p) => p.projectId === selectedProjectId);
-    const hint =
-      "项目 Git 仓库地址（https / ssh / 本地路径）。\nAgent 将按 BRANCHING 规范从此地址 clone/push。\n留空则清除配置。";
-    const value = window.prompt(hint, current?.gitRepoUrl ?? "");
-    if (value === null) return;
-    try {
-      await api.updateProject(selectedProjectId, {
-        gitRepoUrl: value.trim() || null,
+  const createProject = useCallback(
+    async (input: ProjectDialogResult) => {
+      const project = await api.createProject(input.name, {
+        ...(input.gitRepoUrl ? { gitRepoUrl: input.gitRepoUrl } : {}),
+        ...(input.department.departmentId || input.department.departmentName
+          ? { department: input.department }
+          : {}),
       });
       await refreshProjects();
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [projects, refreshProjects, selectedProjectId]);
+      await selectProject(project.projectId);
+    },
+    [refreshProjects, selectProject],
+  );
+
+  const renameProject = useCallback(
+    async (input: ProjectDialogResult) => {
+      if (!selectedProjectId) return;
+      await api.renameProject(selectedProjectId, input.name);
+      await refreshProjects();
+    },
+    [refreshProjects, selectedProjectId],
+  );
+
+  const setProjectGitRepoUrl = useCallback(
+    async (input: ProjectDialogResult) => {
+      if (!selectedProjectId) return;
+      await api.updateProject(selectedProjectId, {
+        gitRepoUrl: input.gitRepoUrl,
+      });
+      await refreshProjects();
+    },
+    [refreshProjects, selectedProjectId],
+  );
+
+  const submitProjectDialog = useCallback(
+    async (input: ProjectDialogResult): Promise<void> => {
+      if (projectDialog === "create") return createProject(input);
+      if (projectDialog === "rename") return renameProject(input);
+      return setProjectGitRepoUrl(input);
+    },
+    [createProject, projectDialog, renameProject, setProjectGitRepoUrl],
+  );
 
   /** Pull events/detail after send so the user message is visible even if WS is quiet. */
   const refreshAfterSend = useCallback(
@@ -792,9 +801,9 @@ export default function App() {
           projects={projects}
           selectedProjectId={selectedProjectId}
           onSelectProject={(id) => void selectProject(id)}
-          onCreateProject={() => void createProject()}
-          onRenameProject={() => void renameProject()}
-          onSetGitRepoUrl={() => void setProjectGitRepoUrl()}
+          onCreateProject={() => setProjectDialog("create")}
+          onRenameProject={() => setProjectDialog("rename")}
+          onSetGitRepoUrl={() => setProjectDialog("gitRepoUrl")}
           onOpenProjectSettings={() => setView("project-settings")}
           tasks={tasks}
           selectedId={selectedId}
@@ -948,6 +957,24 @@ export default function App() {
           onCreate={createTask}
         />
       )}
+      <ProjectDialog
+        open={projectDialog !== null}
+        mode={projectDialog ?? "create"}
+        initialName={
+          projectDialog === "rename"
+            ? (projects.find((p) => p.projectId === selectedProjectId)?.name ??
+              "")
+            : ""
+        }
+        initialGitRepoUrl={
+          projectDialog === "gitRepoUrl"
+            ? (projects.find((p) => p.projectId === selectedProjectId)
+                ?.gitRepoUrl ?? "")
+            : ""
+        }
+        onClose={() => setProjectDialog(null)}
+        onSubmit={submitProjectDialog}
+      />
     </div>
   );
 }

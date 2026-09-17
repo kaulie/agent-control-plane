@@ -3,6 +3,7 @@ import type {
   AgentRuntimeStatus,
   AppSettings,
   AuthStatus,
+  DepartmentConfig,
   DepartmentList,
   ModelInfo,
   Project,
@@ -51,7 +52,7 @@ export const api = {
 
   createProject: (
     name: string,
-    options?: { gitRepoUrl?: string },
+    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
   ) =>
     fetch(`${BASE}/projects`, {
       method: "POST",

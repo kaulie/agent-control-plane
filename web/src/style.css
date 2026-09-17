@@ -1540,6 +1540,27 @@ body {
   color: var(--red);
   font-size: 13px;
 }
+
+.modal-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+/* 弹框里的复合字段（标签 / 下拉 / 状态行 / 提示）纵向排列。 */
+.modal-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 小窗口下弹框仍然完整可见（居中靠 .modal-backdrop 的 flex 居中）。 */
+.modal-dialog,
+.update-modal {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
 /* ---- Token 用量统计页 ---- */
 .stats-page {
   flex: 1;

@@ -2,9 +2,10 @@ import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
-import type { AppSettings, DepartmentList } from "../types.js";
+import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
 import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
+import { normalizeDepartment } from "../settings.js";
 import {
   resolveAttachmentPath,
   validateIncomingImages,
@@ -278,17 +279,24 @@ export async function registerRoutes(
   app.get("/api/projects", async () => gateway.listProjects());
 
   app.post<{
-    Body: { name?: string; gitRepoUrl?: string };
+    Body: {
+      name?: string;
+      gitRepoUrl?: string;
+      /** 新建项目时同时指定所属部门（catalogue 来自 organization 服务）。 */
+      department?: DepartmentConfig;
+    };
   }>("/api/projects", async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) {
       return reply.code(400).send({ error: "name is required" });
     }
     try {
+      const department = normalizeDepartment(req.body?.department);
       const project = gateway.createProject(name, {
         ...(req.body?.gitRepoUrl?.trim()
           ? { gitRepoUrl: req.body.gitRepoUrl.trim() }
           : {}),
+        ...(department ? { department } : {}),
       });
       reply.code(201);
       return project;

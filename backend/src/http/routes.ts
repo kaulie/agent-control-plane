@@ -362,7 +362,8 @@ export async function registerRoutes(
       const scopeRaw = req.query.scope?.trim().toLowerCase();
       const projectId = req.query.projectId?.trim() || undefined;
       return gateway.getAgentBoard({
-        scope: scopeRaw === "all" ? "all" : "current",
+        scope:
+          scopeRaw === "all" ? "all" : scopeRaw === "task" ? "task" : "current",
         ...(projectId ? { projectId } : {}),
       });
     },

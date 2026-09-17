@@ -30,6 +30,7 @@ const tests = [
   // （不需要前端构建）。渲染检查要显式指向 web 的 tsconfig，否则 JSX 走的是
   // backend 的经典 runtime，组件里没 import React 就会炸。
   { file: "../web/scripts/test-timeline-line.mjs", via: "tsx" },
+  { file: "../web/scripts/test-board-format.mjs", via: "tsx" },
   {
     file: "../web/scripts/test-timeline-render.mjs",
     via: "tsx",

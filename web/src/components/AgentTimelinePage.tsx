@@ -974,8 +974,16 @@ export default function AgentTimelinePage({
           <div className="stats-card-value">{data?.totals.userInputCount ?? 0}</div>
         </div>
         <div className="stats-card">
-          <div className="stats-card-label">run 轮次</div>
+          <div className="stats-card-label">run 轮次（本窗口）</div>
           <div className="stats-card-value">{data?.totals.runCount ?? 0}</div>
+          {data && (
+            <div
+              className="stats-card-caption"
+              title="「run 轮次」只统计当前窗口内的 run；累计是这个 agent 自己的全部 run（不含 task 里被 succession 换掉的其他 agent）"
+            >
+              该 agent 累计 {data.agentCompletedRounds} 轮 / {data.agentRunCount} runs
+            </div>
+          )}
         </div>
         <div className="stats-card">
           <div className="stats-card-label">工具 / 模型调用</div>

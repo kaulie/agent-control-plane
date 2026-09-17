@@ -274,8 +274,35 @@ export interface AgentRunSample {
   toolCalls: number;
 }
 
-/** Which agents the board lists. */
-export type AgentBoardScope = "current" | "all";
+/**
+ * Which rows the board lists:
+ * - `current` — the agent each task currently runs (one row per task);
+ * - `all` — every agent instance, including the ones a succession replaced;
+ * - `task` — one row per task, **summed over every agent instance it ever had**
+ *   (a task that swapped agents six times is one row here, not seven).
+ */
+export type AgentBoardScope = "current" | "all" | "task";
+
+/**
+ * A task's cumulative numbers, summed over every agent instance it ever had.
+ *
+ * A task does not keep one agent forever: a succession (mode change / unusable
+ * session) swaps in a new SDK agent, and each agent only owns its own runs. So a
+ * single agent row after a swap shows a small number while the task as a whole
+ * has done far more — `taskTotals` is that "whole task" number.
+ */
+export interface AgentBoardTaskTotals {
+  /** status = finished 的 run 数（= 累计完成对话轮次）。 */
+  completedRounds: number;
+  /** 所有 run（含取消 / 出错 / 进行中）。 */
+  runCount: number;
+  totalTokens: number;
+  durationMs: number;
+  modelCalls: number;
+  toolCalls: number;
+  /** 这个 task 历史上换过多少个 agent 实例（含当前绑定的 / 从没跑过的）。 */
+  agentCount: number;
+}
 
 /**
  * One agent row of the agent board.
@@ -286,7 +313,7 @@ export type AgentBoardScope = "current" | "all";
  * the board, marked with `supersededAt`.
  */
 export interface AgentBoardRow {
-  /** SDK agent id (`agent-…` for Cursor, `cls-…` for Cline). */
+  /** SDK agent id (`agent-…` for Cursor, `cls-…` for Cline). `""` on a scope=task row. */
   agentId: string;
   /**
    * Agent 自己的名称，独立于 task：由 agent id 归一化而来
@@ -325,6 +352,17 @@ export interface AgentBoardRow {
   supersededAt?: string;
   supersededReason?: AgentSuccessionReason;
   replacedByAgentId?: string;
+  /**
+   * 这个 task 的累计（跨它历史上所有 agent 实例）。每行都带，因为 per-agent 的
+   * 「累计完成对话轮次」在 succession 之后会明显小于 task 的真实工作量。
+   */
+  taskTotals?: AgentBoardTaskTotals;
+  /** = `taskTotals.agentCount`（方便前端直接用）。 */
+  agentCount?: number;
+  /** `scope=task` 的行：整行代表 task，不是某一个 agent（`agentId` 为空）。 */
+  taskScope?: boolean;
+  /** task 行：当前绑定的 agent（可跳它的时间线）。 */
+  currentAgentId?: string;
 }
 
 export interface AgentBoardTotals {
@@ -482,6 +520,12 @@ export interface AgentTimeline {
    * 前端用它判断「窗口选错了」还是「这个 agent 真的没动过」。
    */
   lastActiveAt?: string;
+  /**
+   * 这个 agent 自己的累计 run 数 / 完成轮次（**不限窗口**）：时间线页面上的
+   * 「run 轮次」只统计窗口内，光看它会以为这个 agent 只跑过这么几轮。
+   */
+  agentRunCount: number;
+  agentCompletedRounds: number;
   from: string;
   to: string;
   generatedAt: string;

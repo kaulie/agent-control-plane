@@ -2228,6 +2228,11 @@ body {
   font-size: 11px;
 }
 
+/* 「task 累计 …」：per-agent 数字旁边补一行 task 口径（succession 后两者差别很大） */
+.board-task-rollup {
+  color: color-mix(in srgb, var(--accent) 65%, var(--text-dim));
+}
+
 
 /* ---- Agent 时间线（idle / thinking / working + 用户输入）---- */
 .timeline-page .stats-filter-grow select {

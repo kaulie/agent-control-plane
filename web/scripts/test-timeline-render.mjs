@@ -35,6 +35,8 @@ const data = {
   projectName: "web-cursor",
   current: true,
   lastActiveAt: T(40),
+  agentRunCount: 1,
+  agentCompletedRounds: 1,
   from: T(0),
   to: T(60),
   generatedAt: T(60),

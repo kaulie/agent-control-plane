@@ -1186,9 +1186,13 @@ export class Store {
   }
 
   /**
-   * Every run of a task that carries an agent id, with the fields the agent
-   * board aggregates (tokens per run, wall-clock duration, activity).
+   * Every run row, oldest first, with the fields the agent board / timeline
+   * aggregate (tokens per run, wall-clock duration, activity).
    * Grouping/merging stays in the gateway so `tokenVolume` is applied once.
+   *
+   * `agentId` is `""` for legacy runs written before the agent was recorded.
+   * Those still count towards their **task** rollup (so the board's task totals
+   * match `/api/tasks/:taskId`); they just cannot form an agent row.
    */
   listAgentRunSamples(): AgentRunSample[] {
     const rows = this.db
@@ -1197,8 +1201,6 @@ export class Store {
                 created_at, completed_at, duration_ms, usage_json,
                 model_calls, tool_calls
          FROM runs
-         WHERE agent_id IS NOT NULL
-           AND agent_id != ''
          ORDER BY created_at ASC`,
       )
       .all() as unknown as Array<{

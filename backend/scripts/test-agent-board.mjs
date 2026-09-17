@@ -356,6 +356,45 @@ assert.deepEqual(
   { departmentId: "D0001", departmentName: "SRE部门" },
 );
 
+// ---- 4b) task 口径：per-agent 的数字 + 「这个 task 一共做了多少」 ----
+// t1 换过 agent：AGENT_ONE 3 次 run（含 1 次出错）/ AGENT_TWO 2 次（1 个还在跑）。
+// 单看一行会以为这个 task 只做了 1~2 轮 —— taskTotals 才是整条 task 的账。
+const t1Totals = rowOf(current, t1.taskId, AGENT_TWO)?.taskTotals;
+assert.ok(t1Totals, "每个 agent 行都带该 task 的累计");
+assert.equal(t1Totals.completedRounds, 3, "两个 agent 的 finished run 加起来");
+assert.equal(t1Totals.runCount, 5, "含出错 / 进行中");
+assert.equal(t1Totals.totalTokens, 3600 + 6000);
+assert.equal(t1Totals.durationMs, 35_000 + 60_000);
+assert.equal(t1Totals.agentCount, 2, "这个 task 换过 2 个 agent");
+assert.equal(rowOf(current, t1.taskId, AGENT_TWO)?.agentCount, 2);
+
+// scope=task：每个 task 一行，数字跨它历史上所有 agent。
+const perTask = await board("?scope=task");
+assert.equal(perTask.scope, "task");
+assert.equal(perTask.rows.length, 3, "t1 / t2 / t4 各一行（t3 没有 agent）");
+assert.equal(
+  perTask.rows.filter((r) => r.taskScope).length,
+  3,
+  "这些行代表整个 task，不是某一个 agent",
+);
+const t1Task = perTask.rows.find((r) => r.taskId === t1.taskId);
+assert.ok(t1Task);
+assert.equal(t1Task.agentId, "", "task 行不属于某个 agent");
+assert.equal(t1Task.agentName, "Fix the flaky test", "task 行显示 task 标题");
+assert.equal(t1Task.completedRounds, 3, "task 口径 = 所有 agent 相加");
+assert.equal(t1Task.runCount, 5);
+assert.equal(t1Task.tokens.totalTokens, 3600 + 6000);
+assert.equal(t1Task.durationMs, 95_000);
+assert.equal(t1Task.agentCount, 2);
+assert.equal(t1Task.currentAgentId, AGENT_TWO, "task 行也指得出当前绑定的 agent");
+assert.equal(t1Task.current, false, "task 行本身不是一个 agent 实例");
+assert.equal(t1Task.running, true, "有一个 agent 的 run 还在跑");
+assert.equal(t1Task.lastActiveAt, "2026-09-02T09:00:30.000Z", "取该 task 所有 agent 里最新的活跃");
+const t2Task = perTask.rows.find((r) => r.taskId === t2.taskId);
+assert.equal(t2Task?.agentCount, 1, "绑了 agent 但没跑过 → 也算一个 agent");
+assert.equal(t2Task?.completedRounds, 0);
+assert.equal(t2Task?.lastActiveAt, "2026-09-03T12:00:00.000Z");
+
 // ---- 4) projectId 过滤 / 参数兜底 ----
 const betaOnly = await board(`?projectId=${beta.projectId}`);
 assert.equal(betaOnly.rows.length, 1);

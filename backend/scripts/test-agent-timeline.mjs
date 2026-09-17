@@ -172,6 +172,10 @@ assert.equal(tl.agentId, AGENT_ONE);
 assert.equal(tl.agentName, "agent-11111111");
 assert.equal(tl.taskId, t1.taskId);
 assert.equal(tl.taskTitle, "时间线任务");
+// 窗口内只有 run-a（10:00–10:05）；run-b 在 10:30 之后（窗口是 10:00–11:00，也在，
+// 但 cancelled）——「该 agent 累计」是**不限窗口**的，页面用它说明窗口外的量。
+assert.equal(tl.agentRunCount, 2, "run-a + run-b（不限窗口）");
+assert.equal(tl.agentCompletedRounds, 1, "只有 run-a 是 finished");
 assert.equal(tl.projectName, "Alpha");
 assert.deepEqual(tl.department, { departmentId: "D0001", departmentName: "SRE部门" });
 assert.equal(tl.current, true);

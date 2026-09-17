@@ -204,10 +204,14 @@ interface AgentAgg {
   tokens: TokenUsage;
   durationMs: number;
   runCount: number;
+  /** Runs that finished (one run = one conversation round). */
+  completedRounds: number;
   modelCalls: number;
   toolCalls: number;
   /** A run of this agent has not finished yet. */
   running: boolean;
+  /** Provider of this agent's own runs (task provider is only the fallback). */
+  provider?: string;
   /** Newest run completion (or start, while it is still running). */
   lastRunAt?: string;
   /** Newest run that pinned a model (task may leave the model on auto). */
@@ -229,10 +233,20 @@ function emptyAgentAgg(): Omit<AgentAgg, "taskId" | "agentId"> {
     tokens: emptyTokens(),
     durationMs: 0,
     runCount: 0,
+    completedRounds: 0,
     modelCalls: 0,
     toolCalls: 0,
     running: false,
   };
+}
+
+/**
+ * Agent 自己的显示名，独立于 task：`agent-7362ceb1-4b5b-…` → `agent-7362ceb1`，
+ * `cls-5f7393dd40a44b06` → `cls-5f7393dd`。取不到 pattern 时原样返回。
+ */
+function agentDisplayName(agentId: string): string {
+  const m = /^(agent-|cls-)([0-9a-f]{8})/i.exec(agentId);
+  return m ? `${m[1].toLowerCase()}${m[2].toLowerCase()}` : agentId;
 }
 
 /** Board rows are keyed by task + agent (an agent id is only meaningful per task). */
@@ -557,6 +571,7 @@ export class AgentGateway {
         aggs.set(key, agg);
       }
       agg.runCount += 1;
+      if (run.status === "finished") agg.completedRounds += 1;
       agg.durationMs += Math.max(0, run.durationMs ?? 0);
       agg.modelCalls += run.modelCalls || 0;
       agg.toolCalls += run.toolCalls || 0;
@@ -572,6 +587,7 @@ export class AgentGateway {
       if (at && (!agg.lastRunAt || at > agg.lastRunAt)) agg.lastRunAt = at;
       // Samples arrive in created_at order → last assignment is the newest model.
       if (run.model?.trim()) agg.model = run.model.trim();
+      if (run.provider?.trim()) agg.provider = run.provider.trim();
     }
 
     const entries: AgentAgg[] = [];
@@ -644,8 +660,8 @@ export class AgentGateway {
       const model = task.model?.trim() || agg.model;
       rows.push({
         agentId: agg.agentId,
-        name: task.title,
-        provider: task.provider,
+        agentName: agentDisplayName(agg.agentId),
+        provider: agg.provider ?? task.provider,
         ...(model ? { model } : {}),
         projectId: task.projectId,
         projectName: project?.name ?? task.projectId,
@@ -663,6 +679,7 @@ export class AgentGateway {
         tokens: { ...agg.tokens },
         durationMs: agg.durationMs,
         runCount: agg.runCount,
+        completedRounds: agg.completedRounds,
         modelCalls: agg.modelCalls,
         toolCalls: agg.toolCalls,
         ...(succession
@@ -680,7 +697,7 @@ export class AgentGateway {
       const bt = b.lastActiveAt ? Date.parse(b.lastActiveAt) || 0 : 0;
       if (at !== bt) return bt - at;
       if (a.current !== b.current) return a.current ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      return a.agentName.localeCompare(b.agentName);
     });
 
     const totals: AgentBoardTotals = {
@@ -690,6 +707,7 @@ export class AgentGateway {
       tokens: emptyTokens(),
       durationMs: 0,
       runCount: 0,
+      completedRounds: 0,
       modelCalls: 0,
       toolCalls: 0,
     };
@@ -701,6 +719,7 @@ export class AgentGateway {
       totals.tokens.totalTokens += r.tokens.totalTokens;
       totals.durationMs += r.durationMs;
       totals.runCount += r.runCount;
+      totals.completedRounds += r.completedRounds;
       totals.modelCalls += r.modelCalls;
       totals.toolCalls += r.toolCalls;
     }

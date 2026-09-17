@@ -113,6 +113,8 @@ function isUniqueEventIdError(err: unknown): boolean {
 
 export class Store {
   private db: DatabaseSync;
+  /** Guard for close(): shutdown may run twice (two signals, crash path). */
+  private closed = false;
 
   constructor(dataDir: string) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -361,8 +363,20 @@ export class Store {
     }
   }
 
+  /**
+   * Close the SQLite handle. Idempotent and non-throwing on purpose: this runs
+   * from the SIGTERM/SIGINT shutdown path, where a second (or already closed)
+   * handle used to raise `Error: database is not open` as an uncaughtException —
+   * turning a clean restart into a crash report plus a bogus crash-analysis task.
+   */
   close(): void {
-    this.db.close();
+    if (this.closed) return;
+    this.closed = true;
+    try {
+      this.db.close();
+    } catch (err) {
+      console.warn("[store] close failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   /**

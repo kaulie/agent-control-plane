@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** @type {Array<{ file: string; via: "node" | "tsx" }>} */
+/** @type {Array<{ file: string; via: "node" | "tsx"; args?: string[] }>} */
 const tests = [
   { file: "scripts/test-event-ids.mjs", via: "tsx" },
   { file: "scripts/test-port.mjs", via: "tsx" },
@@ -26,6 +26,15 @@ const tests = [
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },
+  // 时间线的折线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码
+  // （不需要前端构建）。渲染检查要显式指向 web 的 tsconfig，否则 JSX 走的是
+  // backend 的经典 runtime，组件里没 import React 就会炸。
+  { file: "../web/scripts/test-timeline-line.mjs", via: "tsx" },
+  {
+    file: "../web/scripts/test-timeline-render.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");
@@ -37,7 +46,10 @@ if (needsDist && !fs.existsSync(path.join(backendDir, "dist/store/db.js"))) {
 let failed = 0;
 for (const t of tests) {
   const command = t.via === "tsx" ? "npx" : process.execPath;
-  const args = t.via === "tsx" ? ["tsx", t.file] : [t.file];
+  const args =
+    t.via === "tsx"
+      ? ["tsx", ...(t.args ?? []), t.file]
+      : [...(t.args ?? []), t.file];
   console.log(`\n--- ${t.file} (${t.via}) ---`);
   const result = spawnSync(command, args, {
     cwd: backendDir,

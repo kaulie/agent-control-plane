@@ -20,15 +20,16 @@ const INTERVAL_OPTIONS: Array<{ ms: number; label: string }> = [
 ];
 
 type SortKey =
-  | "name"
+  | "agentName"
   | "department"
   | "project"
+  | "rounds"
   | "lastActive"
   | "model"
   | "tokens"
   | "duration";
 
-const TEXT_SORTS: SortKey[] = ["name", "department", "project", "model"];
+const TEXT_SORTS: SortKey[] = ["agentName", "department", "project", "model"];
 
 function readBool(key: string, fallback: boolean): boolean {
   try {
@@ -159,10 +160,10 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
       if (status !== "all" && r.taskStatus !== status) return false;
       if (!q) return true;
       return [
-        r.name,
+        r.agentName,
+        r.agentId,
         r.taskId,
         r.taskTitle,
-        r.agentId,
         r.projectName,
         r.department?.departmentName ?? "",
         r.model ?? "",
@@ -175,8 +176,8 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
     const dir = sortAsc ? 1 : -1;
     return [...filtered].sort((a, b) => {
       switch (sortKey) {
-        case "name":
-          return dir * a.name.localeCompare(b.name);
+        case "agentName":
+          return dir * a.agentName.localeCompare(b.agentName);
         case "department":
           return (
             dir *
@@ -188,6 +189,8 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
           return dir * a.projectName.localeCompare(b.projectName);
         case "model":
           return dir * (a.model ?? "").localeCompare(b.model ?? "");
+        case "rounds":
+          return dir * (a.completedRounds - b.completedRounds);
         case "tokens":
           return dir * (a.tokens.totalTokens - b.tokens.totalTokens);
         case "duration":
@@ -197,7 +200,7 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
           const at = a.lastActiveAt ? Date.parse(a.lastActiveAt) || 0 : 0;
           const bt = b.lastActiveAt ? Date.parse(b.lastActiveAt) || 0 : 0;
           if (at !== bt) return dir * (at - bt);
-          return a.name.localeCompare(b.name);
+          return a.agentName.localeCompare(b.agentName);
         }
       }
     });
@@ -218,6 +221,7 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
       tokens: rows.reduce((n, r) => n + r.tokens.totalTokens, 0),
       durationMs: rows.reduce((n, r) => n + r.durationMs, 0),
       runs: rows.reduce((n, r) => n + r.runCount, 0),
+      rounds: rows.reduce((n, r) => n + r.completedRounds, 0),
       running: rows.filter((r) => r.running).length,
       current: rows.filter((r) => r.current).length,
     }),
@@ -236,7 +240,8 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
           </button>
           <h2 className="stats-title">Agent 看板</h2>
           <span className="stats-subtitle">
-            名称 · 所属部门 · project · task · 最后活跃 · 模型 · token · 工作时长
+            agent 名称（独立于 task）· 所属部门 · project · task · 完成轮次 · 最后活跃
+            · 模型 · token · 工作时长
           </span>
         </div>
         <div className="stats-head-right">
@@ -276,10 +281,13 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
       </div>
 
       <p className="stats-note">
-        一个 agent = 绑定在 task 上的一个 SDK agent 实例，「名称」用 task 标题，
-        「所属部门」取该 task 所属 project 的部门。「消耗 Token」= input + output
-        （与用量统计页同一口径），「累计 Duration」= 该 agent 各次 run 的墙钟时长
-        之和 —— 两者都只统计这个 agent 自己的 run。
+        一个 agent = 绑定在 task 上的一个 SDK agent 实例（`agent-…` / `cls-…`）。
+        「Agent 名称」是 agent 自己的名字（由 agent id 归一化），和「所属 Task」里的
+        task 标题是两列、互不共用；「所属部门」取该 task 所属 project 的部门。
+        「累计完成对话轮次」= 这个 agent 跑完的 run 数（一轮 = 一次 run，取消 / 出错 /
+        进行中的不算）。「消耗 Token」= input + output（与用量统计页同一口径），
+        「累计 Duration」= 该 agent 各次 run 的墙钟时长之和 —— 两者都只统计这个 agent
+        自己的 run。
         {data ? ` 数据时间：${formatDateTime(data.generatedAt)}。` : ""}
       </p>
 
@@ -361,6 +369,15 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
           <div className="stats-card-value stats-card-value-sm">{shown.running}</div>
         </div>
         <div className="stats-card">
+          <div className="stats-card-label">累计完成对话轮次</div>
+          <div className="stats-card-value stats-card-value-sm">{shown.rounds}</div>
+          <div className="stats-card-caption">
+            {data && rows.length !== data.rows.length
+              ? `全部 ${data.totals.completedRounds} · 当前筛选 ${shown.rounds}`
+              : `共 ${shown.runs} 次 run`}
+          </div>
+        </div>
+        <div className="stats-card">
           <div className="stats-card-label">消耗 Token</div>
           <div className="stats-card-value">{formatTokens(shown.tokens)}</div>
           <div className="stats-card-caption">
@@ -403,8 +420,11 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
           <table className="stats-table board-table">
             <thead>
               <tr>
-                <th className="board-head-name" onClick={() => toggleSort("name")}>
-                  Agent 名称{sortMark("name")}
+                <th
+                  className="board-head-name"
+                  onClick={() => toggleSort("agentName")}
+                >
+                  Agent 名称{sortMark("agentName")}
                 </th>
                 <th onClick={() => toggleSort("department")}>
                   所属部门{sortMark("department")}
@@ -413,6 +433,9 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
                   所属 Project{sortMark("project")}
                 </th>
                 <th className="board-head-task">所属 Task</th>
+                <th className="board-head-rounds" onClick={() => toggleSort("rounds")}>
+                  累计完成对话轮次{sortMark("rounds")}
+                </th>
                 <th onClick={() => toggleSort("lastActive")}>
                   最后活跃时间{sortMark("lastActive")}
                 </th>
@@ -437,8 +460,11 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
                     <div className="stats-agent">
                       {r.running && <span className="board-badge running">运行中</span>}
                       {!r.current && <span className="board-badge replaced">已接替</span>}
-                      <span className="board-agent-name" title={r.name}>
-                        {r.name || r.taskId}
+                      <span
+                        className="board-agent-name"
+                        title={`${r.agentName}\n${r.agentId}\n${r.provider} SDK agent 实例`}
+                      >
+                        {r.agentName}
                       </span>
                     </div>
                     <div className="stats-agent-sub" title={r.agentId}>
@@ -465,11 +491,19 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
                       title={`${r.taskTitle}\n${r.taskId}\n点击打开这个 task`}
                       onClick={() => onOpenTask(r.taskId, r.projectId)}
                     >
-                      #{r.taskId.slice(-6)}
+                      {r.taskTitle || `#${r.taskId.slice(-6)}`}
                     </button>
+                    <span className="board-task-id">#{r.taskId.slice(-6)}</span>
                     <span className={`board-status ${r.taskStatus}`}>
                       {STATUS_LABEL[r.taskStatus]}
                     </span>
+                  </td>
+                  <td
+                    className="stats-num"
+                    title={`完成 ${r.completedRounds} 轮（status = finished）\n共 ${r.runCount} 次 run（含取消 / 出错 / 进行中）`}
+                  >
+                    {r.completedRounds}
+                    <span className="board-runs"> · 共 {r.runCount} runs</span>
                   </td>
                   <td
                     className="stats-num"
@@ -511,6 +545,13 @@ export default function AgentBoardPage({ onOpenTask, onBack }: Props) {
                 <td />
                 <td />
                 <td />
+                <td
+                  className="stats-total-cell stats-num"
+                  title={`完成 ${shown.rounds} / 共 ${shown.runs} runs`}
+                >
+                  {shown.rounds}
+                  <span className="board-runs"> · 共 {shown.runs} runs</span>
+                </td>
                 <td />
                 <td />
                 <td className="stats-total-cell stats-num">

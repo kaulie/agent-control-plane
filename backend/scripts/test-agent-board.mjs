@@ -2,9 +2,10 @@
  * Agent board checks (`GET /api/agents`).
  *
  * 一个 agent = 绑定在 task 上的一个 SDK agent 实例。看板要给出：
- * name / 所属部门(project 的部门) / project / task / 最后活跃时间 / 模型 /
- * token 消耗 / 累计工作 duration，并且默认只列「当前 agent」，scope=all 时把被
- * succession 替换掉的 agent 也列出来（各自只统计自己的 run）。
+ * agentName（agent 自己的名字，独立于 task）/ 所属部门(project 的部门) / project /
+ * task 标题 / 累计完成对话轮次 / 最后活跃时间 / 模型 / token 消耗 / 累计工作
+ * duration，并且默认只列「当前 agent」，scope=all 时把被 succession 替换掉的 agent
+ * 也列出来（各自只统计自己的 run）。
  *
  * Usage: npm run build --workspace backend && node backend/scripts/test-agent-board.mjs
  */
@@ -157,6 +158,14 @@ recordRun(t1.taskId, AGENT_ONE, {
     totalTokens: 2100,
   },
 });
+// 出错的 run 也是「跑过」，但不计入「累计完成对话轮次」。
+recordRun(t1.taskId, AGENT_ONE, {
+  runId: "run-t1-e",
+  createdAt: "2026-09-01T10:06:00.000Z",
+  completedAt: "2026-09-01T10:06:05.000Z",
+  durationMs: 5_000,
+  status: "error",
+});
 recordRun(t1.taskId, AGENT_TWO, {
   runId: "run-t1-c",
   model: "claude-4-5",
@@ -242,8 +251,10 @@ assert.equal(rowOf(current, t3.taskId, ""), undefined);
 
 const t1Row = rowOf(current, t1.taskId, AGENT_TWO);
 assert.ok(t1Row, "t1 的当前 agent 是 succession 之后的 AGENT_TWO");
-assert.equal(t1Row.name, "Fix the flaky test");
+// agent 名称独立于 task：由 agent id 归一化，和 task 标题不是同一个东西。
+assert.equal(t1Row.agentName, "cls-22222222");
 assert.equal(t1Row.taskTitle, "Fix the flaky test");
+assert.notEqual(t1Row.agentName, t1Row.taskTitle);
 assert.equal(t1Row.current, true);
 assert.equal(t1Row.running, true, "有 running 的 run");
 assert.equal(t1Row.provider, "cursor");
@@ -260,6 +271,7 @@ assert.equal(t1Row.tokens.cacheReadTokens, 200);
 assert.equal(t1Row.tokens.totalTokens, 6000);
 assert.equal(t1Row.durationMs, 60_000, "累计 duration 只算自己的 run");
 assert.equal(t1Row.runCount, 2);
+assert.equal(t1Row.completedRounds, 1, "finished 的 run 才算完成轮次（running 不算）");
 assert.equal(t1Row.modelCalls, 4);
 assert.equal(t1Row.toolCalls, 7);
 // 最后活跃时间 = 该 agent 最新事件（不是 run 完成时间）。
@@ -273,6 +285,8 @@ assert.ok(t2Row);
 assert.equal(t2Row.department, undefined, "Beta 没有部门");
 assert.equal(t2Row.projectName, "Beta");
 assert.equal(t2Row.runCount, 0);
+assert.equal(t2Row.completedRounds, 0);
+assert.equal(t2Row.agentName, "agent-33333333");
 assert.equal(t2Row.durationMs, 0);
 assert.equal(t2Row.tokens.totalTokens, 0);
 assert.equal(t2Row.model, undefined);
@@ -286,6 +300,8 @@ assert.equal(
 const t4Row = rowOf(current, t4.taskId, AGENT_LEGACY);
 assert.ok(t4Row, "没有 task.agent_id 的老数据用最近 run 的 agent 兜底");
 assert.equal(t4Row.current, true);
+assert.equal(t4Row.agentName, "agent-44444444");
+assert.equal(t4Row.completedRounds, 1);
 assert.equal(t4Row.tokens.totalTokens, 500);
 assert.equal(t4Row.lastActiveAt, "2026-08-30T10:00:30.000Z");
 
@@ -302,9 +318,11 @@ assert.equal(
 const oldAgent = rowOf(all, t1.taskId, AGENT_ONE);
 assert.ok(oldAgent);
 assert.equal(oldAgent.current, false);
+assert.equal(oldAgent.agentName, "agent-11111111");
 assert.equal(oldAgent.tokens.totalTokens, 3600, "(1000+500) + (2000+100)");
-assert.equal(oldAgent.durationMs, 30_000);
-assert.equal(oldAgent.runCount, 2);
+assert.equal(oldAgent.durationMs, 35_000, "10s + 20s + 出错那次 5s");
+assert.equal(oldAgent.runCount, 3);
+assert.equal(oldAgent.completedRounds, 2, "出错的 run 不算完成轮次");
 assert.equal(oldAgent.lastActiveAt, "2026-09-01T10:08:00.000Z");
 assert.equal(oldAgent.supersededAt, "2026-09-02T07:59:00.000Z");
 assert.equal(oldAgent.supersededReason, "mode_change");
@@ -315,7 +333,8 @@ assert.equal(rowOf(all, t1.taskId, AGENT_TWO)?.current, true);
 // ---- 3) 汇总 / 筛选项 ----
 assert.equal(current.totals.agentCount, 3);
 assert.equal(current.totals.runningAgentCount, 1);
-assert.equal(current.totals.runCount, 3, "t1 两个 run + t4 一个 run");
+assert.equal(current.totals.runCount, 3, "当前 agent：t1 两个 run + t4 一个 run");
+assert.equal(current.totals.completedRounds, 2, "t1 的 AGENT_TWO 1 轮 + t4 1 轮");
 assert.equal(current.totals.durationMs, 60_000 + 30_000);
 assert.equal(current.totals.tokens.totalTokens, 6000 + 0 + 500);
 
@@ -348,4 +367,6 @@ assert.equal((await board("?projectId=%20")).rows.length, current.rows.length);
 
 await app.close();
 fs.rmSync(dataDir, { recursive: true, force: true });
-console.log("PASS: agent board (scope, department, tokens, duration)");
+console.log(
+  "PASS: agent board (agentName, department, rounds, tokens, duration)",
+);

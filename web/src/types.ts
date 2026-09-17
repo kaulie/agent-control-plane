@@ -133,8 +133,12 @@ export type AgentBoardScope = "current" | "all";
  */
 export interface AgentBoardRow {
   agentId: string;
-  /** Agent 名称（SDK 里 agent name 就是 task title）。 */
-  name: string;
+  /**
+   * Agent 自己的名称（独立于 task，由 agent id 归一化：
+   * `agent-7362ceb1-…` → `agent-7362ceb1`，`cls-5f7393dd40a44b06` → `cls-5f7393dd`）。
+   * task 标题只在 `taskTitle` 里。
+   */
+  agentName: string;
   provider: string;
   model?: string;
   projectId: string;
@@ -156,6 +160,8 @@ export interface AgentBoardRow {
   /** 累计工作时长（该 agent 自己 run 的 duration 之和）。 */
   durationMs: number;
   runCount: number;
+  /** 累计完成对话轮次（status = finished 的 run 数）。 */
+  completedRounds: number;
   modelCalls: number;
   toolCalls: number;
   supersededAt?: string;
@@ -170,6 +176,8 @@ export interface AgentBoardTotals {
   tokens: TokenUsage;
   durationMs: number;
   runCount: number;
+  /** 所有列出 agent 的完成轮次之和。 */
+  completedRounds: number;
   modelCalls: number;
   toolCalls: number;
 }

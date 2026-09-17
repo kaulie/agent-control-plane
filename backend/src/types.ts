@@ -257,6 +257,106 @@ export interface UsageStatsRow {
   series: number[];
 }
 
+/** One run sample for the agent board (usage-aware, unlike `UsageRunSample`). */
+export interface AgentRunSample {
+  runId: string;
+  taskId: string;
+  agentId: string;
+  provider: string;
+  /** Omitted when the run auto-resolved the provider default model. */
+  model?: string;
+  status: RunStatus;
+  createdAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  usage?: TokenUsage;
+  modelCalls: number;
+  toolCalls: number;
+}
+
+/** Which agents the board lists. */
+export type AgentBoardScope = "current" | "all";
+
+/**
+ * One agent row of the agent board.
+ *
+ * An "agent" is one SDK agent instance bound to a task. A task normally has a
+ * single current agent (`tasks.agent_id`), but a succession (mode change /
+ * unusable session) swaps it — with `scope=all` those replaced agents stay on
+ * the board, marked with `supersededAt`.
+ */
+export interface AgentBoardRow {
+  /** SDK agent id (`agent-…` for Cursor, `cls-…` for Cline). */
+  agentId: string;
+  /**
+   * Agent 显示名：网关给 Cursor SDK 的 `name` 就是 task title（Cline 没有 name
+   * 概念，同样回落到 task title）。
+   */
+  name: string;
+  provider: string;
+  /** Task-pinned model, else this agent's latest run model. */
+  model?: string;
+  projectId: string;
+  projectName: string;
+  /** 所属部门：task 所属 project 的部门（存在 project settings 里）。 */
+  department?: DepartmentConfig;
+  taskId: string;
+  taskTitle: string;
+  taskStatus: TaskStatus;
+  taskCreatedAt: string;
+  taskWorkspace: string;
+  /** This is the task's currently bound agent. */
+  current: boolean;
+  /** Latest activity of this agent: newest event, else newest run. */
+  lastActiveAt?: string;
+  /** A run of this agent is running right now. */
+  running: boolean;
+  /** Summed usage over this agent's runs. */
+  tokens: TokenUsage;
+  /** Wall-clock time this agent spent inside runs (`runs.duration_ms`). */
+  durationMs: number;
+  runCount: number;
+  modelCalls: number;
+  toolCalls: number;
+  /** Set when a succession replaced this agent. */
+  supersededAt?: string;
+  supersededReason?: AgentSuccessionReason;
+  replacedByAgentId?: string;
+}
+
+export interface AgentBoardTotals {
+  /** Rows on the board (scope-dependent). */
+  agentCount: number;
+  /** Rows whose task is not finished. */
+  activeAgentCount: number;
+  /** Rows with a run in flight. */
+  runningAgentCount: number;
+  tokens: TokenUsage;
+  durationMs: number;
+  runCount: number;
+  modelCalls: number;
+  toolCalls: number;
+}
+
+/** `GET /api/agents` — the agent board payload. */
+export interface AgentBoard {
+  scope: AgentBoardScope;
+  generatedAt: string;
+  rows: AgentBoardRow[];
+  totals: AgentBoardTotals;
+  /** Filter options so the UI can build dropdowns without extra requests. */
+  projects: Array<{
+    projectId: string;
+    name: string;
+    department?: DepartmentConfig;
+  }>;
+  departments: Array<{
+    departmentId: string;
+    departmentName: string;
+    agentCount: number;
+  }>;
+}
+
 export interface TokenUsageSeries {
   granularity: UsageGranularity;
   /** Calendar used for bucket boundaries. */

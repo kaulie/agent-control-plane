@@ -1,4 +1,6 @@
 import type {
+  AgentBoard,
+  AgentBoardScope,
   AgentEvent,
   AgentRuntimeStatus,
   AppSettings,
@@ -191,6 +193,17 @@ export const api = {
     const s = q.toString();
     return fetch(`${BASE}/stats/token-usage${s ? `?${s}` : ""}`).then(
       (r) => j<TokenUsageSeries>(r),
+    );
+  },
+
+  /** Agent 看板：所有 agent（含所属部门 / project / task / token / 时长）。 */
+  getAgentBoard: (opts?: { scope?: AgentBoardScope; projectId?: string }) => {
+    const q = new URLSearchParams();
+    if (opts?.scope) q.set("scope", opts.scope);
+    if (opts?.projectId) q.set("projectId", opts.projectId);
+    const s = q.toString();
+    return fetch(`${BASE}/agents${s ? `?${s}` : ""}`).then((r) =>
+      j<AgentBoard>(r),
     );
   },
 

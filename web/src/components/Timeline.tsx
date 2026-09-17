@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
-import { formatTime, truncate, formatDuration } from "../format";
+import { formatTime, truncate, formatDuration, shortAgentId } from "../format";
 import { formatRunErrorMessage } from "../run-errors";
 
 const ICONS: Record<string, string> = {
@@ -83,13 +83,6 @@ function resultSummary(result: unknown): string {
     return `${n} matches`;
   }
   return truncate(JSON.stringify(v), 240);
-}
-
-/** Short display form: agent-4e559024-… → agent-4e559024 */
-function shortAgentId(id: string): string {
-  const m = id.match(/^(?:agent-)?([0-9a-f]{8})/i);
-  if (m) return `agent-${m[1].toLowerCase()}`;
-  return id.length > 20 ? `${id.slice(0, 20)}…` : id;
 }
 
 interface Row {

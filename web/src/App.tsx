@@ -5,6 +5,7 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from 
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import UsageStatsPage from "./components/UsageStatsPage";
+import AgentBoardPage from "./components/AgentBoardPage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import ProjectDialog, {
@@ -491,6 +492,18 @@ export default function App() {
     }
   }, [applyInterruptNotice, applyRunState]);
 
+  /** Agent 看板里点 task：先切到它所属 project，再打开这个 task。 */
+  const openTaskFromBoard = useCallback(
+    async (taskId: string, projectId: string) => {
+      if (projectId !== selectedProjectRef.current) {
+        await selectProject(projectId);
+      }
+      await selectTask(taskId);
+      setView("chat");
+    },
+    [selectProject, selectTask],
+  );
+
   const openCreateTask = useCallback(async () => {
     if (!selectedProjectId) return;
     try {
@@ -760,6 +773,14 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
+            title="Agent 看板（所有 agent 的部门 / token / 工作时长）"
+            onClick={() => setView("agent-board")}
+          >
+            🤖
+          </button>
+          <button
+            type="button"
+            className="icon-btn header-settings"
             title="全局设置"
             onClick={() => setView("global-settings")}
           >
@@ -805,6 +826,13 @@ export default function App() {
           />
         ) : view === "agent-runtime" ? (
           <AgentRuntimePage onBack={() => setView("chat")} />
+        ) : view === "agent-board" ? (
+          <AgentBoardPage
+            onOpenTask={(taskId, projectId) =>
+              void openTaskFromBoard(taskId, projectId)
+            }
+            onBack={() => setView("chat")}
+          />
         ) : (
           <>
         <TaskList

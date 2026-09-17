@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  AgentBoard,
+  AgentBoardRow,
+  AgentBoardScope,
+  AgentBoardTotals,
   AgentEvent,
   AgentSuccession,
   AgentSuccessionReason,
@@ -11,6 +15,7 @@ import type {
   RunRecord,
   Task,
   TaskStats,
+  TokenUsage,
   TokenUsageSeries,
   UsageGranularity,
 } from "../types.js";
@@ -52,6 +57,7 @@ import {
   type PlanAnswerBatch,
 } from "../plan-question-parser.js";
 import { buildTokenUsageSeries } from "../usage/series.js";
+import { tokenVolume } from "../usage/tokens.js";
 import {
   collectDecisionEvents,
   type DecisionContext,
@@ -189,6 +195,76 @@ interface ActiveRunSlot {
   runId: string;
   /** Epoch ms when the run took a concurrency slot. */
   occupiedAt: number;
+}
+
+/** All runs of one (task, agent) merged into a single board row. */
+interface AgentAgg {
+  taskId: string;
+  agentId: string;
+  tokens: TokenUsage;
+  durationMs: number;
+  runCount: number;
+  modelCalls: number;
+  toolCalls: number;
+  /** A run of this agent has not finished yet. */
+  running: boolean;
+  /** Newest run completion (or start, while it is still running). */
+  lastRunAt?: string;
+  /** Newest run that pinned a model (task may leave the model on auto). */
+  model?: string;
+}
+
+function emptyTokens(): TokenUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function emptyAgentAgg(): Omit<AgentAgg, "taskId" | "agentId"> {
+  return {
+    tokens: emptyTokens(),
+    durationMs: 0,
+    runCount: 0,
+    modelCalls: 0,
+    toolCalls: 0,
+    running: false,
+  };
+}
+
+/** Board rows are keyed by task + agent (an agent id is only meaningful per task). */
+function agentKey(taskId: string, agentId: string): string {
+  return `${taskId}::${agentId}`;
+}
+
+/** Newest agent that actually ran on a task (used when `tasks.agent_id` is empty). */
+function newestAgentIdForTask(
+  aggs: Map<string, AgentAgg>,
+  taskId: string,
+): string | undefined {
+  let best: AgentAgg | undefined;
+  for (const agg of aggs.values()) {
+    if (agg.taskId !== taskId) continue;
+    if (!best || (agg.lastRunAt ?? "") > (best.lastRunAt ?? "")) best = agg;
+  }
+  return best?.agentId;
+}
+
+/** Newest of the given ISO timestamps; empty/invalid values are ignored. */
+function latestIso(...values: Array<string | undefined>): string | undefined {
+  let best: string | undefined;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const v of values) {
+    if (!v) continue;
+    const ms = Date.parse(v);
+    if (!Number.isFinite(ms) || ms <= bestMs) continue;
+    bestMs = ms;
+    best = v;
+  }
+  return best;
 }
 
 export class AgentGateway {
@@ -434,6 +510,240 @@ export class AgentGateway {
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {
     return this.store.listAgentSuccessions(taskId);
+  }
+
+  /**
+   * Agent board (`GET /api/agents`): one row per agent.
+   *
+   * - `scope=current` (default): the agent each task currently runs (one row per
+   *   task that has ever bound an agent).
+   * - `scope=all`: additionally the agents a succession replaced (mode change /
+   *   unusable session), so their own tokens/duration stay visible.
+   *
+   * 部门取 task 所属 project 的部门（存在 project settings 里，快照字段），
+   * token 口径与用量统计页一致（`tokenVolume`：inclusive → input + output）。
+   */
+  getAgentBoard(opts?: {
+    scope?: AgentBoardScope;
+    projectId?: string;
+  }): AgentBoard {
+    const scope: AgentBoardScope = opts?.scope === "all" ? "all" : "current";
+    const projectFilter = opts?.projectId?.trim() || undefined;
+
+    const projects = this.store.listProjects();
+    const projectById = new Map(projects.map((p) => [p.projectId, p]));
+    const tasks = this.store.listTasks(
+      projectFilter ? { projectId: projectFilter } : undefined,
+    );
+    const taskById = new Map(tasks.map((t) => [t.taskId, t]));
+
+    const lastEventAt = new Map<string, string>();
+    for (const row of this.store.listAgentLastEventAt()) {
+      lastEventAt.set(agentKey(row.taskId, row.agentId), row.lastAt);
+    }
+    const replacedBy = new Map<string, AgentSuccession>();
+    for (const s of this.store.listAllAgentSuccessions()) {
+      // Oldest→newest: an agent replaced twice keeps its latest succession.
+      replacedBy.set(agentKey(s.taskId, s.fromAgentId), s);
+    }
+
+    const aggs = new Map<string, AgentAgg>();
+    for (const run of this.store.listAgentRunSamples()) {
+      if (!taskById.has(run.taskId)) continue;
+      const key = agentKey(run.taskId, run.agentId);
+      let agg = aggs.get(key);
+      if (!agg) {
+        agg = { taskId: run.taskId, agentId: run.agentId, ...emptyAgentAgg() };
+        aggs.set(key, agg);
+      }
+      agg.runCount += 1;
+      agg.durationMs += Math.max(0, run.durationMs ?? 0);
+      agg.modelCalls += run.modelCalls || 0;
+      agg.toolCalls += run.toolCalls || 0;
+      if (run.status === "running") agg.running = true;
+      if (run.usage) {
+        agg.tokens.inputTokens += run.usage.inputTokens || 0;
+        agg.tokens.outputTokens += run.usage.outputTokens || 0;
+        agg.tokens.cacheReadTokens += run.usage.cacheReadTokens || 0;
+        agg.tokens.cacheWriteTokens += run.usage.cacheWriteTokens || 0;
+        agg.tokens.totalTokens += tokenVolume(run.usage, run.provider);
+      }
+      const at = run.completedAt ?? run.createdAt;
+      if (at && (!agg.lastRunAt || at > agg.lastRunAt)) agg.lastRunAt = at;
+      // Samples arrive in created_at order → last assignment is the newest model.
+      if (run.model?.trim()) agg.model = run.model.trim();
+    }
+
+    const entries: AgentAgg[] = [];
+    const seen = new Set<string>();
+    const push = (taskId: string, agentId: string): void => {
+      const key = agentKey(taskId, agentId);
+      if (seen.has(key)) return;
+      seen.add(key);
+      entries.push(aggs.get(key) ?? { taskId, agentId, ...emptyAgentAgg() });
+    };
+    for (const task of tasks) {
+      const bound = task.agentId?.trim();
+      if (scope === "current") {
+        // Fall back to the newest run's agent when the task row is unbound.
+        const agentId = bound || newestAgentIdForTask(aggs, task.taskId);
+        if (agentId) push(task.taskId, agentId);
+        continue;
+      }
+      for (const agg of aggs.values()) {
+        if (agg.taskId === task.taskId) push(agg.taskId, agg.agentId);
+      }
+      if (bound) push(task.taskId, bound);
+    }
+    return this.buildAgentBoard({
+      scope,
+      entries,
+      tasks,
+      projectById,
+      lastEventAt,
+      replacedBy,
+      projects,
+    });
+  }
+
+  /** Row shaping + totals for {@link getAgentBoard}. */
+  private buildAgentBoard(input: {
+    scope: AgentBoardScope;
+    entries: AgentAgg[];
+    tasks: Task[];
+    projectById: Map<string, Project>;
+    lastEventAt: Map<string, string>;
+    replacedBy: Map<string, AgentSuccession>;
+    projects: Project[];
+  }): AgentBoard {
+    const { scope, entries, tasks, projectById, lastEventAt, replacedBy, projects } =
+      input;
+    const taskById = new Map(tasks.map((t) => [t.taskId, t]));
+    // Legacy tasks can have runs without `tasks.agent_id` (pre-backfill): the
+    // newest agent that ran is the current one.
+    const newestByTask = new Map<string, { agentId: string; at: string }>();
+    for (const agg of entries) {
+      const at = agg.lastRunAt ?? "";
+      const best = newestByTask.get(agg.taskId);
+      if (!best || at > best.at) newestByTask.set(agg.taskId, { agentId: agg.agentId, at });
+    }
+
+    const rows: AgentBoardRow[] = [];
+    for (const agg of entries) {
+      const task = taskById.get(agg.taskId);
+      if (!task) continue;
+      const project = projectById.get(task.projectId);
+      const key = agentKey(agg.taskId, agg.agentId);
+      const succession = replacedBy.get(key);
+      const lastActiveAt = latestIso(
+        lastEventAt.get(key),
+        agg.lastRunAt,
+        // Never-ran agent: the user's last message is the honest activity time.
+        agg.runCount === 0 ? (task.lastUserInputAt ?? task.createdAt) : undefined,
+      );
+      const model = task.model?.trim() || agg.model;
+      rows.push({
+        agentId: agg.agentId,
+        name: task.title,
+        provider: task.provider,
+        ...(model ? { model } : {}),
+        projectId: task.projectId,
+        projectName: project?.name ?? task.projectId,
+        ...(project?.department ? { department: project.department } : {}),
+        taskId: task.taskId,
+        taskTitle: task.title,
+        taskStatus: task.status,
+        taskCreatedAt: task.createdAt,
+        taskWorkspace: task.workspace,
+        current: task.agentId?.trim()
+          ? task.agentId.trim() === agg.agentId
+          : newestByTask.get(agg.taskId)?.agentId === agg.agentId,
+        ...(lastActiveAt ? { lastActiveAt } : {}),
+        running: agg.running,
+        tokens: { ...agg.tokens },
+        durationMs: agg.durationMs,
+        runCount: agg.runCount,
+        modelCalls: agg.modelCalls,
+        toolCalls: agg.toolCalls,
+        ...(succession
+          ? {
+              supersededAt: succession.createdAt,
+              supersededReason: succession.reason,
+              replacedByAgentId: succession.toAgentId,
+            }
+          : {}),
+      });
+    }
+
+    rows.sort((a, b) => {
+      const at = a.lastActiveAt ? Date.parse(a.lastActiveAt) || 0 : 0;
+      const bt = b.lastActiveAt ? Date.parse(b.lastActiveAt) || 0 : 0;
+      if (at !== bt) return bt - at;
+      if (a.current !== b.current) return a.current ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const totals: AgentBoardTotals = {
+      agentCount: rows.length,
+      activeAgentCount: rows.filter((r) => r.taskStatus === "active").length,
+      runningAgentCount: rows.filter((r) => r.running).length,
+      tokens: emptyTokens(),
+      durationMs: 0,
+      runCount: 0,
+      modelCalls: 0,
+      toolCalls: 0,
+    };
+    for (const r of rows) {
+      totals.tokens.inputTokens += r.tokens.inputTokens;
+      totals.tokens.outputTokens += r.tokens.outputTokens;
+      totals.tokens.cacheReadTokens += r.tokens.cacheReadTokens;
+      totals.tokens.cacheWriteTokens += r.tokens.cacheWriteTokens;
+      totals.tokens.totalTokens += r.tokens.totalTokens;
+      totals.durationMs += r.durationMs;
+      totals.runCount += r.runCount;
+      totals.modelCalls += r.modelCalls;
+      totals.toolCalls += r.toolCalls;
+    }
+
+    // Filter options: 部门来自各 task 所属 project（空 id = 未设置部门）。
+    const byDepartment = new Map<
+      string,
+      { departmentId: string; departmentName: string; agentCount: number }
+    >();
+    for (const r of rows) {
+      const id = r.department?.departmentId ?? "";
+      const existing = byDepartment.get(id);
+      if (existing) {
+        existing.agentCount += 1;
+        continue;
+      }
+      byDepartment.set(id, {
+        departmentId: id,
+        departmentName: r.department
+          ? r.department.departmentName || r.department.departmentId || "—"
+          : "（未设置）",
+        agentCount: 1,
+      });
+    }
+
+    return {
+      scope,
+      generatedAt: new Date().toISOString(),
+      rows,
+      totals,
+      projects: projects.map((p) => ({
+        projectId: p.projectId,
+        name: p.name,
+        ...(p.department ? { department: p.department } : {}),
+      })),
+      departments: [...byDepartment.values()].sort((a, b) =>
+        a.departmentId === ""
+          ? 1
+          : b.departmentId === ""
+            ? -1
+            : b.agentCount - a.agentCount,
+      ),
+    };
   }
 
   updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {

@@ -91,6 +91,11 @@ npm run dev:web       # frontend :5174
    reads/edits → terminal → final answer).
 5. The usage bar at the top shows tokens, cost, duration, model calls and tool
    calls. Refresh the page to see completed Tasks again.
+6. The 🤖 button in the header opens the **Agent board**: one row per agent with
+   its name, department (the task's project department), project, task, last
+   activity, model, token spend and accumulated working duration. It can list
+   only the current agent per task or every agent (including the ones replaced by
+   a succession), and clicking a task cell jumps to that task.
 
 > The agent runs in the `workspace/` directory by default (set `AGENT_WORKSPACE`
 > in `backend/.env` to change it). Each run is billed to the authenticated
@@ -121,6 +126,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
 | POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
+| GET | `/api/agents` | **Agent 看板**：列出每个 agent（`?scope=current\|all`，默认只列当前 agent；`?projectId=` 过滤），带所在部门（task 所属 project 的部门）/ project / task / 最后活跃时间 / 模型 / token 消耗 / 累计工作时长 |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |

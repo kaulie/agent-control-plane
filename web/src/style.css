@@ -2111,24 +2111,49 @@ body {
 }
 
 .board-head-name {
-  min-width: 260px;
+  min-width: 170px;
 }
 
 .board-head-task {
-  min-width: 120px;
+  min-width: 220px;
+}
+
+.board-head-rounds {
+  min-width: 140px;
 }
 
 .board-cell-name {
-  max-width: 320px;
+  max-width: 220px;
 }
 
 .board-agent-name {
   display: inline-block;
-  max-width: 220px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
   white-space: nowrap;
+}
+
+.board-cell-task {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board-cell-task .board-task-link {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.board-task-id {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .board-cell-dept,

@@ -20,6 +20,7 @@ const tests = [
   { file: "scripts/test-project-department.mjs", via: "node" },
   { file: "scripts/test-project-api.mjs", via: "node" },
   { file: "scripts/test-agent-board.mjs", via: "node" },
+  { file: "scripts/test-agent-timeline.mjs", via: "node" },
   { file: "scripts/test-ui-version-guard.mjs", via: "node" },
   { file: "scripts/test-run-errors.mjs", via: "node" },
   { file: "scripts/test-token-volume.mjs", via: "node" },

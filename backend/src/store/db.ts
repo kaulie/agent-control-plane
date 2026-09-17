@@ -27,6 +27,12 @@ import {
   serializeSettings,
 } from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
+import {
+  sqlMarkerInList,
+  sqlStateCase,
+  type TimelineMarkerRow,
+  type TimelineStateRow,
+} from "../timeline.js";
 
 export const DEFAULT_PROJECT_ID = "project-default";
 export const DEFAULT_PROJECT_NAME = "Default";
@@ -109,6 +115,11 @@ interface EventRow {
  */
 export function newId(prefix: string): string {
   return `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+/** `?, ?, ?` — SQLite 参数占位符（`IN (...)` 用）。 */
+function placeholders(count: number): string {
+  return Array.from({ length: count }, () => "?").join(", ");
 }
 
 function isUniqueEventIdError(err: unknown): boolean {
@@ -1248,6 +1259,119 @@ export class Store {
       agentId: r.agent_id,
       lastAt: r.last_at,
     }));
+  }
+
+  /**
+   * Agent 时间线（`GET /api/agents/:agentId/timeline`）的状态切换点。
+   *
+   * 一个 agent 的事件可能有几十万条，逐条返回会卡住网关事件循环，所以只取
+   * 「状态组的首/末事件」：用窗口函数算出前后状态，仅保留 state 与相邻不同的行
+   * （一组最多 2 行）。命中 `idx_events_agent_time (task_id, agent_id, timestamp)`。
+   */
+  listAgentTimelineStateRows(input: {
+    taskIds: string[];
+    agentId: string;
+    fromIso: string;
+    toIso: string;
+  }): TimelineStateRow[] {
+    if (input.taskIds.length === 0) return [];
+    const params = [...input.taskIds, input.agentId, input.fromIso, input.toIso];
+    const rows = this.db
+      .prepare(
+        `WITH scoped AS (
+           SELECT seq, timestamp, event_type, run_id,
+                  ${sqlStateCase("event_type")} AS state
+           FROM events
+           WHERE task_id IN (${placeholders(input.taskIds.length)})
+             AND agent_id = ?
+             AND timestamp >= ? AND timestamp <= ?
+         ), windowed AS (
+           SELECT seq, timestamp, event_type, run_id, state,
+                  LAG(state) OVER (ORDER BY timestamp, seq) AS prev_state,
+                  LEAD(state) OVER (ORDER BY timestamp, seq) AS next_state
+           FROM scoped
+         )
+         SELECT timestamp, event_type, run_id, state, prev_state, next_state
+         FROM windowed
+         WHERE prev_state IS NULL OR next_state IS NULL
+            OR state <> prev_state OR state <> next_state
+         ORDER BY timestamp ASC, seq ASC`,
+      )
+      .all(...params) as unknown as Array<{
+      timestamp: string;
+      event_type: string;
+      run_id: string;
+      state: string;
+      prev_state: string | null;
+      next_state: string | null;
+    }>;
+    return rows.map((r) => ({
+      timestamp: r.timestamp,
+      eventType: r.event_type,
+      runId: r.run_id ?? "",
+      state: r.state as TimelineStateRow["state"],
+      isStart: r.prev_state == null || r.prev_state !== r.state,
+      isEnd: r.next_state == null || r.next_state !== r.state,
+    }));
+  }
+
+  /** Agent 时间线的瞬时事件行（用户输入 / run 起止 / agent 替换）。 */
+  listAgentTimelineMarkerRows(input: {
+    taskIds: string[];
+    agentId: string;
+    fromIso: string;
+    toIso: string;
+  }): TimelineMarkerRow[] {
+    if (input.taskIds.length === 0) return [];
+    const params = [...input.taskIds, input.agentId, input.fromIso, input.toIso];
+    const rows = this.db
+      .prepare(
+        `SELECT timestamp, event_type, run_id, payload
+         FROM events
+         WHERE task_id IN (${placeholders(input.taskIds.length)})
+           AND agent_id = ?
+           AND timestamp >= ? AND timestamp <= ?
+           AND ${sqlMarkerInList("event_type")}
+         ORDER BY timestamp ASC, seq ASC`,
+      )
+      .all(...params) as unknown as Array<{
+      timestamp: string;
+      event_type: string;
+      run_id: string;
+      payload: string;
+    }>;
+    return rows.map((r) => ({
+      timestamp: r.timestamp,
+      eventType: r.event_type,
+      runId: r.run_id ?? "",
+      payload: JSON.parse(r.payload) as Record<string, unknown>,
+    }));
+  }
+
+  /** 窗口内该 agent 的原始事件按类型计数（时间线 totals 用）。 */
+  countAgentEventsByType(input: {
+    taskIds: string[];
+    agentId: string;
+    fromIso: string;
+    toIso: string;
+  }): Record<string, number> {
+    if (input.taskIds.length === 0) return {};
+    const rows = this.db
+      .prepare(
+        `SELECT event_type, COUNT(*) AS c
+         FROM events
+         WHERE task_id IN (${placeholders(input.taskIds.length)})
+           AND agent_id = ?
+           AND timestamp >= ? AND timestamp <= ?
+         GROUP BY event_type`,
+      )
+      .all(...input.taskIds, input.agentId, input.fromIso, input.toIso) as unknown as Array<{
+      event_type: string;
+      c: number;
+    }>;
+    const counts: Record<string, number> = {};
+    for (const r of rows) counts[r.event_type] = Number(r.c) || 0;
+    return counts;
   }
 
   /** Every succession, oldest first (agent board marks replaced agents). */

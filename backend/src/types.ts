@@ -362,6 +362,136 @@ export interface AgentBoard {
   }>;
 }
 
+/**
+ * Agent 时间线（`GET /api/agents/:agentId/timeline`）里 agent 在某段时间的工作状态。
+ *
+ * - `thinking` —— 模型侧事件（`thinking` / `agent_response` / `usage` / `status` /
+ *   `run_started` / plan 相关）：agent 在生成/思考，没有外部副作用。
+ * - `working` —— 工具侧事件（`tool_call_started` / `tool_result` / `file_read` /
+ *   `file_edit` / `terminal` / `search`）：agent 真的在动文件 / 跑命令 / 检索。
+ * - `idle` —— 其余事件（用户消息、run 结束/取消/出错、agent 替换），以及同一状态
+ *   连续超过 `stallMs` 没有任何事件的那部分（疑似卡住 / 等待）。
+ */
+export type AgentActivityState = "thinking" | "working" | "idle";
+
+/** 一段连续状态；`segments` 首尾相接，正好覆盖 [from, to]。 */
+export interface AgentTimelineSegment {
+  state: AgentActivityState;
+  start: string;
+  end: string;
+  durationMs: number;
+  /** 所属 run（idle 段没有）。 */
+  runId?: string;
+  /** 这一段里最后一条事件的类型（tooltip / 排查用）。 */
+  lastEvent?: EventType;
+  /** 这一段是被「无事件超过 stallMs」截断出来的（后面接的是空闲）。 */
+  stalled?: boolean;
+}
+
+/**
+ * 时间跨度太大时不做逐段渲染：按等宽时间桶给出每桶的状态占比。
+ * （`mode: "buckets"` 时 `segments` 为空，用 `buckets` 画堆叠柱。）
+ */
+export interface AgentTimelineBucket {
+  start: string;
+  end: string;
+  thinkingMs: number;
+  workingMs: number;
+  idleMs: number;
+  /** 桶内占比最高的状态（整桶空闲时为 idle）。 */
+  dominant: AgentActivityState;
+  /** 桶内 run 开始次数 / 用户输入次数。 */
+  runCount: number;
+  userInputs: number;
+}
+
+/** 时间线上的瞬时事件。 */
+export type AgentTimelineMarkerKind =
+  | "user_input"
+  | "run_start"
+  | "run_end"
+  | "succession"
+  | "stall";
+
+export interface AgentTimelineMarker {
+  at: string;
+  kind: AgentTimelineMarkerKind;
+  /** 一行短标签（marker 的 title / 列表用）。 */
+  label?: string;
+  /** 用户输入原文（`user_input`）。 */
+  text?: string;
+  mode?: "agent" | "plan";
+  imageCount?: number;
+  runId?: string;
+  /** run 结束时的状态（`run_end`）。 */
+  status?: RunStatus;
+}
+
+/** 区间内该 agent 的一轮 run（含状态时长拆解）。 */
+export interface AgentTimelineRun {
+  runId: string;
+  status: RunStatus;
+  startedAt: string;
+  completedAt?: string;
+  durationMs: number;
+  /** 这一轮里 thinking / working 的实测时长（来自事件）。 */
+  thinkingMs: number;
+  workingMs: number;
+  modelCalls: number;
+  toolCalls: number;
+  model?: string;
+  /** 触发这一轮的用户输入（同 run 的 `user_message`）。 */
+  inputText?: string;
+  mode?: "agent" | "plan";
+}
+
+export interface AgentTimelineTotals {
+  /** 窗口长度（ms）。 */
+  spanMs: number;
+  thinkingMs: number;
+  workingMs: number;
+  idleMs: number;
+  /** thinking + working。 */
+  activeMs: number;
+  /** activeMs / spanMs（0~1）。 */
+  activeRatio: number;
+  runCount: number;
+  userInputCount: number;
+  toolCalls: number;
+  modelCalls: number;
+  /** 原始事件按类型计数（窗口内）。 */
+  eventCounts: Record<string, number>;
+}
+
+/** `GET /api/agents/:agentId/timeline` 的返回体。 */
+export interface AgentTimeline {
+  agentId: string;
+  /** agent 自己的显示名（独立于 task，见 `agentDisplayName`）。 */
+  agentName: string;
+  provider: string;
+  model?: string;
+  taskId: string;
+  taskTitle: string;
+  projectId: string;
+  projectName: string;
+  department?: DepartmentConfig;
+  /** 这个 agent 是否仍是该 task 当前绑定的 agent。 */
+  current: boolean;
+  from: string;
+  to: string;
+  generatedAt: string;
+  /** 跨度大时退化为 `buckets`（否则 `segments` 逐段精确渲染）。 */
+  mode: "segments" | "buckets";
+  segments: AgentTimelineSegment[];
+  buckets: AgentTimelineBucket[];
+  /** 用户输入 / run 起止 / agent 替换 / 疑似停滞 等瞬时事件（两种模式都有）。 */
+  markers: AgentTimelineMarker[];
+  runs: AgentTimelineRun[];
+  totals: AgentTimelineTotals;
+  /** 判定口径（前端直接展示，避免"这段为什么算 idle"的疑问）。 */
+  note: string;
+}
+
 export interface TokenUsageSeries {
   granularity: UsageGranularity;
   /** Calendar used for bucket boundaries. */

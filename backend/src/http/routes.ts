@@ -368,6 +368,31 @@ export async function registerRoutes(
     },
   );
 
+  /**
+   * Agent 时间线：某段时间内这个 agent 的工作状态（idle / thinking / working）
+   * 与用户的 input 事件。只读。
+   * Query: `?from=&to=`（ISO；默认最近 1 小时，跨度上限 30 天）、`?projectId=`。
+   */
+  app.get<{
+    Params: { agentId: string };
+    Querystring: { from?: string; to?: string; projectId?: string };
+  }>("/api/agents/:agentId/timeline", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const from = req.query.from?.trim() || undefined;
+    const to = req.query.to?.trim() || undefined;
+    const projectId = req.query.projectId?.trim() || undefined;
+    const timeline = gateway.getAgentTimeline({
+      agentId: req.params.agentId,
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(projectId ? { projectId } : {}),
+    });
+    if (!timeline) {
+      return reply.code(404).send({ error: "agent not found" });
+    }
+    return timeline;
+  });
+
   app.get<{ Querystring: { projectId?: string } }>(
     "/api/tasks",
     async (req) => {

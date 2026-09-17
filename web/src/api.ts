@@ -3,6 +3,7 @@ import type {
   AgentBoardScope,
   AgentEvent,
   AgentRuntimeStatus,
+  AgentTimeline,
   AppSettings,
   AuthStatus,
   DepartmentConfig,
@@ -205,6 +206,24 @@ export const api = {
     return fetch(`${BASE}/agents${s ? `?${s}` : ""}`).then((r) =>
       j<AgentBoard>(r),
     );
+  },
+
+  /**
+   * Agent 时间线：某段时间内这个 agent 的 idle / thinking / working 状态
+   * （含用户的 input 事件）。`from`/`to` 为 ISO；缺省为最近 1 小时。
+   */
+  getAgentTimeline: (
+    agentId: string,
+    params?: { from?: string; to?: string; projectId?: string },
+  ) => {
+    const q = new URLSearchParams();
+    if (params?.from) q.set("from", params.from);
+    if (params?.to) q.set("to", params.to);
+    if (params?.projectId) q.set("projectId", params.projectId);
+    const s = q.toString();
+    return fetch(
+      `${BASE}/agents/${encodeURIComponent(agentId)}/timeline${s ? `?${s}` : ""}`,
+    ).then((r) => j<AgentTimeline>(r));
   },
 
   getAgentRuntime: (params?: {

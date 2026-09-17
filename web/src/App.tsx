@@ -6,6 +6,7 @@ import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
+import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
 import ProjectDialog, {
@@ -96,6 +97,8 @@ export default function App() {
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
+  /** Agent 时间线要打开哪个 agent（从看板点过来时带上）。 */
+  const [timelineAgentId, setTimelineAgentId] = useState<string | null>(null);
   // Plan 只是 run 的一种模式：主界面不再有 Plan tab，也不再有 Plan 文档面板。
   const [versionUpdate, setVersionUpdate] = useState<VersionUpdate | null>(null);
   const [upgradeState, setUpgradeState] = useState<UpgradeState | null>(null);
@@ -773,6 +776,14 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
+            title="Agent 时间线（某段时间内的 idle / thinking / working + 用户输入）"
+            onClick={() => setView("agent-timeline")}
+          >
+            🕒
+          </button>
+          <button
+            type="button"
+            className="icon-btn header-settings"
             title="Agent 看板（所有 agent 的部门 / token / 工作时长）"
             onClick={() => setView("agent-board")}
           >
@@ -828,6 +839,18 @@ export default function App() {
           <AgentRuntimePage onBack={() => setView("chat")} />
         ) : view === "agent-board" ? (
           <AgentBoardPage
+            onOpenTask={(taskId, projectId) =>
+              void openTaskFromBoard(taskId, projectId)
+            }
+            onOpenTimeline={(agentId) => {
+              setTimelineAgentId(agentId);
+              setView("agent-timeline");
+            }}
+            onBack={() => setView("chat")}
+          />
+        ) : view === "agent-timeline" ? (
+          <AgentTimelinePage
+            defaultAgentId={timelineAgentId}
             onOpenTask={(taskId, projectId) =>
               void openTaskFromBoard(taskId, projectId)
             }

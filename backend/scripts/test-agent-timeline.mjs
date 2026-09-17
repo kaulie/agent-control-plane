@@ -272,6 +272,28 @@ assert.equal(nowTl.totals.runCount, 0);
 assert.equal(nowTl.segments.length, 1);
 assert.equal(nowTl.segments[0].state, "idle");
 
+// ---- 3b) 窗口选错了：窗口里一条事件都没有，但必须能说出「这个 agent 最近活跃在……」----
+// （前端靠 lastActiveAt 区分「窗口选错了」和「这个 agent 真的没动过」，并给一键跳转。）
+assert.equal(nowTl.lastActiveAt, T("10:40:00"), "lastActiveAt 不受查询窗口限制");
+assert.ok(
+  Date.parse(nowTl.lastActiveAt) < Date.parse(nowTl.from),
+  "最近活跃时间早于窗口起点（也就是这个窗口里真的没有事件）",
+);
+assert.equal(Object.keys(nowTl.totals.eventCounts).length, 0);
+
+const awayTl = (
+  await timelineOf(
+    AGENT_ONE,
+    `?from=${encodeURIComponent("2026-09-02T00:00:00.000Z")}&to=${encodeURIComponent(
+      "2026-09-02T01:00:00.000Z",
+    )}`,
+  )
+).body;
+assert.equal(Object.keys(awayTl.totals.eventCounts).length, 0);
+assert.equal(awayTl.runs.length, 0);
+assert.equal(awayTl.markers.length, 0);
+assert.equal(awayTl.lastActiveAt, T("10:40:00"));
+
 // 跨度上限 30 天：from 给得很早 → 以 to 为准夹到 30 天
 const longTl = (
   await timelineOf(AGENT_ONE, `?from=2020-01-01T00:00:00.000Z&to=${encodeURIComponent(TO)}`)
@@ -298,6 +320,9 @@ const idleTl = (
 assert.equal(idleTl.totals.runCount, 0);
 assert.equal(idleTl.totals.idleMs, 3_600_000);
 assert.equal(idleTl.segments.length, 1);
+// 从没跑过的 agent 也要有个诚实的活跃时间（task 的建立时间），否则页面没法解释
+// 「它为什么是空的」——用户在意的就是这个 task 到底动没动过。
+assert.equal(idleTl.lastActiveAt, t3.createdAt);
 assert.equal(idleTl.segments[0].state, "idle");
 assert.equal(idleTl.current, true);
 assert.equal(idleTl.taskTitle, "未运行任务");

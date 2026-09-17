@@ -105,6 +105,13 @@ npm run dev:web       # frontend :5174
    listed in a table, plus a per-run breakdown (thinking/working time, tool &
    model calls, the message that triggered it). Hover any segment/run/marker for
    exact times; wide ranges are aggregated into time buckets.
+   The range is **automatic by default**: it follows the selected agent's own
+   last activity (`lastActiveAt`, not limited by the window), so picking an agent
+   that has not run for a day never lands on an empty window. If even the longest
+   preset does not cover an agent's activity, the page widens the window itself
+   and says so; if you picked a range by hand and it turns out to contain no
+   events, the page says which agent was last active when and offers a
+   one-click “查看那段时间”. Only a range you pick yourself is remembered.
 
 > The agent runs in the `workspace/` directory by default (set `AGENT_WORKSPACE`
 > in `backend/.env` to change it). Each run is billed to the authenticated
@@ -136,7 +143,7 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
 | GET | `/api/agents` | **Agent 看板**：列出每个 agent（`?scope=current\|all`，默认只列当前 agent；`?projectId=` 过滤），带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长 |
-| GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径） |
+| GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」） |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |

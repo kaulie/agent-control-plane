@@ -477,6 +477,11 @@ export interface AgentTimeline {
   department?: DepartmentConfig;
   /** 这个 agent 是否仍是该 task 当前绑定的 agent。 */
   current: boolean;
+  /**
+   * 这个 agent 自己的「最近活跃时间」（最新事件 / run 结束时间），**不受查询窗口限制**：
+   * 前端用它判断「窗口选错了」还是「这个 agent 真的没动过」。
+   */
+  lastActiveAt?: string;
   from: string;
   to: string;
   generatedAt: string;

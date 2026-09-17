@@ -2256,6 +2256,22 @@ body {
   border-radius: 8px;
 }
 
+/* 「这个窗口里没有事件 / 窗口已自动放宽」的说明条 */
+.timeline-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border));
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .timeline-chart {
   width: 100%;
   height: auto;

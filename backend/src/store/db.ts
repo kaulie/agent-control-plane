@@ -1234,6 +1234,23 @@ export class Store {
   }
 
   /**
+   * 单个 agent 在给定 task 集合里的最新事件时间（时间线「最近活跃」用；走
+   * `idx_events_agent_time (task_id, agent_id, timestamp)`，不受查询窗口影响）。
+   */
+  maxAgentEventAt(input: { taskIds: string[]; agentId: string }): string | undefined {
+    const taskIds = input.taskIds.filter((t) => t);
+    if (!taskIds.length || !input.agentId) return undefined;
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const row = this.db
+      .prepare(
+        `SELECT MAX(timestamp) AS last_at FROM events
+         WHERE task_id IN (${placeholders}) AND agent_id = ?`,
+      )
+      .get(...taskIds, input.agentId) as unknown as { last_at: string | null } | undefined;
+    return row?.last_at ?? undefined;
+  }
+
+  /**
    * Newest event per (task, agent) — the real "最后活跃时间" (a run row is only
    * written when the run finishes, events stream while it is still running).
    */

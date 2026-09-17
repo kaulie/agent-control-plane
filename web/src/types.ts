@@ -200,6 +200,8 @@ export interface AgentTimeline {
   projectName: string;
   department?: DepartmentConfig;
   current: boolean;
+  /** 这个 agent 自己的最近活跃时间（不受查询窗口限制）。 */
+  lastActiveAt?: string;
   from: string;
   to: string;
   generatedAt: string;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime, formatDuration, formatTime } from "../format";
+import { buildStateLine, TIMELINE_LINE_ORDER } from "../timeline-line";
 import type {
   AgentActivityState,
   AgentBoardRow,
@@ -87,16 +88,16 @@ const MARKER_LABEL: Record<string, string> = {
 
 const CHART = {
   width: 1000,
-  height: 150,
+  height: 156,
   padL: 6,
   padR: 6,
-  bandY: 10,
-  bandH: 30,
-  runY: 50,
+  /** 状态折线的三个高度：thinking 最高、working 中间、idle 最低（上下跳动的一条线）。 */
+  levels: { thinking: 12, working: 32, idle: 52 },
+  runY: 68,
   runH: 12,
-  inputY: 74,
+  inputY: 90,
   inputH: 16,
-  axisY: 106,
+  axisY: 118,
 };
 
 function readStored(key: string): string {
@@ -254,8 +255,12 @@ function truncate(s: string, n: number): string {
   return oneLine.length > n ? `${oneLine.slice(0, n)}…` : oneLine;
 }
 
-/** 状态色带（顶栏）+ run 区间 + 用户输入 marker + 时间轴。 */
-function TimelineBand({
+/**
+ * 状态折线（上 thinking / 中 working / 下 idle）+ run 区间 + 用户输入 marker + 时间轴。
+ *
+ * 导出是为了能直接把这段 SVG 渲染出来检查（见 `web/scripts/test-timeline-render.mjs`）。
+ */
+export function TimelineBand({
   data,
   onHover,
 }: {
@@ -269,6 +274,55 @@ function TimelineBand({
   const x = (t: number): number =>
     CHART.padL + ((Math.min(Math.max(t, fromMs), toMs) - fromMs) / spanMs) * innerW;
   const tips = Array.from({ length: 7 }, (_, i) => fromMs + (spanMs * i) / 6);
+
+  /**
+   * 这一段 / 这一桶 → 折线的一段 + hover 文案。段模式和桶模式共用后面的折线绘制：
+   * 桶模式用桶的 `dominant`（占比最高的状态）作为高度，明细留在 tooltip 里。
+   */
+  const steps = useMemo(() => {
+    const toX = (iso: string): number => x(Date.parse(iso));
+    if (data.mode === "segments") {
+      return data.segments.map((s) => {
+        const title =
+          `${STATE_LABEL[s.state]} · ${formatDuration(s.durationMs)}\n` +
+          `${formatDateTime(s.start)} → ${formatTime(s.end)}\n` +
+          `${STATE_DESC[s.state]}` +
+          (s.lastEvent ? `\n最后事件：${s.lastEvent}` : "") +
+          (s.runId ? `\nrun ${s.runId}` : "") +
+          (s.stalled ? "\n（疑似停滞：超过阈值没有新事件，之后按空闲计）" : "");
+        const x0 = toX(s.start);
+        return {
+          state: s.state,
+          x0,
+          x1: Math.max(x0 + 0.7, toX(s.end)),
+          stalled: Boolean(s.stalled),
+          title,
+          hover: `${formatDateTime(s.start)} ${title.replace(/\n/g, " · ")}`,
+        };
+      });
+    }
+    return data.buckets.map((b) => {
+      const title =
+        `${formatDateTime(b.start)} → ${formatTime(b.end)}\n` +
+        `这一桶主要状态：${STATE_LABEL[b.dominant]}\n` +
+        `thinking ${formatDuration(b.thinkingMs)} · working ${formatDuration(
+          b.workingMs,
+        )} · idle ${formatDuration(b.idleMs)}\n` +
+        `run 开始 ${b.runCount} 次 · 用户输入 ${b.userInputs} 次`;
+      const x0 = toX(b.start);
+      return {
+        state: b.dominant,
+        x0,
+        x1: Math.max(x0 + 0.7, toX(b.end)),
+        stalled: false,
+        title,
+        hover: `${formatDateTime(b.start)} 时间桶 · ${title.replace(/\n/g, " · ")}`,
+      };
+    });
+    // x() 只依赖 from/to，data 变了才会重算。
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shape = useMemo(() => buildStateLine(steps, CHART.levels), [steps]);
 
   return (
     <svg
@@ -285,7 +339,7 @@ function TimelineBand({
             className="timeline-chart-grid"
             x1={x(t)}
             x2={x(t)}
-            y1={CHART.bandY}
+            y1={CHART.levels.thinking}
             y2={CHART.axisY - 4}
           />
           <text
@@ -299,62 +353,49 @@ function TimelineBand({
         </g>
       ))}
 
-      {/* 状态带：段模式 = 逐段矩形；桶模式 = 每桶按占比纵向堆叠 */}
-      {data.mode === "segments"
-        ? data.segments.map((s) => {
-            const sx = x(Date.parse(s.start));
-            const w = Math.max(0.7, x(Date.parse(s.end)) - sx);
-            const title =
-              `${STATE_LABEL[s.state]} · ${formatDuration(s.durationMs)}\n` +
-              `${formatDateTime(s.start)} → ${formatTime(s.end)}\n` +
-              `${STATE_DESC[s.state]}` +
-              (s.lastEvent ? `\n最后事件：${s.lastEvent}` : "") +
-              (s.runId ? `\nrun ${s.runId}` : "") +
-              (s.stalled ? "\n（疑似停滞：超过阈值没有新事件，之后按空闲计）" : "");
-            return (
-              <rect
-                key={`${s.start}-${s.state}`}
-                className={`timeline-seg ${s.state}${s.stalled ? " stalled" : ""}`}
-                x={sx}
-                y={CHART.bandY}
-                width={w}
-                height={CHART.bandH}
-                onMouseEnter={() => onHover(`${formatDateTime(s.start)} ${title.replace(/\n/g, " · ")}`)}
-              >
-                <title>{title}</title>
-              </rect>
-            );
-          })
-        : data.buckets.map((b) => {
-            const bx = x(Date.parse(b.start));
-            const bw = Math.max(0.7, x(Date.parse(b.end)) - bx);
-            const total = b.thinkingMs + b.workingMs + b.idleMs || 1;
-            const thinkH = (b.thinkingMs / total) * CHART.bandH;
-            const workH = (b.workingMs / total) * CHART.bandH;
-            const title =
-              `${formatDateTime(b.start)} → ${formatTime(b.end)}\n` +
-              `thinking ${formatDuration(b.thinkingMs)} · working ${formatDuration(b.workingMs)} · idle ${formatDuration(b.idleMs)}\n` +
-              `run 开始 ${b.runCount} 次 · 用户输入 ${b.userInputs} 次`;
-            return (
-              <g
-                key={b.start}
-                onMouseEnter={() =>
-                  onHover(`${formatDateTime(b.start)} 时间桶 · ${title.replace(/\n/g, " · ")}`)
-                }
-              >
-                <rect className="timeline-bucket idle" x={bx} y={CHART.bandY} width={bw} height={CHART.bandH} />
-                <rect className="timeline-bucket thinking" x={bx} y={CHART.bandY} width={bw} height={thinkH} />
-                <rect
-                  className="timeline-bucket working"
-                  x={bx}
-                  y={CHART.bandY + thinkH}
-                  width={bw}
-                  height={workH}
-                />
-                <title>{title}</title>
-              </g>
-            );
-          })}
+      {/* 三条状态的基准高度：细虚线，方便看出这条线跳了几档 */}
+      {TIMELINE_LINE_ORDER.map((state) => (
+        <line
+          key={`guide-${state}`}
+          className={`timeline-guide ${state}`}
+          x1={CHART.padL}
+          x2={CHART.width - CHART.padR}
+          y1={CHART.levels[state]}
+          y2={CHART.levels[state]}
+        />
+      ))}
+
+      {/* 状态折线：同一状态连续段连成水平细线，状态变化处一根竖直跳线（颜色跟新状态） */}
+      {shape.paths.map((p) => (
+        <path key={p.state} className={`timeline-line ${p.state}`} d={p.d} />
+      ))}
+
+      {/* 疑似停滞（长时间没有新事件）的那几段：同一高度上叠一根细虚线 */}
+      {shape.stalled.map((s, i) => (
+        <line
+          key={`stall-${s.state}-${i}`}
+          className="timeline-line-stall"
+          x1={s.x0}
+          x2={s.x1}
+          y1={s.y}
+          y2={s.y}
+        />
+      ))}
+
+      {/* 命中区：折线本身是一个整体，逐段的 hover / tooltip 还得靠透明矩形 */}
+      {steps.map((s, i) => (
+        <rect
+          key={`hit-${i}-${s.x0}`}
+          className="timeline-hit"
+          x={s.x0}
+          y={CHART.levels.thinking - 6}
+          width={Math.max(0.7, s.x1 - s.x0)}
+          height={CHART.levels.idle - CHART.levels.thinking + 12}
+          onMouseEnter={() => onHover(s.hover)}
+        >
+          <title>{s.title}</title>
+        </rect>
+      ))}
 
       {/* run 区间：每条 run 一个条，颜色按最终状态 */}
       {data.runs.map((r) => {
@@ -418,7 +459,7 @@ function TimelineBand({
                 className="timeline-marker-input-line"
                 x1={mx}
                 x2={mx}
-                y1={CHART.bandY + CHART.bandH}
+                y1={CHART.levels.idle}
                 y2={CHART.inputY}
               />
             ) : (
@@ -426,7 +467,7 @@ function TimelineBand({
                 className="timeline-marker-stall-line"
                 x1={mx}
                 x2={mx}
-                y1={CHART.bandY}
+                y1={CHART.levels.thinking}
                 y2={CHART.inputY}
               />
             )}
@@ -961,19 +1002,22 @@ export default function AgentTimelinePage({
         )}
         <div className="timeline-hover" aria-live="polite">
           {hover ??
-            "悬停色带 / run 条 / 三角标记可看这一段的起止、时长与判定依据；点 task 名可跳回该对话。"}
+            "悬停折线 / run 条 / 三角标记可看这一段的起止、时长与判定依据；点 task 名可跳回该对话。"}
         </div>
         <div className="timeline-legend">
+          <span className="timeline-legend-item timeline-legend-note">
+            折线高度 = 状态（上 thinking · 中 working · 下 idle），一条线上下跳
+          </span>
           <span className="timeline-legend-item">
-            <i className="timeline-swatch thinking" />
+            <i className="timeline-swatch state thinking" />
             thinking（模型侧事件）
           </span>
           <span className="timeline-legend-item">
-            <i className="timeline-swatch working" />
+            <i className="timeline-swatch state working" />
             working（工具侧事件）
           </span>
           <span className="timeline-legend-item">
-            <i className="timeline-swatch idle" />
+            <i className="timeline-swatch state idle" />
             idle（无事件）
           </span>
           <span className="timeline-legend-item">

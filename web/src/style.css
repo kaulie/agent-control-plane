@@ -2288,31 +2288,55 @@ body {
   font-size: 11px;
 }
 
-/* 状态色：thinking = 模型侧（蓝），working = 工具侧（绿），idle = 无事件（灰） */
-.timeline-seg.thinking,
-.timeline-bucket.thinking {
-  fill: #6f8cff;
+/* 状态线：thinking = 模型侧（蓝，最高）/ working = 工具侧（绿，中间）/ idle = 无事件（灰，最低）。
+   三条细线拼成一条随时间上下跳动的折线，不是铺满的色带。 */
+.timeline-line {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.timeline-seg.working,
-.timeline-bucket.working {
-  fill: var(--green);
+.timeline-line.thinking {
+  stroke: #6f8cff;
 }
 
-.timeline-seg.idle,
-.timeline-bucket.idle {
-  fill: #262b36;
+.timeline-line.working {
+  stroke: var(--green);
 }
 
-.timeline-seg {
-  shape-rendering: crispEdges;
+.timeline-line.idle {
+  stroke: color-mix(in srgb, var(--text-dim) 55%, transparent);
 }
 
-/* 被 stall 截断的那一段（后面是空闲，说明超过阈值没有事件） */
-.timeline-seg.stalled {
-  stroke: var(--amber);
+/* 三个高度上的基准虚线：方便看出这条线跳了几档 */
+.timeline-guide {
+  stroke: var(--border);
   stroke-width: 1;
-  stroke-dasharray: 2 2;
+  stroke-dasharray: 2 7;
+  opacity: 0.55;
+}
+
+.timeline-guide.thinking {
+  stroke: color-mix(in srgb, #6f8cff 35%, var(--border));
+}
+
+.timeline-guide.working {
+  stroke: color-mix(in srgb, var(--green) 30%, var(--border));
+}
+
+/* 被 stall 截断的那一段（超过阈值没有新事件）：同一高度叠一根琥珀色细虚线 */
+.timeline-line-stall {
+  stroke: var(--amber);
+  stroke-width: 2.2;
+  stroke-dasharray: 3 3;
+  stroke-linecap: round;
+}
+
+/* 命中区（透明矩形，只用来 hover / tooltip） */
+.timeline-hit {
+  fill: transparent;
+  stroke: none;
 }
 
 .timeline-run {
@@ -2389,6 +2413,18 @@ body {
   width: 14px;
   height: 10px;
   border-radius: 2px;
+}
+
+/* 状态图例画成「细线」：和折线本身一个样子 */
+.timeline-swatch.state {
+  height: 3px;
+  width: 16px;
+  border-radius: 2px;
+}
+
+.timeline-legend-note {
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .timeline-swatch.thinking {

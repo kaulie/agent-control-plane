@@ -9,7 +9,8 @@ import type {
 } from "@cline/sdk";
 import type { AgentEvent, AgentSuccessionReason, CostInfo, EventType, TokenUsage } from "../../types.js";
 import { newId } from "../../store/db.js";
-import { composePromptWithBootstrap } from "../../task-context.js";
+import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
+import { estimateMessagesTokenRange, modelContextLimit } from "../../context/index.js";
 import { formatRunErrorMessage } from "../../run-errors.js";
 import type { BillingService } from "../../billing/service.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
@@ -23,6 +24,35 @@ import {
 } from "./config.js";
 
 export type { ClineProviderConfig } from "./config.js";
+
+/**
+ * seed 体量（透明化 PR-5）：条数之外再给 token 估算 —— 以前 `seeded_messages: 1630`
+ * 看不出「切模式把 ≈1M 上下文搬进新会话」，现在两个数都写进事件（尾部 UI 直接显示）。
+ *
+ * `seededTokens` 用实测比（≈6.4 字符/token），`seededTokensUpperBound` 用 SDK 的保守比
+ * （3 字符/token，偏早预警）；两者都记，避免以后分不清这个数是哪来的。
+ */
+function seedPayload(
+  messages: MessageWithMetadata[],
+  modelId: string,
+): Record<string, unknown> {
+  const range = estimateMessagesTokenRange(messages);
+  const limit = modelContextLimit("cline", modelId);
+  const seededOverLimit = limit ? range.tokensUpperBound >= limit : false;
+  if (seededOverLimit) {
+    console.warn(
+      `[cline] succession seed ≈ ${range.tokens} tokens（保守上界 ${range.tokensUpperBound}）` +
+        ` 已达到/超过模型窗口 ${limit} —— 新会话很可能一出生就超限`,
+    );
+  }
+  return {
+    seededChars: range.chars,
+    seededTokens: range.tokens,
+    seededTokensUpperBound: range.tokensUpperBound,
+    ...(limit ? { contextLimit: limit } : {}),
+    seededOverLimit,
+  };
+}
 
 interface ActiveHandle {
   cancelled: boolean;
@@ -286,7 +316,7 @@ export class ClineProvider implements AgentProvider {
         cwd: input.cwd,
         model: modelId,
         mode: input.mode ?? "agent",
-        ...(resident ? {} : { sessionCreated: true }),
+        ...(resident ? {} : { sessionCreated: true, ...bootstrapEventPayload(input.bootstrap) }),
       });
       let result: AgentResult | undefined;
       if (resident) {
@@ -322,6 +352,18 @@ export class ClineProvider implements AgentProvider {
           emit,
         });
       } else {
+        // 透明化（PR-5）：task 本来绑了会话，但本进程里没有它（网关重启 / 会话失效）→
+        // 这次会以启动简报开新会话。以前这件事**完全无感**：用户只觉得 agent 突然失忆。
+        if (input.agentId) {
+          await emit("status", {
+            status: "session_reset",
+            message:
+              `之前绑定的会话 ${input.agentId} 不在本进程中（网关重启或会话失效），` +
+              `本次以启动简报开新会话；完整对话历史仍在本任务时间线里。`,
+            previousAgentId: input.agentId,
+            mode: input.mode ?? "agent",
+          });
+        }
         result = await this.startFresh(cline, input, modelId, mode, handle);
       }
       this.sessionsByTask.set(input.taskId, { sessionId: handle.sessionId, mode });
@@ -480,6 +522,7 @@ export class ClineProvider implements AgentProvider {
       fromMode: opts.fromMode,
       toMode: mode,
       seededMessages: initialMessages.length,
+      ...seedPayload(initialMessages, modelId),
     });
 
     return result;

@@ -27,6 +27,7 @@ const tests = [
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-billing.mjs", via: "tsx" },
   { file: "scripts/test-context-size.mjs", via: "tsx" },
+  { file: "scripts/test-transparency.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },
   // 时间线的点线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码
@@ -36,6 +37,7 @@ const tests = [
   { file: "../web/scripts/test-board-format.mjs", via: "tsx" },
   { file: "../web/scripts/test-usage-cost.mjs", via: "tsx" },
   { file: "../web/scripts/test-context-format.mjs", via: "tsx" },
+  { file: "../web/scripts/test-timeline-events.mjs", via: "tsx" },
   {
     file: "../web/scripts/test-timeline-render.mjs",
     via: "tsx",

@@ -317,12 +317,22 @@ export class Store {
         to_mode          TEXT NOT NULL,
         seeded_messages  INTEGER NOT NULL DEFAULT 0,
         created_at       TEXT NOT NULL
+      , seeded_tokens INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_agent_successions_task
         ON agent_successions(task_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_agent_successions_to
         ON agent_successions(to_agent_id);
     `);
+
+    // 透明化（PR-5）：succession 带过去的 seed 体量（token 估算）——
+    // 以前只记条数，看不出"切模式把 1M 上下文搬进新会话"。
+    const successionCols = this.db
+      .prepare(`PRAGMA table_info(agent_successions)`)
+      .all() as unknown as Array<{ name: string }>;
+    if (!successionCols.some((c) => c.name === "seeded_tokens")) {
+      this.db.exec(`ALTER TABLE agent_successions ADD COLUMN seeded_tokens INTEGER`);
+    }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS concurrency_samples (
@@ -993,8 +1003,8 @@ export class Store {
         `INSERT INTO agent_successions (
            succession_id, task_id, run_id, provider,
            from_agent_id, to_agent_id, reason, from_mode, to_mode,
-           seeded_messages, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           seeded_messages, seeded_tokens, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.successionId,
@@ -1007,8 +1017,17 @@ export class Store {
         row.fromMode,
         row.toMode,
         row.seededMessages,
+        row.seededTokens ?? null,
         row.createdAt,
       );
+  }
+
+  /** `agent_successions` 的列名（诊断 / 测试用：确认老库补上了 seeded_tokens）。 */
+  agentSuccessionColumns(): string[] {
+    const rows = this.db
+      .prepare(`PRAGMA table_info(agent_successions)`)
+      .all() as unknown as Array<{ name: string }>;
+    return rows.map((r) => r.name);
   }
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {
@@ -1027,6 +1046,7 @@ export class Store {
       from_mode: string;
       to_mode: string;
       seeded_messages: number;
+      seeded_tokens: number | null;
       created_at: string;
     }>;
     return rows.map((r) => ({
@@ -1040,6 +1060,7 @@ export class Store {
       fromMode: r.from_mode,
       toMode: r.to_mode,
       seededMessages: r.seeded_messages,
+      ...(r.seeded_tokens != null ? { seededTokens: r.seeded_tokens } : {}),
       createdAt: r.created_at,
     }));
   }
@@ -1727,6 +1748,7 @@ export class Store {
       fromMode: String(r.from_mode),
       toMode: String(r.to_mode),
       seededMessages: Number(r.seeded_messages) || 0,
+      ...(r.seeded_tokens != null ? { seededTokens: Number(r.seeded_tokens) } : {}),
       createdAt: String(r.created_at),
     }));
   }

@@ -4,12 +4,26 @@ const MAX_BOOTSTRAP_CHARS = 7500;
 const MAX_USER_MESSAGES = 20;
 const MAX_RUN_RESULTS = 10;
 const MAX_LINE_CHARS = 400;
+const MAX_ATTACHMENT_LINES = 20;
+
+/** 历史段预算的分配（骨架先占，剩下来的按这个比例分给两段）。 */
+const RUN_RESULTS_SHARE = 0.4;
 
 export interface TaskBootstrapInput {
   task: Task;
   project?: Project;
   events: AgentEvent[];
   runs: RunRecord[];
+}
+
+/** 简报的产出 + 它的"体检数据"（要写进 `run_started` 事件，便于事后核对）。 */
+export interface TaskBootstrap {
+  text: string;
+  chars: number;
+  /** 有没有因为超预算丢掉历史行（用户消息 / run 结论）。 */
+  truncated: boolean;
+  dropped: { userMessages: number; runResults: number };
+  kept: { userMessages: number; runResults: number };
 }
 
 function clip(text: string, max: number): string {
@@ -43,7 +57,7 @@ function collectAttachments(events: AgentEvent[]): string[] {
       lines.push(`- ${id} (${mime})`);
     }
   }
-  return lines;
+  return lines.slice(-MAX_ATTACHMENT_LINES).map((line) => clip(line, 120));
 }
 
 function collectRunResults(runs: RunRecord[]): string[] {
@@ -60,17 +74,9 @@ function collectRunResults(runs: RunRecord[]): string[] {
   });
 }
 
-/**
- * Build a one-shot briefing injected only on Agent.create (not shown in the
- * Web Cursor timeline). Keeps the agent aware of task identity + history.
- */
-export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
-  const { task, project, events, runs } = input;
-  const userMsgs = collectUserMessages(events);
-  const attachments = collectAttachments(events);
-  const runResults = collectRunResults(runs);
-
-  const sections: string[] = [
+/** 固定骨架（任务身份 / 隔离规则 / 代理 / 角色）—— 不参与裁剪。 */
+function skeletonSections(task: Task, project: Project | undefined): string[] {
+  return [
     "[Web Cursor task bootstrap — injected once on agent create; not a user message]",
     "",
     "## Task identity",
@@ -110,33 +116,87 @@ export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
     "- Prefer answering from this briefing + conversation; look up the DB only if needed.",
     "",
   ];
+}
 
-  sections.push("## History summary");
+const TAIL = [
+  "## Current user message",
+  "The text after this block is the user's actual message for this turn.",
+].join("\n");
 
-  if (userMsgs.length === 0 && runResults.length === 0 && attachments.length === 0) {
-    sections.push("- (no prior history on this task yet)");
-  } else {
-    if (userMsgs.length) {
-      sections.push("### Recent user messages", ...userMsgs, "");
-    }
-    if (runResults.length) {
-      sections.push("### Recent run outcomes", ...runResults, "");
-    }
-    if (attachments.length) {
-      sections.push("### Attachments (ids only)", ...attachments, "");
-    }
+/**
+ * 从**最新往回**装行，保证最近的内容一定留下（这是原来那个 bug：
+ * 之前是整段 `slice(0, MAX)`，超预算时先把 `### Recent run outcomes` 整段砍掉）。
+ */
+function fitLines(lines: string[], budget: number): { kept: string[]; used: number } {
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]!;
+    if (used + line.length + 1 > budget) break;
+    kept.unshift(line);
+    used += line.length + 1;
   }
+  return { kept, used };
+}
 
-  sections.push(
-    "## Current user message",
-    "The text after this block is the user's actual message for this turn.",
+/**
+ * Build the one-shot briefing injected only when a session is actually created
+ * (not shown in the Web Cursor timeline).
+ *
+ * Budget: 固定骨架先占，剩下的按 3:2 分给「用户消息 / run 结论」，两段都**保尾部**；
+ * 丢了多少行会写进 `TaskBootstrap.dropped`（由 provider 记进 `run_started` 事件）。
+ */
+export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
+  const { task, project, events, runs } = input;
+  const userMsgs = collectUserMessages(events);
+  const attachments = collectAttachments(events);
+  const runResults = collectRunResults(runs);
+
+  const skeleton = skeletonSections(task, project).filter((s) => s !== "").join("\n");
+  const attachmentText = attachments.length
+    ? ["### Attachments (ids only)", ...attachments].join("\n")
+    : "";
+  const budget = Math.max(
+    0,
+    MAX_BOOTSTRAP_CHARS - skeleton.length - TAIL.length - attachmentText.length - 80,
   );
 
-  let text = sections.filter((s) => s !== "").join("\n");
-  if (text.length > MAX_BOOTSTRAP_CHARS) {
-    text = `${text.slice(0, MAX_BOOTSTRAP_CHARS - 1)}…`;
+  // run 结论更稀缺（每轮一条），先给它 40%，用户消息拿剩下的。
+  const runBudget = Math.floor(budget * RUN_RESULTS_SHARE);
+  const fittedRuns = fitLines(runResults, runBudget);
+  const fittedUsers = fitLines(userMsgs, Math.max(0, budget - fittedRuns.used));
+
+  const parts: string[] = [skeleton, "## History summary"];
+  if (!fittedUsers.kept.length && !fittedRuns.kept.length && !attachmentText) {
+    parts.push("- (no prior history on this task yet)");
+  } else {
+    if (fittedUsers.kept.length) parts.push("### Recent user messages", ...fittedUsers.kept);
+    if (fittedRuns.kept.length) parts.push("### Recent run outcomes", ...fittedRuns.kept);
+    if (attachmentText) parts.push(attachmentText);
   }
-  return text;
+  parts.push(TAIL);
+
+  let text = parts.filter((s) => s !== "").join("\n");
+  let truncated = false;
+  if (text.length > MAX_BOOTSTRAP_CHARS) {
+    // 最后一道保险（正常不会走到：上面已经按预算装了）。
+    text = `${text.slice(0, MAX_BOOTSTRAP_CHARS - 1)}…`;
+    truncated = true;
+  }
+  const droppedUserMessages = userMsgs.length - fittedUsers.kept.length;
+  const droppedRunResults = runResults.length - fittedRuns.kept.length;
+  return {
+    text,
+    chars: text.length,
+    truncated: truncated || droppedUserMessages > 0 || droppedRunResults > 0,
+    dropped: { userMessages: droppedUserMessages, runResults: droppedRunResults },
+    kept: { userMessages: fittedUsers.kept.length, runResults: fittedRuns.kept.length },
+  };
+}
+
+/** 兼容旧调用：只要文本。 */
+export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
+  return buildTaskBootstrap(input).text;
 }
 
 export function composePromptWithBootstrap(
@@ -145,4 +205,24 @@ export function composePromptWithBootstrap(
 ): string {
   if (!bootstrapText?.trim()) return userText;
   return `${bootstrapText.trim()}\n\n---\n\n${userText}`;
+}
+
+/**
+ * 简报要写进 `run_started` 的字段（透明化 PR-5）：体检数据 + 原文。
+ * 只在**真的新开会话**时记，所以量很小（每个会话一次，≤7.5KB），但能回答
+ * "这个会话的模型到底看到了什么"。
+ */
+export function bootstrapEventPayload(
+  bootstrap: TaskBootstrap | undefined,
+): Record<string, unknown> {
+  if (!bootstrap) return {};
+  return {
+    bootstrapChars: bootstrap.chars,
+    bootstrapTruncated: bootstrap.truncated,
+    bootstrapKeptUserMessages: bootstrap.kept.userMessages,
+    bootstrapKeptRunResults: bootstrap.kept.runResults,
+    bootstrapDroppedUserMessages: bootstrap.dropped.userMessages,
+    bootstrapDroppedRunResults: bootstrap.dropped.runResults,
+    bootstrapText: bootstrap.text,
+  };
 }

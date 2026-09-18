@@ -66,10 +66,48 @@
 测试：`backend/scripts/test-context-size.mjs`（口径）、`backend/scripts/test-transparency.mjs`（简报裁剪 +
 seed 体量落库）、`web/scripts/test-context-format.mjs`、`web/scripts/test-timeline-events.mjs`。
 
-## 四、还没做（后续 PR）
+## 四、防炸：三条线（PR-4）
 
-- ~~PR-2/PR-3：≥85% 提示 + fork 新 task~~（已做：`POST /api/tasks/:id/fork` + `ContextMeter` 常驻提示
-  + 发言时弹窗 + `forkedFrom/forkedTo` + `carried` 简报；详见根 README 的 `## Context`）；
+| 线 | 谁在管 | 行为 |
+| --- | --- | --- |
+| **85%** `CONTEXT_ALERT_PERCENT` | 用户 | 常驻提示 + 发言时弹窗：建议 fork 新 task（自己决定）|
+| **90%** | SDK（core 自带）| **启用 compaction** 后 core 自己压（`triggerRatio = 0.9`，basic = token 预算截断投影）|
+| **88%** `CONTEXT_ROTATE_PERCENT` | 系统 | 兜底：换会话（run 开始前判定，见 `rotate.ts`）|
+| **上一次 run 被窗口顶死** | 系统 | **无条件轮转** —— 否则再发一句只会再失败一次（不可逆）|
+
+### 压缩为什么以前没生效（探针结论）
+
+`@cline/core` 的压缩是 **opt-in**：`BY()` 里 `if (config.compaction?.enabled !== true) return;`，
+返回 undefined 就等于**没有 `prepareTurn`** → 长会话只会撞 provider 硬上限，报
+"no conversation history to compact"（pdf-reader 的死法）。
+所以 cline provider 现在在 `buildConfig()` 里显式传
+`compaction: { enabled: true, strategy: "basic" }`（不需要 summarizer；agentic 需要额外 provider，留给后续）。
+→ `CLINE_COMPACTION=0` 可关。
+
+### 自动轮转的判据（`rotate.ts`，纯函数）
+
+```
+rotate  ⟺  tokens + 本次输入  ≥  min(limit × 88%, limit − 60k)   或  上一次 run 就是上下文超限
+```
+
+- `tokens` = 最近一次模型调用的 prompt（`size.ts`），`limit` = 模型窗口；**任一未知 → 不轮转**（不猜）；
+- `incomingTokens`：文本按实测比、图片按 1.5k/张 —— 用户贴一大段也会提前触发；
+- 留 `60k` 余量：实测单个 run 内部还能自己长 ~66k；
+- 轮转 = `startFresh`（新会话 + 启动简报，简报里就带最近历史）→ **不需要 seed**；
+- `CONTEXT_AUTO_ROTATE=0` 可关（关掉后只留 85% 的 fork 提示 + 溢出时的可操作报错）。
+
+### 透明化（契约在 §二）
+
+| 动作 | 事件 | 页面 |
+| --- | --- | --- |
+| 自动轮转 | `status: context_rotation`（含 tokens/limit/percent/reason）+ `agent_succession`（`reason: "context_rotation"`，带 `contextTokens/contextLimit/contextPercent/rotateReason`）| 时间线「已自动轮转会话」+ 「上下文轮转 · 当时约 88%」|
+| 撞上窗口（没救回来时）| 原始报错 | 页面把它翻成可操作中文：「上下文已超出模型窗口…请点 Fork 新 task」（`web/src/run-errors.ts`）|
+
+## 五、还没做
+
+- `strategy: "agentic"`（LLM 摘要式压缩）需要单独的 summarizer provider；
+- 轮转的"摘要式 digest"（目前直接用启动简报，含最近 20 条用户消息 + 10 个 run 结论）；
+- cursor 侧只有"上一次超限"这一个信号（它的 usage 是 agent 累计值，推不出体量）。
 - **PR-4**：自动轮转（70% 主触发 / 溢出重试兜底 / 85% 只告警）+ 轮转的透明化四件套 + 可关闭开关；
 - 压缩探针：`@cline/core` 自带 compaction（触发比 0.9 / 目标 0.7 / 保留 20k），但实测没生效 ——
   需要确认是不是我们没把 `contextWindow/maxInputTokens` 喂给 runtime。

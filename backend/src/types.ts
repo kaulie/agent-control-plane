@@ -152,7 +152,11 @@ export type EventType =
   | "agent_succession";
 
 /** Why a task's bound agent id was replaced by a successor. */
-export type AgentSuccessionReason = "mode_change" | "session_unusable";
+export type AgentSuccessionReason =
+  | "mode_change"
+  | "session_unusable"
+  /** 上下文接近模型窗口，系统自动换会话（兜底；见 context/README.md）。 */
+  | "context_rotation";
 
 /**
  * Explicit lineage when a task gets a new SDK agent/session while inheriting

@@ -1,5 +1,6 @@
 /** Classified run failure kinds for Timeline display. */
 export type RunErrorKind =
+  | "context_window"
   | "user_stop"
   | "server_restart"
   | "sdk_aborted"
@@ -31,6 +32,19 @@ export function classifyRunError(
 
   const lower = s.toLowerCase();
 
+  // 上下文撞模型窗口：给可操作的中文（原文只说"no conversation history to compact"，谁也看不懂）。
+  if (
+    /exceeds the model's context window|maximum context length|context window exceeded|contextwindowoverflow/i.test(
+      s,
+    )
+  ) {
+    return {
+      kind: "context_window",
+      message:
+        "上下文已超出模型窗口，这个会话发不出消息了：请在 Context 条上点「Fork 新 task」" +
+        "（或新开 task）换个会话继续 —— 完整历史仍在时间线里",
+    };
+  }
   if (/interrupted \(server restart\)/i.test(s)) {
     return { kind: "server_restart", message: "任务因服务重启中断" };
   }

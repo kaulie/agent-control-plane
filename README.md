@@ -173,6 +173,10 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
   ⚠️ 别和 `stats.inputTokens`（跨调用累加，38.9M）混；provider 推不出体量时（cursor）
   显示「未知 + 原因」，**不猜数**；
 - 模型窗口从 provider 的模型目录读（`@cline/llms`），查不到就是"窗口未知"；
+- **防炸三条线**：85% 提示 fork（人决定）→ 88% 系统兜底**自动轮转会话**（换会话 + 简报，时间线写明
+  原因与当时占比）→ 90% 由 SDK 的 **compaction** 自己压（已启用，`CLINE_COMPACTION=0` 可关；
+  探针发现它是 opt-in 的：不显式打开等于没有 `prepareTurn`，长会话只能撞硬上限）。
+  开关：`CONTEXT_AUTO_ROTATE=0` 关掉自动轮转（只留提示与可操作报错）；
 - **上下文将满（≥85%）= fork 出口**：UsageBar 下方常驻一条提示 + 「Fork 新 task」按钮；
   你**下一次发言**时会先弹窗（Fork / 仍然发送 / 不再提醒 / 取消）—— 不做"替用户决定"的默认动作。
   Fork 继承工作区与模型并带上最近历史，原 task 时间线留痕，也会显示 `已 fork → #xxx`；

@@ -10,7 +10,7 @@ import type {
 import type { AgentEvent, AgentSuccessionReason, CostInfo, EventType, TokenUsage } from "../../types.js";
 import { newId } from "../../store/db.js";
 import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
-import { estimateMessagesTokenRange, modelContextLimit } from "../../context/index.js";
+import { estimateMessagesTokenRange, modelContextLimit, shouldRotateContext } from "../../context/index.js";
 import { formatRunErrorMessage } from "../../run-errors.js";
 import type { BillingService } from "../../billing/service.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
@@ -110,6 +110,8 @@ export class ClineProvider implements AgentProvider {
   private readonly baseUrl?: string;
   /** 计费模块（数据源 = `billing_rules` 表）；缺省 = 退回本地价目估算。 */
   private readonly billing?: BillingService;
+  /** SDK 自带的上下文压缩（`config.compaction`）；默认开，见 config.ts 的探针结论。 */
+  private readonly compactionEnabled: boolean;
 
   private modelsCache: ModelInfo[] | undefined;
   private client: ClineCore | undefined;
@@ -124,6 +126,7 @@ export class ClineProvider implements AgentProvider {
     this.apiKey = config.apiKey?.trim() || undefined;
     this.baseUrl = config.baseUrl?.trim() || undefined;
     this.billing = config.billing;
+    this.compactionEnabled = config.compaction !== false;
   }
 
   // ---- infrastructure ----
@@ -318,8 +321,53 @@ export class ClineProvider implements AgentProvider {
         mode: input.mode ?? "agent",
         ...(resident ? {} : { sessionCreated: true, ...bootstrapEventPayload(input.bootstrap) }),
       });
+      // 自动轮转兜底（PR-4）：会话接近模型窗口就换会话，避免"用户什么都没点、任务却被顶死"。
+      // 85% 那条线是给用户的提示（建议 fork），这里是系统兜底（~88% + 上一次超限则无条件）。
+      const sessionContext = input.sessionContext;
+      const rotate = shouldRotateContext({
+        tokens: sessionContext?.tokens,
+        limit: sessionContext?.limit,
+        incomingTokens: sessionContext?.incomingTokens,
+        lastRunOverflow: sessionContext?.lastRunOverflow,
+        enabled: sessionContext?.autoRotate !== false,
+      });
+      const rotateNow = Boolean(resident && prior && rotate.rotate);
+      if (rotateNow) {
+        console.warn(
+          `[cline] context rotation for task ${input.taskId}: ${rotate.detail ?? rotate.reason}` +
+            `（窗口 ${sessionContext?.limit ?? "?"}）`,
+        );
+      }
+
       let result: AgentResult | undefined;
-      if (resident) {
+      if (rotateNow && prior) {
+        // 透明化：轮转必须说出来（时间线可见 + 可审计），否则用户只会觉得 agent 失忆。
+        await emit("status", {
+          status: "context_rotation",
+          message:
+            `上下文已达 ${rotate.percent ?? "?"}%（模型窗口 ${sessionContext?.limit ?? "?"} tokens）：` +
+            `为避免会话被顶死，已自动新开会话并把最近历史写进简报；完整历史仍在本任务时间线里。`,
+          reason: rotate.reason,
+          ...(sessionContext?.tokens != null ? { contextTokens: sessionContext.tokens } : {}),
+          ...(sessionContext?.limit != null ? { contextLimit: sessionContext.limit } : {}),
+          ...(rotate.percent != null ? { contextPercent: rotate.percent } : {}),
+        });
+        const fromAgentId = prior.sessionId;
+        result = await this.startFresh(cline, input, modelId, mode, handle);
+        await emit("agent_succession", {
+          provider: "cline",
+          fromAgentId,
+          toAgentId: handle.sessionId,
+          reason: "context_rotation",
+          fromMode: mode,
+          toMode: mode,
+          seededMessages: 0,
+          ...(sessionContext?.tokens != null ? { contextTokens: sessionContext.tokens } : {}),
+          ...(sessionContext?.limit != null ? { contextLimit: sessionContext.limit } : {}),
+          ...(rotate.percent != null ? { contextPercent: rotate.percent } : {}),
+          ...(rotate.reason ? { rotateReason: rotate.reason } : {}),
+        });
+      } else if (resident) {
         try {
           const userImages = this.buildUserImages(input);
           result = await cline.send({
@@ -472,6 +520,13 @@ export class ClineProvider implements AgentProvider {
       mode,
       systemPrompt: this.systemPrompt,
       sessionId,
+      // 上下文压缩：opt-in 的能力，不显式打开等于没有（探针见 config.ts）。
+      compaction: {
+        enabled: this.compactionEnabled,
+        // basic = 内置 token 预算截断投影（不需要 summarizer，可确定性复现）；
+        // agentic 需要额外的 summarizer provider，留给后续。
+        strategy: "basic",
+      },
     };
   }
 

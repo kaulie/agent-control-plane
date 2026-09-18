@@ -3,6 +3,7 @@
  */
 export * from "./size.js";
 export * from "./estimate.js";
+export * from "./rotate.js";
 export {
   knownModelLimits,
   modelContextLimit,

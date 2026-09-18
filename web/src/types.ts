@@ -453,10 +453,41 @@ export interface TaskStats {
   runCount: number;
 }
 
+/** 一轮 run 的上下文轨迹（口径见 backend/src/context/size.ts）。 */
+export interface ContextRunSample {
+  runId: string;
+  at: string;
+  model?: string;
+  calls: number;
+  startTokens: number;
+  endTokens: number;
+  growthTokens: number;
+  /** 这一轮换了会话（重启 / 轮转）。 */
+  reset: boolean;
+}
+
+/** 上下文体量（`GET /api/tasks/:id` 的 `context`）。 */
+export interface TaskContextSize {
+  provider: string;
+  available: boolean;
+  note?: string;
+  model?: string;
+  limit?: number;
+  tokens?: number;
+  percent?: number;
+  sampledAt?: string;
+  runs: ContextRunSample[];
+  avgGrowthTokens?: number;
+  estimatedRunsLeft?: number;
+  thresholds: { warn: number; alert: number };
+}
+
 export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
+  /** 上下文体量（缺失 = 还没有可用的 usage 采样）。 */
+  context?: TaskContextSize;
 }
 
 export interface AuthStatus {
@@ -474,7 +505,12 @@ export interface ProviderInfo {
 
 export interface ModelInfo {
   id: string;
-  displayName: string;
+  displayName: string;  /** 模型上下文窗口（tokens）；未知则缺省。 */
+  contextWindow?: number;
+  /** 可用输入预算（tokens）。 */
+  maxInputTokens?: number;
+  /** 单轮最大输出（tokens）。 */
+  maxTokens?: number;
 }
 
 export type UsageGranularity = "hour" | "day" | "week";

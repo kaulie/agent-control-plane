@@ -319,6 +319,77 @@ body {
   min-width: 90px;
 }
 
+.context-meter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.context-meter-head {
+  display: flex;
+  flex-direction: column;
+}
+
+.context-percent {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-tone-ok {
+  color: var(--green);
+}
+
+.context-tone-warn {
+  color: var(--amber);
+}
+
+.context-tone-alert,
+.context-tone-over {
+  color: var(--red);
+}
+
+.context-tone-unknown {
+  color: var(--text-dim);
+}
+
+.context-tokens {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.context-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 24px;
+  padding: 2px 0;
+}
+
+.context-bar {
+  display: block;
+  width: 8px;
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+}
+
+.context-bar-reset {
+  background: var(--amber);
+  opacity: 1;
+}
+
 .usage-label {
   font-size: 10px;
   text-transform: uppercase;

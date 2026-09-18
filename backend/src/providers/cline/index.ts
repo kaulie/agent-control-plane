@@ -181,13 +181,22 @@ export class ClineProvider implements AgentProvider {
     try {
       const models = (await Llms.getModelsForProvider(this.providerId)) as Record<
         string,
-        { name?: string }
+        {
+          name?: string;
+          contextWindow?: number;
+          maxInputTokens?: number;
+          maxTokens?: number;
+        }
       >;
       const entries = Object.entries(models);
       if (entries.length) {
+        // 上下文窗口一起带上：计费/上下文显示都要用（见 context/limits.ts）。
         this.modelsCache = entries.map(([id, m]) => ({
           id,
           displayName: m.name ?? id,
+          ...(typeof m.contextWindow === "number" ? { contextWindow: m.contextWindow } : {}),
+          ...(typeof m.maxInputTokens === "number" ? { maxInputTokens: m.maxInputTokens } : {}),
+          ...(typeof m.maxTokens === "number" ? { maxTokens: m.maxTokens } : {}),
         }));
         return this.modelsCache;
       }
@@ -199,7 +208,7 @@ export class ClineProvider implements AgentProvider {
     }
     this.modelsCache =
       this.providerId === DEFAULT_PROVIDER_ID
-        ? DEEPSEEK_FALLBACK_MODELS.map((m) => ({ id: m.id, displayName: m.displayName }))
+        ? DEEPSEEK_FALLBACK_MODELS.map((m) => ({ ...m }))
         : [];
     return this.modelsCache;
   }

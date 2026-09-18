@@ -11,6 +11,7 @@ import {
 } from "./git-via-proxy.js";
 import { Store } from "./store/db.js";
 import { createBillingService } from "./billing/index.js";
+import { warmModelLimits } from "./context/index.js";
 import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
@@ -129,6 +130,14 @@ const providers = createProviderRegistry({
     systemPrompt: config.clineSystemPrompt,
   },
 });
+// 预热模型窗口（上下文占比要用；失败只是"窗口未知"，不影响启动）。
+void warmModelLimits(providers).catch((err) => {
+  console.warn(
+    "[context] warmModelLimits failed:",
+    err instanceof Error ? err.message : err,
+  );
+});
+
 if (interrupted.orphans.length) {
   console.warn(
     `[startup] clearing ${interrupted.orphans.length} orphaned SDK agent run(s) from prior process`,

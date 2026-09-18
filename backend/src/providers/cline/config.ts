@@ -37,10 +37,17 @@ export const DEFAULT_SYSTEM_PROMPT = [
  * DeepSeek fallback model catalog, used only when `@cline/llms` returns no
  * registered models for the configured provider.
  */
-export const DEEPSEEK_FALLBACK_MODELS: Array<{ id: string; displayName: string }> = [
-  { id: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro" },
-  { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash" },
-  { id: "deepseek-v4-flash-vision-exp", displayName: "DeepSeek V4 Flash Vision Exp" },
+export const DEEPSEEK_FALLBACK_MODELS: Array<{
+  id: string;
+  displayName: string;
+  /** 目录不可达时的兜底窗口（与 `@cline/llms` 目录一致）。 */
+  contextWindow: number;
+  maxInputTokens: number;
+  maxTokens: number;
+}> = [
+  { id: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", contextWindow: 1_000_000, maxInputTokens: 1_000_000, maxTokens: 384_000 },
+  { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", contextWindow: 1_000_000, maxInputTokens: 1_000_000, maxTokens: 384_000 },
+  { id: "deepseek-v4-flash-vision-exp", displayName: "DeepSeek V4 Flash Vision Exp", contextWindow: 1_000_000, maxInputTokens: 1_000_000, maxTokens: 384_000 },
 ];
 
 export interface PricingPerMTok {

@@ -36,6 +36,7 @@ import {
   type StoredImageRef,
 } from "../attachments.js";
 import { buildTaskBootstrap, type TaskBootstrapCarried } from "../task-context.js";
+import type { RunSessionContext } from "../providers/types.js";
 import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
@@ -68,7 +69,10 @@ import {
   type BillingService,
 } from "../billing/index.js";
 import {
+  IMAGE_TOKEN_ESTIMATE,
+  MEASURED_CHARS_PER_TOKEN,
   buildContextSize,
+  estimateTextTokens,
   modelContextLimit,
   type TaskContextSize,
 } from "../context/index.js";
@@ -110,6 +114,8 @@ export interface GatewayConfig {
   deployGracefulWaitMs?: number;
   /** 计费模块；缺省时按 store 自建一个（同一个实例应与 provider 共用）。 */
   billing?: BillingService;
+  /** 上下文自动轮转兜底开关（`CONTEXT_AUTO_ROTATE=0` 关掉；缺省开）。 */
+  autoRotate?: boolean;
 }
 
 export interface SendMessageInput {
@@ -324,7 +330,9 @@ export function agentSuccessionFromEvent(
   if (!fromAgentId || !toAgentId) return undefined;
   const reasonRaw = typeof p.reason === "string" ? p.reason.trim() : "";
   const reason: AgentSuccessionReason =
-    reasonRaw === "session_unusable" ? "session_unusable" : "mode_change";
+    reasonRaw === "session_unusable" || reasonRaw === "context_rotation"
+      ? reasonRaw
+      : "mode_change";
   return {
     taskId: event.taskId,
     runId: event.runId,
@@ -626,6 +634,36 @@ export class AgentGateway {
     this.publish({ type: "agent_event", event: note });
     this.publish({ type: "task_created", task });
     return { task, source };
+  }
+
+  /**
+   * provider 侧"自动轮转"要的会话体量快照（口径见 `context/size.ts`）。
+   *
+   * - `tokens` / `limit`：当前会话请求体量与模型窗口（未知就给 undefined，provider 不会猜）；
+   * - `incomingTokens`：本次输入（文本按实测比、图片按固定估算）—— 用户贴一大段也要算进去；
+   * - `lastRunOverflow`：上一次 run 就是被窗口顶死的 → provider 无条件轮转。
+   */
+  sessionContextFor(
+    task: Task,
+    incoming: { text: string; images: number },
+  ): RunSessionContext {
+    const ctx = this.getTaskContext(task.taskId);
+    const runs = this.store.listRuns(task.taskId);
+    const lastRun = runs[runs.length - 1];
+    const lastRunOverflow = Boolean(
+      lastRun?.error && /context window|context length|ContextWindowOverflow/i.test(lastRun.error),
+    );
+    const incomingTokens =
+      estimateTextTokens(incoming.text, MEASURED_CHARS_PER_TOKEN) +
+      incoming.images * IMAGE_TOKEN_ESTIMATE;
+    return {
+      ...(ctx?.tokens != null ? { tokens: ctx.tokens } : {}),
+      ...(ctx?.limit != null ? { limit: ctx.limit } : {}),
+      ...(ctx?.avgGrowthTokens != null ? { avgGrowthTokens: ctx.avgGrowthTokens } : {}),
+      incomingTokens,
+      lastRunOverflow,
+      autoRotate: this.config.autoRotate !== false,
+    };
   }
 
   /**
@@ -2112,6 +2150,7 @@ export class AgentGateway {
         mode,
         bootstrapText: bootstrap.text,
         bootstrap,
+        sessionContext: this.sessionContextFor(task, { text, images: images.length }),
         agentName: task.title,
         onEvent: (event) => {
           if (event.agentId) bindAgentId(event.agentId);

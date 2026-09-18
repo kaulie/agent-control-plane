@@ -22,6 +22,16 @@ export interface ClineProviderConfig {
    * 缺省时保持旧行为：SDK 上报的 `totalCost` + 下面的本地价目估算。
    */
   billing?: BillingService;
+  /**
+   * 是否启用 SDK 自带的上下文压缩（`config.compaction`）。默认 **true**。
+   *
+   * 探针结论（2026-09-18，`@cline/core` 源码）：压缩是 opt-in 的 ——
+   * `BY()` 里 `if (config.compaction?.enabled !== true) return;`，返回 undefined 就等于
+   * **没有 `prepareTurn`**，于是长会话只会撞 provider 的硬上限，报
+   * "no conversation history to compact"（这正是 pdf-reader 的死法）。
+   * 打开后 core 会在 90% 时自己压缩（basic = 内置 token 预算截断投影，不需要 summarizer）。
+   */
+  compaction?: boolean;
 }
 
 export const DEFAULT_PROVIDER_ID = "deepseek";

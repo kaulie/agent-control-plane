@@ -9,6 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { buildRows } from "../src/components/Timeline.tsx";
+import { classifyRunError } from "../src/run-errors.ts";
 
 const ev = (eventType, payload, over = {}) => ({
   eventId: `evt-${eventType}`,
@@ -74,4 +75,49 @@ assert.match(withBootstrap.detail, /丢 8 条用户消息 \/ 4 条 run 结论/);
 const plain = buildRows([ev("run_started", { cwd: "/tmp/ws", model: "m" })])[0];
 assert.equal(plain.detail, "/tmp/ws");
 
-console.log("PASS: 时间线透明化文案（会话重置 / seed 体量 / 简报裁剪）");
+// 6) 系统自动轮转也要说出来（PR-4）
+const rotation = buildRows([
+  ev("status", {
+    status: "context_rotation",
+    message: "上下文已达 88%（模型窗口 1000000 tokens）：为避免会话被顶死，已自动新开会话…",
+    reason: "over_threshold",
+    contextPercent: 88,
+  }),
+])[0];
+assert.equal(rotation.body, "已自动轮转会话");
+assert.match(rotation.detail, /避免会话被顶死/);
+
+// 7) succession 的 reason 要有中文，并把"当时占比"带上
+const rotatedSuccession = buildRows([
+  ev("agent_succession", {
+    fromAgentId: "cls-0123456789abcdef",
+    toAgentId: "cls-fedcba9876543210",
+    fromMode: "yolo",
+    toMode: "yolo",
+    reason: "context_rotation",
+    seededMessages: 0,
+    contextPercent: 88,
+    contextLimit: 1000000,
+  }),
+])[0];
+assert.match(rotatedSuccession.detail, /上下文轮转/);
+assert.match(rotatedSuccession.detail, /当时约 88%/);
+assert.match(
+  buildRows([ev("agent_succession", { fromAgentId: "a", toAgentId: "b", reason: "session_unusable" })])[0].detail,
+  /会话失效/,
+);
+assert.match(
+  buildRows([ev("agent_succession", { fromAgentId: "a", toAgentId: "b", reason: "mode_change" })])[0].detail,
+  /切模式/,
+);
+
+// 8) 撞上模型窗口的原始报错 → 可操作中文（原文没人看得懂）
+const overflow = classifyRunError(
+  "The request exceeds the model's context window and there is no conversation history to compact — the system prompt, tools, and current input alone are too large. (provider reported: This model's maximum context length is 1048576 tokens.)",
+);
+assert.equal(overflow.kind, "context_window");
+assert.match(overflow.message, /Fork 新 task/);
+assert.match(overflow.message, /完整历史仍在时间线里/);
+assert.equal(classifyRunError("already has active run").kind, "busy", "其它分类不受影响");
+
+console.log("PASS: 时间线透明化文案（会话重置 / seed 体量 / 简报裁剪 / 自动轮转 / 超限报错）");

@@ -18,6 +18,22 @@ export interface RunPrompt {
   images?: PromptImage[];
 }
 
+/** 会话体量 + 轮转开关（`RunInput.sessionContext`）。 */
+export interface RunSessionContext {
+  /** 当前会话请求体量（tokens）；未知则不给（provider 也就不会轮转）。 */
+  tokens?: number;
+  /** 模型窗口（tokens）。 */
+  limit?: number;
+  /** 本次用户输入（文本 + 图片）的估算 tokens。 */
+  incomingTokens?: number;
+  /** 最近几轮平均增量（tokens/run），给日志/事件用。 */
+  avgGrowthTokens?: number;
+  /** 上一次 run 因上下文超限失败 → 无条件轮转。 */
+  lastRunOverflow?: boolean;
+  /** 自动轮转总开关（`CONTEXT_AUTO_ROTATE=0` 关掉）。 */
+  autoRotate?: boolean;
+}
+
 export interface RunInput {
   taskId: string;
   runId: string;
@@ -45,6 +61,11 @@ export interface RunInput {
    * provider 会把它写进 `run_started` 事件，页面/接口因此能回答"模型到底看到了什么"。
    */
   bootstrap?: TaskBootstrap;
+  /**
+   * 会话体量快照（网关算好给 provider 用）：自动轮转兜底的判据。
+   * 口径见 `context/size.ts`（tokens = 最近一次模型调用的 prompt）。
+   */
+  sessionContext?: RunSessionContext;
   /** Display name for the underlying session (typically task.title). */
   agentName?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;

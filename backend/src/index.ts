@@ -128,6 +128,7 @@ const providers = createProviderRegistry({
     apiKey: config.clineApiKey,
     baseUrl: config.clineBaseUrl,
     systemPrompt: config.clineSystemPrompt,
+    compaction: config.clineCompaction,
   },
 });
 // 预热模型窗口（上下文占比要用；失败只是"窗口未知"，不影响启动）。
@@ -192,6 +193,7 @@ const gateway = new AgentGateway(
     agentRssLimitMb: config.agentRssLimitMb,
     deployGracefulWaitMs: config.deployGracefulWaitMs,
     billing,
+    autoRotate: config.contextAutoRotate,
   },
   publish,
 );

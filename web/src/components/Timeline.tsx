@@ -159,6 +159,10 @@ export function buildRows(events: AgentEvent[]): Row[] {
         } else if (statusRaw.toLowerCase() === "retrying") {
           body = "自动重试";
           detail = p.message ? String(p.message) : "";
+        } else if (statusRaw.toLowerCase() === "context_rotation") {
+          // 透明化（PR-4）：系统自动换会话（会话接近模型窗口），必须说出来。
+          body = "已自动轮转会话";
+          detail = p.message ? String(p.message) : "";
         } else if (statusRaw.toLowerCase() === "session_reset") {
           // 透明化（PR-5）：网关重启/会话失效导致"换会话、模型失忆"，以前完全无感。
           body = "会话已重置";
@@ -259,10 +263,21 @@ export function buildRows(events: AgentEvent[]): Row[] {
           p.seededTokens != null && Number.isFinite(Number(p.seededTokens))
             ? Number(p.seededTokens)
             : undefined;
-        const reason = String(p.reason ?? "mode_change");
+        const reasonRaw = String(p.reason ?? "mode_change");
+        const reason =
+          reasonRaw === "context_rotation"
+            ? "上下文轮转"
+            : reasonRaw === "session_unusable"
+              ? "会话失效"
+              : "切模式";
+        const contextPercent =
+          p.contextPercent != null && Number.isFinite(Number(p.contextPercent))
+            ? Number(p.contextPercent)
+            : undefined;
         body = `${shortAgentId(fromId)} → ${shortAgentId(toId)} (${fromMode}→${toMode})`;
         detail = [
           reason,
+          contextPercent != null ? `当时约 ${contextPercent}%` : null,
           Number.isFinite(seeded)
             ? `seeded ${seeded} msgs${seededTokens != null ? ` ≈ ${formatTokens(seededTokens)} tokens` : ""}`
             : null,

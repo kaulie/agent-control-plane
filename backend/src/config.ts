@@ -121,6 +121,10 @@ export interface Config {
   clineApiKey: string | undefined;
   clineBaseUrl: string | undefined;
   clineSystemPrompt: string | undefined;
+  /** 启用 SDK 自带上下文压缩（CLINE_COMPACTION=0 关闭；见 context/README.md 探针）。 */
+  clineCompaction: boolean;
+  /** 上下文自动轮转兜底（CONTEXT_AUTO_ROTATE=0 关闭）。 */
+  contextAutoRotate: boolean;
   dataDir: string;
   webDistDir: string;
   /**
@@ -242,6 +246,8 @@ export function loadConfig(): Config {
     clineApiKey: process.env.DEEPSEEK_API_KEY?.trim() || undefined,
     clineBaseUrl: process.env.CLINE_BASE_URL?.trim() || undefined,
     clineSystemPrompt: process.env.CLINE_SYSTEM_PROMPT?.trim() || undefined,
+    clineCompaction: process.env.CLINE_COMPACTION?.trim() !== "0",
+    contextAutoRotate: process.env.CONTEXT_AUTO_ROTATE?.trim() !== "0",
     dataDir: resolveFromBackend("data"),
     webDistDir: resolveFromBackend("..", "web", "dist"),
     gitViaProxyUrl,

@@ -7,6 +7,7 @@ import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
 import type { BillingService } from "../../billing/service.js";
 import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
+import { shouldRotateContext } from "../../context/index.js";
 import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 
@@ -223,7 +224,7 @@ export class CursorProvider implements AgentProvider {
 
   private async obtainAgent(
     input: RunInput,
-    options: AgentOptions,
+    options: AgentOptions & { skipResume?: boolean },
   ): Promise<{ agent: SDKAgent; created: boolean; resumeError?: string }> {
     const cached = this.agentsByTask.get(input.taskId);
     if (cached && (!input.agentId || cached.agentId === input.agentId)) {
@@ -234,7 +235,10 @@ export class CursorProvider implements AgentProvider {
     let created = false;
     // 透明化（PR-5）：resume 失败要带回原因，页面才能说清"为什么换了个 agent"。
     let resumeError: string | undefined;
-    if (input.agentId) {
+    if (input.agentId && options.skipResume) {
+      // 上下文兜底轮转：**故意不 resume**，直接新建 agent（新的空上下文）。
+      resumeError = "context_rotation";
+    } else if (input.agentId) {
       try {
         agent = await Agent.resume(input.agentId, options);
       } catch (err) {
@@ -337,7 +341,17 @@ export class CursorProvider implements AgentProvider {
     const modelId = input.model || (await this.resolveModel());
     const options = this.buildOptions(input, modelId);
 
-    const obtained = await this.obtainAgent(input, options);
+    // 自动轮转兜底（PR-4）：cursor 推不出上下文体量（usage 是 agent 累计值），
+    // 所以这里主要接"上一次 run 被窗口顶死"的信号 —— 直接放弃 resume、新建 agent。
+    const sessionContext = input.sessionContext;
+    const rotate = shouldRotateContext({
+      tokens: sessionContext?.tokens,
+      limit: sessionContext?.limit,
+      incomingTokens: sessionContext?.incomingTokens,
+      lastRunOverflow: sessionContext?.lastRunOverflow,
+      enabled: sessionContext?.autoRotate !== false,
+    });
+    const obtained = await this.obtainAgent(input, { ...options, skipResume: rotate.rotate });
     let agent = obtained.agent;
     handle.agent = agent;
 
@@ -369,7 +383,33 @@ export class CursorProvider implements AgentProvider {
 
     // 透明化（PR-5）：本来绑着 agent、但这次是新建的（进程重启 / resume 失败）→ 明确说出来，
     // 否则用户只看到 agent 突然换了 id、还丢了上下文。
-    if (obtained.created && input.agentId) {
+    if (obtained.created && input.agentId && rotate.rotate) {
+      // 透明化：轮转必须说出来（时间线可见 + 可审计）。
+      await emit("status", {
+        status: "context_rotation",
+        message:
+          `${rotate.detail ?? "上下文接近模型窗口"}：已新建 agent（不再 resume 旧会话），` +
+          `最近历史见本任务时间线。`,
+        reason: rotate.reason,
+        previousAgentId: input.agentId,
+        ...(sessionContext?.tokens != null ? { contextTokens: sessionContext.tokens } : {}),
+        ...(sessionContext?.limit != null ? { contextLimit: sessionContext.limit } : {}),
+        ...(rotate.percent != null ? { contextPercent: rotate.percent } : {}),
+      });
+      await emit("agent_succession", {
+        provider: "cursor",
+        fromAgentId: input.agentId,
+        toAgentId: agent.agentId,
+        reason: "context_rotation",
+        fromMode: input.mode ?? "agent",
+        toMode: input.mode ?? "agent",
+        seededMessages: 0,
+        ...(sessionContext?.tokens != null ? { contextTokens: sessionContext.tokens } : {}),
+        ...(sessionContext?.limit != null ? { contextLimit: sessionContext.limit } : {}),
+        ...(rotate.percent != null ? { contextPercent: rotate.percent } : {}),
+        ...(rotate.reason ? { rotateReason: rotate.reason } : {}),
+      });
+    } else if (obtained.created && input.agentId) {
       await emit("status", {
         status: "session_reset",
         message:

@@ -294,11 +294,13 @@ export class CursorProvider implements AgentProvider {
   }
 
   async run(input: RunInput): Promise<RunResultData> {
+    const handle: ActiveHandle = { cancelled: false, cwd: input.cwd };
+    // Register before any await so a Stop click during startup can find and
+    // cancel this run (otherwise cancel() returns false → HTTP 400).
+    this.active.set(input.runId, handle);
+
     const modelId = input.model || (await this.resolveModel());
     const options = this.buildOptions(input, modelId);
-
-    const handle: ActiveHandle = { cancelled: false, cwd: input.cwd };
-    this.active.set(input.runId, handle);
 
     const obtained = await this.obtainAgent(input, options);
     let agent = obtained.agent;

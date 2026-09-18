@@ -60,6 +60,13 @@ import {
   type PlanAnswerBatch,
 } from "../plan-question-parser.js";
 import { buildTokenUsageSeries } from "../usage/series.js";
+import {
+  createBillingService,
+  normalizeBillingRuleInput,
+  type BillingRule,
+  type BillingRuleInput,
+  type BillingService,
+} from "../billing/index.js";
 import { tokenVolume } from "../usage/tokens.js";
 import {
   collectDecisionEvents,
@@ -96,6 +103,8 @@ export interface GatewayConfig {
    * After this, resume the queue even if the restart never arrives. Default 5 min.
    */
   deployGracefulWaitMs?: number;
+  /** 计费模块；缺省时按 store 自建一个（同一个实例应与 provider 共用）。 */
+  billing?: BillingService;
 }
 
 export interface SendMessageInput {
@@ -311,6 +320,11 @@ export class AgentGateway {
   private admissionPauseTimer: NodeJS.Timeout | undefined;
   private readonly deployGracefulWaitMs: number;
   /**
+   * 计费模块 —— 唯一知道「钱怎么算」的地方（数据源 = `billing_rules` 表）。
+   * 与 provider 共用同一个实例：保证事件的 `cost` 与 run 行的 `cost_json` 一致。
+   */
+  private readonly billing: BillingService;
+  /**
    * Short in-memory ring (warm cache / restart hydrate).
    * Full history lives in SQLite (`concurrency_samples`) and is never pruned.
    */
@@ -338,6 +352,7 @@ export class AgentGateway {
       0,
       config.deployGracefulWaitMs ?? 5 * 60 * 1000,
     );
+    this.billing = config.billing ?? createBillingService(store);
   }
 
   /** Resolve the live adapter for a task (falls back to registry default). */
@@ -400,6 +415,23 @@ export class AgentGateway {
     const settings = this.store.updateGlobalSettings(patch);
     this.publish({ type: "global_settings_updated", settings });
     return settings;
+  }
+
+  // ---- billing rules（计费模块的数据源；页面/脚本都走这里） ----
+
+  /** 全部计费规则（含停用行）。 */
+  listBillingRules(): BillingRule[] {
+    return this.billing.listRules();
+  }
+
+  /** 新增 / 整体覆盖一条规则（价格校验失败抛 Error → 路由 400）。 */
+  upsertBillingRule(ruleId: string, input: BillingRuleInput): BillingRule {
+    return this.store.upsertBillingRule(normalizeBillingRuleInput(ruleId, input));
+  }
+
+  /** 删一条规则；内置行下次启动会被补种（想停用请置 `enabled = false`）。 */
+  deleteBillingRule(ruleId: string): boolean {
+    return this.store.deleteBillingRule(ruleId);
   }
 
   /** Effective WorkspaceRoot from global settings, else env/default. */

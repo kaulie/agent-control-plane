@@ -138,12 +138,28 @@ npm run dev:web       # frontend :5174
 
 ## Cost
 
-Cost is computed in `backend/src/usage/` (kept out of the UI):
+计费是**独立模块** `backend/src/billing/`（见该目录的 README），钱只按一张表算：
+SQLite 表 **`billing_rules`**（模型价目 + 高峰/空闲时段规则，可改价、可停用、改完立即生效）。
 
-- If the SDK returns a server-derived billed cost, it is used.
-- Otherwise (local agents are often plan-included, so `getUsage()` returns
-  nothing billable), an estimate is produced from the per-model pricing table
-  in `backend/src/usage/pricing.ts`.
+- 主口径 = 计费表算出来的钱：写在 `run.cost_json.estimatedCents`（USD cents）+
+  逐项明细 `cost_json.billing`（规则 id / 时段 / 本币金额 / 分项），本币金额是账单口径；
+- 对比口径 = provider / SDK 自己上报的 `totalCost`：写在 `cost_json.chargedCents`，**只作对比**
+  （实测 SDK 上报 ≈ $15，而按 DeepSeek 官方价目表算 ≈ ¥297 ≈ $42，不是一套价卡）；
+- 页面（`UsageBar`）把两个值**分开显示**，不要相加；
+- **实际成本的取值顺序 = 计费表 > provider/SDK 上报 > 旧估算**（`cost_json.costSource`）：
+  没有规则命中的 run（例如 cursor：价目表还没入库）实际成本**就是上报值**；
+  连上报值也没有（cursor 的 SDK 就不返回成本）才用旧估算兜底 ——
+  这两种情况下两个格子都显示**同一个数**，两个字都有值（不会出现「—」）；
+- 旧的两张代码价目表（`backend/src/usage/pricing.ts`、cline 的 `DEEPSEEK_PRICING`）降级为
+  兜底估算，只在「没规则命中 / 没注入计费模块」时用。
+
+历史 run 想按新表重算：
+
+```bash
+sqlite3 ~/runtime/web-cursor/backend/data/web_cursor.db ".backup /tmp/wc-copy/web_cursor.db"
+npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy           # dry-run
+npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 落库
+```
 
 ## API
 
@@ -166,6 +182,9 @@ Cost is computed in `backend/src/usage/` (kept out of the UI):
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
+| GET | `/api/billing/rules` | **计费规则表**（`billing_rules`）：每个模型的峰谷价目 + 错峰窗口（UTC 分钟） |
+| PUT | `/api/billing/rules/:ruleId` | 新增 / 覆盖一条计费规则（校验：数值 ≥ 0、分钟 0–1439、设了 `offpeakWindow` 必须给 `offpeak` 价；400 返回原因） |
+| DELETE | `/api/billing/rules/:ruleId` | 删一条规则（内置行下次启动会补种，想停用请把 `enabled` 置 0） |
 | GET | `/api/stats/token-usage` | 按 provider/model 粒度、按时间统计总 token 消耗量（`?granularity=hour\|day\|week&projectId=&from=&to=`；缺省按天） |
 | WS | `/ws` | real-time push: `agent_event`, `task_updated`, `task_created`, `project_created`, `project_updated` |
 
@@ -205,9 +224,11 @@ backend/src/
   gateway/        Task → Run → Event → Usage orchestration
   providers/      AgentProvider adapter + createProvider + cursor/ (@cursor/sdk)
   timeline.ts     agent 时间线：事件 → idle / thinking / working（+ 用户输入 marker）
-  usage/          pricing + CostCalculator
+  usage/          token 口径（inclusive/disjoint）+ 兜底估算价目
+  billing/        计费模块：billing_rules 表驱动的价目/时段规则（见该目录 README）
   http/ ws/       REST + WebSocket
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
+  usage-cost.ts    成本两个口径的文案（计费表本币 vs SDK 上报美元，分开显示）
   timeline-line.ts  状态点线的几何（idle / thinking / working → 三条互不相连的水平线）
   board-format.ts   看板数字口径文案（per-agent vs 整个 task，两处都写清）
 web/scripts/     前端纯逻辑测试（点线几何 + SVG 渲染，由 backend 的 run-tests 统一起跑）

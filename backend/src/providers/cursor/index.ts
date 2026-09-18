@@ -5,6 +5,7 @@ import { mapSdkMessage } from "./mapper.js";
 import { buildCost, type SdkCostLike } from "../../usage/cost.js";
 import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
+import type { BillingService } from "../../billing/service.js";
 import { composePromptWithBootstrap } from "../../task-context.js";
 import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
@@ -16,6 +17,11 @@ export interface CursorProviderConfig {
   gitViaProxyUrl?: string;
   gitViaProxyMcp?: boolean;
   gitViaProxyServerPath?: string;
+  /**
+   * 计费模块（数据源 = `billing_rules` 表）。注入了就以计费表为准；
+   * 缺省时保持旧行为：SDK 上报成本 + `usage/pricing.ts` 估算。
+   */
+  billing?: BillingService;
 }
 
 interface ActiveHandle {
@@ -23,6 +29,35 @@ interface ActiveHandle {
   agent?: SDKAgent;
   run?: Run;
   cwd: string;
+}
+
+/**
+ * 计费：命中 `billing_rules` 规则时以计费表为准（`estimatedCents` = 表算的钱，
+ * 明细在 `cost_json.billing`），SDK 上报值只留在 `chargedCents` 作对比。
+ * 没有计费模块时与改造前完全一致。
+ */
+function buildCostWithBilling(
+  billing: BillingService | undefined,
+  usage: TokenUsage | undefined,
+  modelId: string | undefined,
+  at: string,
+  sdkCost: SdkCostLike | undefined,
+): CostInfo | undefined {
+  const legacy = buildCost(usage, modelId, sdkCost, "cursor");
+  if (!billing || !usage) return legacy;
+  return billing.costFor({
+    provider: "cursor",
+    model: modelId,
+    usage,
+    at,
+    reported: {
+      ...(legacy?.chargedCents != null ? { chargedCents: legacy.chargedCents } : {}),
+      ...(legacy?.rawCostCents != null ? { rawCostCents: legacy.rawCostCents } : {}),
+    },
+    ...(legacy?.estimatedCents != null
+      ? { fallbackEstimatedCents: legacy.estimatedCents }
+      : {}),
+  });
 }
 
 function isAgentBusy(err: unknown): boolean {
@@ -562,7 +597,14 @@ export class CursorProvider implements AgentProvider {
         } catch (err) {
           console.warn("[cursor] getUsage failed:", err instanceof Error ? err.message : err);
         }
-        const cost = buildCost(usage, modelId, sdkCost, "cursor");
+        // 计费走独立模块（`billing_rules` 表）；SDK 上报值仅作对比。
+        const cost = buildCostWithBilling(
+          this.config.billing,
+          usage,
+          modelId,
+          new Date(startedAt).toISOString(),
+          sdkCost,
+        );
 
         await emit(
           "run_completed",

@@ -19,11 +19,13 @@ const tests = [
   { file: "scripts/test-settings.mjs", via: "node" },
   { file: "scripts/test-project-department.mjs", via: "node" },
   { file: "scripts/test-project-api.mjs", via: "node" },
+  { file: "scripts/test-billing-api.mjs", via: "node" },
   { file: "scripts/test-agent-board.mjs", via: "node" },
   { file: "scripts/test-agent-timeline.mjs", via: "node" },
   { file: "scripts/test-ui-version-guard.mjs", via: "node" },
   { file: "scripts/test-run-errors.mjs", via: "node" },
   { file: "scripts/test-token-volume.mjs", via: "node" },
+  { file: "scripts/test-billing.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },
   // 时间线的点线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码
@@ -31,6 +33,7 @@ const tests = [
   // backend 的经典 runtime，组件里没 import React 就会炸。
   { file: "../web/scripts/test-timeline-line.mjs", via: "tsx" },
   { file: "../web/scripts/test-board-format.mjs", via: "tsx" },
+  { file: "../web/scripts/test-usage-cost.mjs", via: "tsx" },
   {
     file: "../web/scripts/test-timeline-render.mjs",
     via: "tsx",

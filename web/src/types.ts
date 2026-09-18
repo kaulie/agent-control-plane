@@ -344,12 +344,42 @@ export interface TokenUsage {
   reasoningTokens?: number;
 }
 
+/** 计费模块（`billing_rules`）算出来的明细。 */
+export interface BillingCostInfo {
+  ruleId: string;
+  provider: string;
+  model: string;
+  matchedBy: "exact" | "pattern" | "wildcard";
+  period: "peak" | "offpeak";
+  /** 计费基准时刻（run 起始）。 */
+  at: string;
+  currency: string;
+  usdPerUnit: number;
+  /** 本币金额。 */
+  amount: number;
+  /** 折算后的 USD cents。 */
+  usdCents: number;
+  prices: Record<string, number>;
+  tokens: Record<string, number>;
+  breakdown: Record<string, number>;
+  offpeakWindow: { startMinute: number; endMinute: number } | null;
+}
+
 export interface CostInfo {
   rawCostCents?: number;
+  /** provider / SDK 自己上报的成本（USD cents）—— 对比口径。 */
   chargedCents?: number;
+  /** 计费表算出来的成本（USD cents）—— 主口径。 */
   estimatedCents?: number;
   currency: string;
   model?: string;
+  /**
+   * 实际成本（`estimatedCents`）的来源：`rule` = 计费表；
+   * `reported` = provider/SDK 上报（没有规则时就是这个，两个口径同值）；`estimate` = 旧估算。
+   */
+  costSource?: "rule" | "reported" | "estimate";
+  /** 计费表明细（命中规则时才有）。 */
+  billing?: BillingCostInfo;
 }
 
 export interface AgentEvent {
@@ -405,8 +435,17 @@ export interface TaskStats {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  /** 主口径：按计费表 `billing_rules` 算出的成本合计（USD cents）。 */
   costCents?: number;
+  /** 主口径的本币金额（币种见 `billedCurrency`）—— 账单就是这个数。 */
+  billedAmount?: number;
+  billedCurrency?: string;
+  /** 对比口径：provider / SDK 上报的成本合计（USD cents），与 `costCents` 分开显示。 */
+  chargedCents?: number;
+  /** 旧口径（历史本地估算），只为兼容老数据保留。 */
   estimatedCents?: number;
+  /** `costCents` 里各来源的 run 数。 */
+  costSources?: { rule: number; reported: number; estimate: number };
   currency: string;
   durationMs: number;
   modelCalls: number;

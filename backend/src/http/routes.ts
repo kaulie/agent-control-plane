@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
+import type { BillingRuleInput } from "../billing/index.js";
 import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import { normalizeDepartment } from "../settings.js";
@@ -218,6 +219,34 @@ export async function registerRoutes(
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  /**
+   * 计费规则（`billing_rules` 表）：模型价目 + 峰谷时段规则。
+   * 改完立即生效（计费每次现读表），不需要重启。
+   */
+  app.get("/api/billing/rules", async () => ({ rules: gateway.listBillingRules() }));
+
+  app.put<{ Params: { ruleId: string }; Body: BillingRuleInput }>(
+    "/api/billing/rules/:ruleId",
+    async (req, reply) => {
+      try {
+        return gateway.upsertBillingRule(req.params.ruleId, req.body ?? {});
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.delete<{ Params: { ruleId: string } }>(
+    "/api/billing/rules/:ruleId",
+    async (req, reply) => {
+      const deleted = gateway.deleteBillingRule(req.params.ruleId);
+      if (!deleted) return reply.code(404).send({ error: "billing rule not found" });
+      return { deleted: req.params.ruleId };
+    },
+  );
 
   app.get<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/settings",

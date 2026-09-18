@@ -27,6 +27,9 @@ import {
   serializeSettings,
 } from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
+import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
+import { resolveBilledCost, type CostSource } from "../billing/cost.js";
+import type { BillingRule } from "../billing/types.js";
 import {
   sqlMarkerInList,
   sqlStateCase,
@@ -122,11 +125,72 @@ function placeholders(count: number): string {
   return Array.from({ length: count }, () => "?").join(", ");
 }
 
+/** 金额保留两位小数（分的两位小数，和 usage/cost.ts 的旧口径一致）。 */
+function roundCents(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 function isUniqueEventIdError(err: unknown): boolean {
   return (
     err instanceof Error &&
     /UNIQUE constraint failed: events\.event_id/i.test(err.message)
   );
+}
+
+/** `billing_rules` 行（snake_case，价格 = 本币 / 1M tokens）。 */
+interface BillingRuleRow {
+  rule_id: string;
+  provider: string;
+  model: string;
+  display_name: string | null;
+  currency: string;
+  usd_per_unit: number;
+  peak_cache_hit: number;
+  peak_cache_miss: number;
+  peak_output: number;
+  peak_cache_write: number | null;
+  offpeak_cache_hit: number;
+  offpeak_cache_miss: number;
+  offpeak_output: number;
+  offpeak_cache_write: number | null;
+  offpeak_start_min: number | null;
+  offpeak_end_min: number | null;
+  priority: number;
+  enabled: number;
+  note: string | null;
+  updated_at: string;
+}
+
+function toBillingRule(r: BillingRuleRow): BillingRule {
+  const window =
+    r.offpeak_start_min != null && r.offpeak_end_min != null
+      ? { startMinute: r.offpeak_start_min, endMinute: r.offpeak_end_min }
+      : null;
+  return {
+    ruleId: r.rule_id,
+    provider: r.provider,
+    model: r.model,
+    ...(r.display_name ? { displayName: r.display_name } : {}),
+    currency: r.currency,
+    usdPerUnit: r.usd_per_unit,
+    peak: {
+      cacheHit: r.peak_cache_hit,
+      cacheMiss: r.peak_cache_miss,
+      output: r.peak_output,
+      ...(r.peak_cache_write != null ? { cacheWrite: r.peak_cache_write } : {}),
+    },
+    offpeak: {
+      cacheHit: r.offpeak_cache_hit,
+      cacheMiss: r.offpeak_cache_miss,
+      output: r.offpeak_output,
+      ...(r.offpeak_cache_write != null ? { cacheWrite: r.offpeak_cache_write } : {}),
+    },
+    offpeakWindow: window,
+    priority: r.priority,
+    enabled: r.enabled !== 0,
+    ...(r.note ? { note: r.note } : {}),
+    updatedAt: r.updated_at,
+  };
 }
 
 export class Store {
@@ -269,6 +333,33 @@ export class Store {
         ON concurrency_samples(t);
     `);
 
+    // 计费规则表（billing 模块的唯一数据源）：模型价目 + 峰谷时段规则。
+    // 价格单位 = 规则本币 / 1M tokens；错峰窗口用 UTC 分钟 [start, end)，跨 0 点 start > end。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS billing_rules (
+        rule_id             TEXT PRIMARY KEY,
+        provider            TEXT NOT NULL,
+        model               TEXT NOT NULL,
+        display_name        TEXT,
+        currency            TEXT NOT NULL DEFAULT 'USD',
+        usd_per_unit        REAL NOT NULL DEFAULT 1,
+        peak_cache_hit      REAL NOT NULL,
+        peak_cache_miss     REAL NOT NULL,
+        peak_output         REAL NOT NULL,
+        peak_cache_write    REAL,
+        offpeak_cache_hit   REAL NOT NULL,
+        offpeak_cache_miss  REAL NOT NULL,
+        offpeak_output      REAL NOT NULL,
+        offpeak_cache_write REAL,
+        offpeak_start_min   INTEGER,
+        offpeak_end_min     INTEGER,
+        priority            INTEGER NOT NULL DEFAULT 0,
+        enabled             INTEGER NOT NULL DEFAULT 1,
+        note                TEXT,
+        updated_at          TEXT NOT NULL
+      );
+    `);
+
     this.db.exec(
       `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
     );
@@ -385,6 +476,47 @@ export class Store {
            VALUES (?, ?, 1, ?)`,
         )
         .run(WATCHDOG_USER_ID, WATCHDOG_USER_NAME, now);
+    }
+
+    this.seedBillingRules(now);
+  }
+
+  /**
+   * 内置计费规则只在缺失时补种（`INSERT OR IGNORE`）：运维改过的行不被覆盖，
+   * 想在重启后仍停用某行就置 `enabled = 0`，不要删。
+   */
+  private seedBillingRules(now: string): void {
+    const insert = this.db.prepare(`
+      INSERT OR IGNORE INTO billing_rules (
+        rule_id, provider, model, display_name, currency, usd_per_unit,
+        peak_cache_hit, peak_cache_miss, peak_output, peak_cache_write,
+        offpeak_cache_hit, offpeak_cache_miss, offpeak_output, offpeak_cache_write,
+        offpeak_start_min, offpeak_end_min, priority, enabled, note, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const rule of DEFAULT_BILLING_RULES) {
+      insert.run(
+        rule.ruleId,
+        rule.provider,
+        rule.model,
+        rule.displayName ?? null,
+        rule.currency,
+        rule.usdPerUnit,
+        rule.peak.cacheHit,
+        rule.peak.cacheMiss,
+        rule.peak.output,
+        rule.peak.cacheWrite ?? null,
+        rule.offpeak.cacheHit,
+        rule.offpeak.cacheMiss,
+        rule.offpeak.output,
+        rule.offpeak.cacheWrite ?? null,
+        rule.offpeakWindow?.startMinute ?? null,
+        rule.offpeakWindow?.endMinute ?? null,
+        rule.priority,
+        rule.enabled ? 1 : 0,
+        rule.note ?? null,
+        now,
+      );
     }
   }
 
@@ -652,6 +784,89 @@ export class Store {
       .prepare(`UPDATE app_settings SET settings_json = ?, updated_at = ? WHERE id = 1`)
       .run(serializeSettings(next), updatedAt);
     return next;
+  }
+
+  // ---- billing rules（计费模块的数据源） ----
+
+  /** 全部计费规则（含停用行；排序稳定，便于页面直接展示）。 */
+  listBillingRules(): BillingRule[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM billing_rules
+         ORDER BY provider ASC, model ASC, rule_id ASC`,
+      )
+      .all() as unknown as BillingRuleRow[];
+    return rows.map(toBillingRule);
+  }
+
+  getBillingRule(ruleId: string): BillingRule | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM billing_rules WHERE rule_id = ?`)
+      .get(ruleId) as BillingRuleRow | undefined;
+    return row ? toBillingRule(row) : undefined;
+  }
+
+  /** 新增或整体覆盖一条规则（`ruleId` 为主键）。 */
+  upsertBillingRule(rule: BillingRule): BillingRule {
+    this.db
+      .prepare(
+        `INSERT INTO billing_rules (
+           rule_id, provider, model, display_name, currency, usd_per_unit,
+           peak_cache_hit, peak_cache_miss, peak_output, peak_cache_write,
+           offpeak_cache_hit, offpeak_cache_miss, offpeak_output, offpeak_cache_write,
+           offpeak_start_min, offpeak_end_min, priority, enabled, note, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(rule_id) DO UPDATE SET
+           provider = excluded.provider,
+           model = excluded.model,
+           display_name = excluded.display_name,
+           currency = excluded.currency,
+           usd_per_unit = excluded.usd_per_unit,
+           peak_cache_hit = excluded.peak_cache_hit,
+           peak_cache_miss = excluded.peak_cache_miss,
+           peak_output = excluded.peak_output,
+           peak_cache_write = excluded.peak_cache_write,
+           offpeak_cache_hit = excluded.offpeak_cache_hit,
+           offpeak_cache_miss = excluded.offpeak_cache_miss,
+           offpeak_output = excluded.offpeak_output,
+           offpeak_cache_write = excluded.offpeak_cache_write,
+           offpeak_start_min = excluded.offpeak_start_min,
+           offpeak_end_min = excluded.offpeak_end_min,
+           priority = excluded.priority,
+           enabled = excluded.enabled,
+           note = excluded.note,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        rule.ruleId,
+        rule.provider,
+        rule.model,
+        rule.displayName ?? null,
+        rule.currency,
+        rule.usdPerUnit,
+        rule.peak.cacheHit,
+        rule.peak.cacheMiss,
+        rule.peak.output,
+        rule.peak.cacheWrite ?? null,
+        rule.offpeak.cacheHit,
+        rule.offpeak.cacheMiss,
+        rule.offpeak.output,
+        rule.offpeak.cacheWrite ?? null,
+        rule.offpeakWindow?.startMinute ?? null,
+        rule.offpeakWindow?.endMinute ?? null,
+        rule.priority,
+        rule.enabled ? 1 : 0,
+        rule.note ?? null,
+        rule.updatedAt,
+      );
+    return this.getBillingRule(rule.ruleId) as BillingRule;
+  }
+
+  deleteBillingRule(ruleId: string): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM billing_rules WHERE rule_id = ?`)
+      .run(ruleId);
+    return Number(result.changes) > 0;
   }
 
   private toProject(r: ProjectRow): Project {
@@ -1104,7 +1319,14 @@ export class Store {
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
     let totalTokens = 0;
-    let costCents: number | undefined;
+    // 计费模块（billing_rules）算出来的主口径 + SDK 上报的对比口径，分开累计。
+    let billedUsdCents = 0;
+    let hasBilled = false;
+    let billedAmount = 0;
+    // 本币金额只在「全部命中的规则同一个币种」时才给（混币种就别假装能相加）。
+    const billingCurrencies = new Set<string>();
+    const costSources: Record<CostSource, number> = { rule: 0, reported: 0, estimate: 0 };
+    let chargedCents: number | undefined;
     let estimatedCents: number | undefined;
     let durationMs = 0;
     let modelCalls = 0;
@@ -1119,8 +1341,21 @@ export class Store {
         totalTokens += tokenVolume(run.usage, run.provider);
       }
       if (run.cost) {
+        const billing = run.cost.billing;
+        if (billing) {
+          billedAmount += billing.amount;
+          billingCurrencies.add(billing.currency);
+        }
+        // 主口径（= 实际成本）= resolveBilledCost：计费表 > provider/SDK 上报 > 旧估算。
+        // 没有规则时它就是上报值，所以页面上「Cost」与「SDK cost」显示同一个数。
+        const resolved = resolveBilledCost(run.cost);
+        if (resolved) {
+          billedUsdCents += resolved.cents;
+          hasBilled = true;
+          costSources[resolved.source] += 1;
+        }
         if (typeof run.cost.chargedCents === "number") {
-          costCents = (costCents ?? 0) + run.cost.chargedCents;
+          chargedCents = (chargedCents ?? 0) + run.cost.chargedCents;
         }
         if (typeof run.cost.estimatedCents === "number") {
           estimatedCents = (estimatedCents ?? 0) + run.cost.estimatedCents;
@@ -1137,8 +1372,18 @@ export class Store {
       cacheReadTokens,
       cacheWriteTokens,
       totalTokens,
-      costCents,
-      estimatedCents,
+      ...(hasBilled ? { costCents: roundCents(billedUsdCents) } : {}),
+      ...(billingCurrencies.size === 1
+        ? {
+            billedAmount: roundCents(billedAmount),
+            billedCurrency: [...billingCurrencies][0],
+          }
+        : {}),
+      ...(hasBilled ? { costSources: { ...costSources } } : {}),
+      ...(chargedCents != null ? { chargedCents: roundCents(chargedCents) } : {}),
+      ...(estimatedCents != null
+        ? { estimatedCents: roundCents(estimatedCents) }
+        : {}),
       currency: "USD",
       durationMs,
       modelCalls,

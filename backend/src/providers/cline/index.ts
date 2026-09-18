@@ -11,10 +11,11 @@ import type { AgentEvent, AgentSuccessionReason, CostInfo, EventType, TokenUsage
 import { newId } from "../../store/db.js";
 import { composePromptWithBootstrap } from "../../task-context.js";
 import { formatRunErrorMessage } from "../../run-errors.js";
+import type { BillingService } from "../../billing/service.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 import { mapAgentEvent, toTokenUsage, type MappedEvent, type UsageLike } from "./mapper.js";
 import {
-  buildCostInfo,
+  buildCostWithBilling,
   DEFAULT_PROVIDER_ID,
   DEFAULT_SYSTEM_PROMPT,
   DEEPSEEK_FALLBACK_MODELS,
@@ -77,6 +78,8 @@ export class ClineProvider implements AgentProvider {
   private readonly model?: string;
   private readonly apiKey?: string;
   private readonly baseUrl?: string;
+  /** 计费模块（数据源 = `billing_rules` 表）；缺省 = 退回本地价目估算。 */
+  private readonly billing?: BillingService;
 
   private modelsCache: ModelInfo[] | undefined;
   private client: ClineCore | undefined;
@@ -90,6 +93,7 @@ export class ClineProvider implements AgentProvider {
     this.model = config.model?.trim() || undefined;
     this.apiKey = config.apiKey?.trim() || undefined;
     this.baseUrl = config.baseUrl?.trim() || undefined;
+    this.billing = config.billing;
   }
 
   // ---- infrastructure ----
@@ -520,7 +524,16 @@ export class ClineProvider implements AgentProvider {
     const usageSource: UsageLike | undefined =
       result?.usage ?? (await this.accumulatedUsage(handle.sessionId));
     const usage = usageSource ? toTokenUsage(usageSource) : undefined;
-    const cost = usage ? buildCostInfo(usage, modelId, usageSource?.totalCost) : undefined;
+    // 计费走独立模块（`billing_rules` 表）；SDK 上报值仅作对比。
+    const cost = usage
+      ? buildCostWithBilling(
+          this.billing,
+          usage,
+          modelId,
+          new Date(startedAt).toISOString(),
+          usageSource?.totalCost,
+        )
+      : undefined;
 
     const status: RunResultData["status"] =
       !result

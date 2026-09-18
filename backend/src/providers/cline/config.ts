@@ -1,5 +1,6 @@
 import type { CostInfo, TokenUsage } from "../../types.js";
 import { billableInputTokens } from "../../usage/tokens.js";
+import type { BillingService } from "../../billing/service.js";
 
 /**
  * Configuration for the Cline provider (agent runtime adapter).
@@ -16,6 +17,11 @@ export interface ClineProviderConfig {
   baseUrl?: string;
   /** System prompt used for new sessions. */
   systemPrompt?: string;
+  /**
+   * 计费模块（数据源 = `billing_rules` 表）。注入了就以计费表为准；
+   * 缺省时保持旧行为：SDK 上报的 `totalCost` + 下面的本地价目估算。
+   */
+  billing?: BillingService;
 }
 
 export const DEFAULT_PROVIDER_ID = "deepseek";
@@ -44,7 +50,10 @@ export interface PricingPerMTok {
   cacheWrite: number;
 }
 
-/** Approximate DeepSeek pricing (USD per 1M tokens). Estimate-only fallback. */
+/**
+ * Approximate DeepSeek pricing (USD per 1M tokens) — **兜底估算**，只在没有任何
+ * `billing_rules` 规则命中（或没注入计费模块）时用。真正的账目口径在计费模块里。
+ */
 export const DEEPSEEK_PRICING: PricingPerMTok = {
   input: 0.28,
   output: 0.42,
@@ -82,4 +91,33 @@ export function buildCostInfo(
     currency: "USD",
     ...(modelId ? { model: modelId } : {}),
   };
+}
+
+/**
+ * 计费：命中 `billing_rules` 规则时以**计费表**为准 —— `estimatedCents` = 表算出来的钱，
+ * 逐项明细落在 `cost_json.billing`；SDK 上报的 `totalCost` 只写进 `chargedCents`（对比口径）。
+ * 没有计费模块（老构造路径 / 单测）时与改造前行为完全一致。
+ */
+export function buildCostWithBilling(
+  billing: BillingService | undefined,
+  usage: TokenUsage,
+  modelId: string | undefined,
+  at: string,
+  totalCostUsd?: number,
+): CostInfo | undefined {
+  const legacy = buildCostInfo(usage, modelId, totalCostUsd);
+  if (!billing) return legacy;
+  return billing.costFor({
+    provider: "cline",
+    model: modelId,
+    usage,
+    at,
+    reported: {
+      ...(legacy?.chargedCents != null ? { chargedCents: legacy.chargedCents } : {}),
+      ...(legacy?.rawCostCents != null ? { rawCostCents: legacy.rawCostCents } : {}),
+    },
+    ...(legacy?.estimatedCents != null
+      ? { fallbackEstimatedCents: legacy.estimatedCents }
+      : {}),
+  });
 }

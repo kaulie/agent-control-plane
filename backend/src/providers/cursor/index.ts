@@ -6,7 +6,7 @@ import { buildCost, type SdkCostLike } from "../../usage/cost.js";
 import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
 import type { BillingService } from "../../billing/service.js";
-import { composePromptWithBootstrap } from "../../task-context.js";
+import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
 import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 
@@ -224,7 +224,7 @@ export class CursorProvider implements AgentProvider {
   private async obtainAgent(
     input: RunInput,
     options: AgentOptions,
-  ): Promise<{ agent: SDKAgent; created: boolean }> {
+  ): Promise<{ agent: SDKAgent; created: boolean; resumeError?: string }> {
     const cached = this.agentsByTask.get(input.taskId);
     if (cached && (!input.agentId || cached.agentId === input.agentId)) {
       return { agent: cached, created: false };
@@ -232,14 +232,14 @@ export class CursorProvider implements AgentProvider {
 
     let agent: SDKAgent | undefined;
     let created = false;
+    // 透明化（PR-5）：resume 失败要带回原因，页面才能说清"为什么换了个 agent"。
+    let resumeError: string | undefined;
     if (input.agentId) {
       try {
         agent = await Agent.resume(input.agentId, options);
       } catch (err) {
-        console.warn(
-          "[cursor] resume failed, creating new agent:",
-          err instanceof Error ? err.message : err,
-        );
+        resumeError = err instanceof Error ? err.message : String(err);
+        console.warn("[cursor] resume failed, creating new agent:", resumeError);
       }
     }
     if (!agent) {
@@ -255,7 +255,7 @@ export class CursorProvider implements AgentProvider {
       }
     }
     this.agentsByTask.set(input.taskId, agent);
-    return { agent, created };
+    return { agent, created, ...(resumeError ? { resumeError } : {}) };
   }
 
   private buildSendPayload(
@@ -367,12 +367,29 @@ export class CursorProvider implements AgentProvider {
       });
     };
 
+    // 透明化（PR-5）：本来绑着 agent、但这次是新建的（进程重启 / resume 失败）→ 明确说出来，
+    // 否则用户只看到 agent 突然换了 id、还丢了上下文。
+    if (obtained.created && input.agentId) {
+      await emit("status", {
+        status: "session_reset",
+        message:
+          `之前绑定的 agent ${input.agentId} 无法在本进程恢复（网关重启或 resume 失败` +
+          `${obtained.resumeError ? `：${obtained.resumeError}` : ""}），本次以启动简报新建 agent；` +
+          `完整对话历史仍在本任务时间线里。`,
+        previousAgentId: input.agentId,
+        ...(obtained.resumeError ? { resumeError: obtained.resumeError } : {}),
+        mode: input.mode ?? "agent",
+      });
+    }
+
     await emit("run_started", {
       cwd: input.cwd,
       model: modelId,
       sdkAgentId: agent.agentId,
       mode: input.mode ?? "agent",
-      ...(obtained.created ? { agentCreated: true } : {}),
+      ...(obtained.created
+        ? { agentCreated: true, ...bootstrapEventPayload(input.bootstrap) }
+        : {}),
     });
 
     if (handle.cancelled) {

@@ -167,6 +167,8 @@ export interface AgentSuccession {
   fromMode: string;
   toMode: string;
   seededMessages: number;
+  /** seed 体量（token 估算，实测比 ≈6.4 字符/token）；透明化 PR-5 之前只有条数。 */
+  seededTokens?: number;
   createdAt: string;
 }
 

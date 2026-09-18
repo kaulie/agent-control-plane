@@ -1,5 +1,6 @@
 import type { AgentEvent, CostInfo, TokenUsage } from "../types.js";
 import type { PromptImage } from "../attachments.js";
+import type { TaskBootstrap } from "../task-context.js";
 
 export interface ModelInfo {
   id: string;
@@ -39,6 +40,11 @@ export interface RunInput {
    * Not shown in the Web Cursor timeline.
    */
   bootstrapText?: string;
+  /**
+   * 简报的体检数据（字符数 / 有没有因超预算丢历史行）。
+   * provider 会把它写进 `run_started` 事件，页面/接口因此能回答"模型到底看到了什么"。
+   */
+  bootstrap?: TaskBootstrap;
   /** Display name for the underlying session (typically task.title). */
   agentName?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;

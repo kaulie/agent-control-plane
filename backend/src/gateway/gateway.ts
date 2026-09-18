@@ -35,7 +35,7 @@ import {
   type PromptImage,
   type StoredImageRef,
 } from "../attachments.js";
-import { buildTaskBootstrapText } from "../task-context.js";
+import { buildTaskBootstrap } from "../task-context.js";
 import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
@@ -304,6 +304,44 @@ function latestIso(...values: Array<string | undefined>): string | undefined {
     best = v;
   }
   return best;
+}
+
+/**
+ * `agent_succession` 事件 → `agent_successions` 表行（纯函数，导出给测试用）。
+ *
+ * 透明化（PR-5）：除了 `seeded_messages` 条数，还要落 `seeded_tokens`（估算体量）——
+ * pdf-reader 的教训就是只看条数（1630）看不出「切模式把 ≈1M 上下文搬进了新会话」。
+ * 缺 from/to agent id → 返回 undefined（调用方跳过写表并告警）。
+ */
+export function agentSuccessionFromEvent(
+  event: AgentEvent,
+): Omit<AgentSuccession, "successionId"> | undefined {
+  const p = event.payload;
+  const fromAgentId = typeof p.fromAgentId === "string" ? p.fromAgentId.trim() : "";
+  const toAgentId = typeof p.toAgentId === "string" ? p.toAgentId.trim() : "";
+  if (!fromAgentId || !toAgentId) return undefined;
+  const reasonRaw = typeof p.reason === "string" ? p.reason.trim() : "";
+  const reason: AgentSuccessionReason =
+    reasonRaw === "session_unusable" ? "session_unusable" : "mode_change";
+  return {
+    taskId: event.taskId,
+    runId: event.runId,
+    provider:
+      typeof p.provider === "string" && p.provider.trim() ? p.provider.trim() : "unknown",
+    fromAgentId,
+    toAgentId,
+    reason,
+    fromMode: typeof p.fromMode === "string" ? p.fromMode : "",
+    toMode: typeof p.toMode === "string" ? p.toMode : "",
+    seededMessages:
+      typeof p.seededMessages === "number" && Number.isFinite(p.seededMessages)
+        ? Math.max(0, Math.floor(p.seededMessages))
+        : 0,
+    ...(typeof p.seededTokens === "number" && Number.isFinite(p.seededTokens)
+      ? { seededTokens: Math.max(0, Math.round(p.seededTokens)) }
+      : {}),
+    createdAt: event.timestamp,
+  };
 }
 
 export class AgentGateway {
@@ -1984,7 +2022,7 @@ export class AgentGateway {
       });
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
-      const bootstrapText = buildTaskBootstrapText({
+      const bootstrap = buildTaskBootstrap({
         task,
         project,
         events: historyEvents,
@@ -2005,7 +2043,8 @@ export class AgentGateway {
         cwd: task.workspace,
         model: task.model,
         mode,
-        bootstrapText,
+        bootstrapText: bootstrap.text,
+        bootstrap,
         agentName: task.title,
         onEvent: (event) => {
           if (event.agentId) bindAgentId(event.agentId);
@@ -2075,33 +2114,13 @@ export class AgentGateway {
    * `agent_succession` (e.g. Cline plan↔yolo rebuild with seeded history).
    */
   private recordAgentSuccession(event: AgentEvent): void {
-    const p = event.payload;
-    const fromAgentId = typeof p.fromAgentId === "string" ? p.fromAgentId.trim() : "";
-    const toAgentId = typeof p.toAgentId === "string" ? p.toAgentId.trim() : "";
-    if (!fromAgentId || !toAgentId) {
+    const row = agentSuccessionFromEvent(event);
+    if (!row) {
       console.warn("[gateway] agent_succession missing from/to agent id; skip table write");
       return;
     }
-    const reasonRaw = typeof p.reason === "string" ? p.reason.trim() : "";
-    const reason: AgentSuccessionReason =
-      reasonRaw === "session_unusable" ? "session_unusable" : "mode_change";
     try {
-      this.store.insertAgentSuccession({
-        successionId: newId("asn"),
-        taskId: event.taskId,
-        runId: event.runId,
-        provider: typeof p.provider === "string" && p.provider.trim() ? p.provider.trim() : "unknown",
-        fromAgentId,
-        toAgentId,
-        reason,
-        fromMode: typeof p.fromMode === "string" ? p.fromMode : "",
-        toMode: typeof p.toMode === "string" ? p.toMode : "",
-        seededMessages:
-          typeof p.seededMessages === "number" && Number.isFinite(p.seededMessages)
-            ? Math.max(0, Math.floor(p.seededMessages))
-            : 0,
-        createdAt: event.timestamp,
-      });
+      this.store.insertAgentSuccession({ successionId: newId("asn"), ...row });
     } catch (err) {
       console.warn(
         "[gateway] insertAgentSuccession failed:",

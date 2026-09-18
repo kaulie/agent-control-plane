@@ -161,6 +161,26 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy           # 
 npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 落库
 ```
 
+## Context（上下文体量 + 透明化）
+
+会话是**只增不减**的消息列表，长到模型窗口（deepseek-v4-* = 1,000,000）就会**永久卡死**
+（pdf-reader 实测：最后一次调用 prompt = 1,046,240，下一次请求就越过上限，SDK 的"压缩后重试"
+也救不回来）。所以：
+
+- 详情页 `UsageBar` 下方有一条 **Context**：`Context 39.1% · 390.6K / 1.00M · 约 28 轮后到 85%`
+  + 最近每轮 run 的增量小柱图（黄柱 = 那一轮换了会话）；70% 黄 / 85% 红 / ≥100% 标 over；
+- 口径：`tokens` = **最近一次模型调用的 prompt**（cline 的 usage 是 run 内累计值，单次 = 相邻两条的差）。
+  ⚠️ 别和 `stats.inputTokens`（跨调用累加，38.9M）混；provider 推不出体量时（cursor）
+  显示「未知 + 原因」，**不猜数**；
+- 模型窗口从 provider 的模型目录读（`@cline/llms`），查不到就是"窗口未知"；
+- **透明化契约**：任何改变 agent 上下文/记忆的动作都必须写一条用户可见的时间线消息 +
+  一条可审计的事件 —— 已落地三类：网关重启/会话失效 → `session_reset`；切模式 seed →
+  `agent_succession.seededTokens`（以前只有条数 `1630`，看不出搬走了 ≈1M 上下文）；新会话简报 →
+  `run_started.bootstrap*`（含原文，能回答"模型看到了什么"，且超预算时**保尾部**不再整段砍掉
+  「近几轮 run 结论」）。
+
+细节与后续计划见 [`backend/src/context/README.md`](backend/src/context/README.md)。
+
 ## API
 
 | Method | Path | Description |
@@ -226,6 +246,7 @@ backend/src/
   timeline.ts     agent 时间线：事件 → idle / thinking / working（+ 用户输入 marker）
   usage/          token 口径（inclusive/disjoint）+ 兜底估算价目
   billing/        计费模块：billing_rules 表驱动的价目/时段规则（见该目录 README）
+  context/        上下文体量口径 + 模型窗口 + token 估算（见该目录 README）
   http/ ws/       REST + WebSocket
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
   usage-cost.ts    成本两个口径的文案（计费表本币 vs SDK 上报美元，分开显示）

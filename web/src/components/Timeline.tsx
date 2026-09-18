@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "../types";
-import { formatTime, truncate, formatDuration, shortAgentId } from "../format";
+import { formatTime, truncate, formatDuration, formatTokens, shortAgentId } from "../format";
 import { formatRunErrorMessage } from "../run-errors";
 
 const ICONS: Record<string, string> = {
@@ -102,7 +102,8 @@ interface Row {
   queued?: boolean;
 }
 
-function buildRows(events: AgentEvent[]): Row[] {
+/** 导出给测试用：事件 → 行文案（透明化文案都在这里，必须可测）。 */
+export function buildRows(events: AgentEvent[]): Row[] {
   const rows: Row[] = [];
   for (const ev of events) {
     const type = ev.eventType;
@@ -130,10 +131,25 @@ function buildRows(events: AgentEvent[]): Row[] {
         }
         break;
       }
-      case "run_started":
+      case "run_started": {
         body = String(p.model ?? "agent");
-        detail = p.cwd ? String(p.cwd) : "";
+        const parts: string[] = [];
+        if (p.cwd) parts.push(String(p.cwd));
+        // 透明化（PR-5）：新开会话时把"简报多大、裁掉了什么"写出来（details 也留了原文）。
+        if (p.bootstrapChars != null) {
+          const droppedUsers = Number(p.bootstrapDroppedUserMessages ?? 0);
+          const droppedRuns = Number(p.bootstrapDroppedRunResults ?? 0);
+          const trimmed = p.bootstrapTruncated === true;
+          parts.push(
+            `简报 ${formatTokens(Number(p.bootstrapChars))} 字符` +
+              (trimmed
+                ? `（按预算裁剪：丢 ${droppedUsers} 条用户消息 / ${droppedRuns} 条 run 结论）`
+                : ""),
+          );
+        }
+        detail = parts.join(" · ");
         break;
+      }
       case "status": {
         const statusRaw = String(p.status ?? "");
         if (statusRaw.toLowerCase() === "error" || /cancel/i.test(statusRaw)) {
@@ -142,6 +158,10 @@ function buildRows(events: AgentEvent[]): Row[] {
           );
         } else if (statusRaw.toLowerCase() === "retrying") {
           body = "自动重试";
+          detail = p.message ? String(p.message) : "";
+        } else if (statusRaw.toLowerCase() === "session_reset") {
+          // 透明化（PR-5）：网关重启/会话失效导致"换会话、模型失忆"，以前完全无感。
+          body = "会话已重置";
           detail = p.message ? String(p.message) : "";
         } else if (statusRaw.toLowerCase() === "working") {
           body = "仍在执行";
@@ -235,11 +255,17 @@ function buildRows(events: AgentEvent[]): Row[] {
         const fromMode = String(p.fromMode ?? "?");
         const toMode = String(p.toMode ?? "?");
         const seeded = p.seededMessages != null ? Number(p.seededMessages) : 0;
+        const seededTokens =
+          p.seededTokens != null && Number.isFinite(Number(p.seededTokens))
+            ? Number(p.seededTokens)
+            : undefined;
         const reason = String(p.reason ?? "mode_change");
         body = `${shortAgentId(fromId)} → ${shortAgentId(toId)} (${fromMode}→${toMode})`;
         detail = [
           reason,
-          Number.isFinite(seeded) ? `seeded ${seeded} msgs` : null,
+          Number.isFinite(seeded)
+            ? `seeded ${seeded} msgs${seededTokens != null ? ` ≈ ${formatTokens(seededTokens)} tokens` : ""}`
+            : null,
           fromId ? `from=${fromId}` : null,
           toId ? `to=${toId}` : null,
         ]

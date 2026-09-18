@@ -113,7 +113,12 @@ async function write<T>(
   const res = await fetch(`${BASE}${path}`, {
     method: init.method,
     headers: {
-      "content-type": "application/json",
+      // Only stamp content-type when there is a body: bodyless writes (e.g.
+      // task stop / cancel) would otherwise hit Fastify's
+      // FST_ERR_CTP_EMPTY_JSON_BODY → 400 "Bad Request".
+      ...(init.body === undefined
+        ? {}
+        : { "content-type": "application/json" }),
       [UI_VERSION_HEADER]: APP_VERSION,
     },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),

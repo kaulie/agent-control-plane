@@ -207,15 +207,6 @@ export class ClineProvider implements AgentProvider {
   }
 
   async run(input: RunInput): Promise<RunResultData> {
-    const cline = await this.getClient();
-    const modelId = input.model || (await this.resolveModel());
-    if (!modelId) {
-      throw new Error(
-        `No model available for provider "${this.providerId}". ` +
-          `Set CLINE_MODEL or check your provider id.`,
-      );
-    }
-
     const mode: AgentMode = input.mode === "plan" ? "plan" : "yolo";
     const prior = this.sessionsByTask.get(input.taskId);
     const sameSession = Boolean(input.agentId && prior?.sessionId === input.agentId);
@@ -232,6 +223,8 @@ export class ClineProvider implements AgentProvider {
       seenToolCalls: new Set<string>(),
       onEvent: input.onEvent,
     };
+    // Register before any await so a Stop click during startup can find and
+    // cancel this run (otherwise cancel() returns false → HTTP 400).
     this.active.set(input.runId, handle);
 
     const startedAt = Date.now();
@@ -249,14 +242,39 @@ export class ClineProvider implements AgentProvider {
       });
     };
 
-    await emit("run_started", {
-      cwd: input.cwd,
-      model: modelId,
-      mode: input.mode ?? "agent",
-      ...(resident ? {} : { sessionCreated: true }),
-    });
-
     try {
+      const cline = await this.getClient();
+      const modelId = input.model || (await this.resolveModel());
+      if (!modelId) {
+        throw new Error(
+          `No model available for provider "${this.providerId}". ` +
+            `Set CLINE_MODEL or check your provider id.`,
+        );
+      }
+
+      // A Stop click may have landed while we were resolving the client/model.
+      if (handle.cancelled) {
+        await emit("run_cancelled", {
+          durationMs: Date.now() - startedAt,
+          modelCalls: handle.modelCalls,
+          toolCalls: handle.toolCalls,
+          reason: "user_stop",
+        });
+        return {
+          status: "cancelled",
+          durationMs: Date.now() - startedAt,
+          modelCalls: handle.modelCalls,
+          toolCalls: handle.toolCalls,
+          agentId: handle.sessionId,
+        };
+      }
+
+      await emit("run_started", {
+        cwd: input.cwd,
+        model: modelId,
+        mode: input.mode ?? "agent",
+        ...(resident ? {} : { sessionCreated: true }),
+      });
       let result: AgentResult | undefined;
       if (resident) {
         try {

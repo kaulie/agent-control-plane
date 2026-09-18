@@ -4,6 +4,7 @@ import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
+import ContextMeter from "./components/ContextMeter";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
 import AgentTimelinePage from "./components/AgentTimelinePage";
@@ -875,6 +876,7 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
+              <ContextMeter context={detail.context} />
               <Timeline
                 events={events}
                 running={running}

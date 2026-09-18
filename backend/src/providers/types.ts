@@ -4,6 +4,12 @@ import type { PromptImage } from "../attachments.js";
 export interface ModelInfo {
   id: string;
   displayName: string;
+  /** 模型上下文窗口（tokens）；来自 provider 的模型目录，未知则缺省。 */
+  contextWindow?: number;
+  /** 可用输入预算（tokens）；SDK 的 `resolveEffectiveMaxInputTokens` 优先用它。 */
+  maxInputTokens?: number;
+  /** 单轮最大输出（tokens）。 */
+  maxTokens?: number;
 }
 
 export interface RunPrompt {

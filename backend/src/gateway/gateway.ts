@@ -67,6 +67,11 @@ import {
   type BillingRuleInput,
   type BillingService,
 } from "../billing/index.js";
+import {
+  buildContextSize,
+  modelContextLimit,
+  type TaskContextSize,
+} from "../context/index.js";
 import { tokenVolume } from "../usage/tokens.js";
 import {
   collectDecisionEvents,
@@ -121,6 +126,8 @@ export interface TaskDetail {
   task: Task;
   runs: RunRecord[];
   stats: TaskStats;
+  /** 上下文体量（口径见 context/size.ts）；缺失 = 还没有可用的 usage 采样。 */
+  context?: TaskContextSize;
 }
 
 interface PendingRun {
@@ -538,11 +545,34 @@ export class AgentGateway {
   getTaskDetail(taskId: string): TaskDetail | undefined {
     const task = this.store.getTask(taskId);
     if (!task) return undefined;
+    const context = this.getTaskContext(taskId);
     return {
       task,
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
+      ...(context ? { context } : {}),
     };
+  }
+
+  /**
+   * 上下文体量：**当前会话的请求体量**（最近一次模型调用的 prompt）+ 最近几轮的增量。
+   *
+   * 数据来自 runs 的 usage 采样（口径极容易踩错，见 context/size.ts 顶部注释）；
+   * provider 不支持（cursor）或没有采样时返回 `available: false` 的说明，而不是猜一个数。
+   */
+  getTaskContext(taskId: string): TaskContextSize | undefined {
+    const task = this.store.getTask(taskId);
+    if (!task) return undefined;
+    const { samples, modelByRun, latestModel } = this.store.listContextUsageSamples(taskId);
+    const model = latestModel ?? task.model;
+    const limit = modelContextLimit(task.provider, model);
+    return buildContextSize({
+      provider: task.provider,
+      ...(model ? { model } : {}),
+      ...(limit ? { limit } : {}),
+      samples,
+      modelByRun,
+    });
   }
 
   getTokenUsageSeries(filter: {

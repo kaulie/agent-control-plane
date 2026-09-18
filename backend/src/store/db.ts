@@ -1393,6 +1393,79 @@ export class Store {
   }
 
   /**
+   * 最近若干轮 run 的 usage 采样，供上下文体量显示（口径见 context/size.ts）。
+   *
+   * ⚠️ 每条采样是**该 run 内的累计 prompt tokens**（cline 的 usage 事件语义），
+   * 不是单次请求体量：单次 prompt = 相邻两条的差（`buildContextSize` 负责折算）。
+   * cursor 的 usage 是 agent 生命周期累计 → context 模块会判为不可用。
+   */
+  listContextUsageSamples(
+    taskId: string,
+    opts?: { runLimit?: number },
+  ): {
+    samples: Array<{ runId: string; at: string; tokens: number }>;
+    modelByRun: Record<string, string | undefined>;
+    latestModel?: string;
+  } {
+    const runLimit = Math.max(1, Math.min(50, opts?.runLimit ?? 12));
+    const runRows = this.db
+      .prepare(
+        `SELECT run_id, model, cost_json FROM runs
+         WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(taskId, runLimit) as unknown as Array<{
+      run_id: string;
+      model: string | null;
+      cost_json: string | null;
+    }>;
+    if (!runRows.length) return { samples: [], modelByRun: {} };
+
+    const modelByRun: Record<string, string | undefined> = {};
+    for (const row of runRows) {
+      // 老 run 的 model 列可能是 NULL（自动选模型），模型挂在 cost_json.model 上。
+      let model = row.model?.trim() || undefined;
+      if (!model && row.cost_json) {
+        try {
+          const parsed = JSON.parse(row.cost_json) as { model?: string };
+          model = parsed.model?.trim() || undefined;
+        } catch {
+          model = undefined;
+        }
+      }
+      modelByRun[row.run_id] = model;
+    }
+
+    const ids = runRows.map((r) => r.run_id);
+    const rows = this.db
+      .prepare(
+        `SELECT run_id, timestamp, usage FROM events
+         WHERE task_id = ? AND usage IS NOT NULL AND run_id IN (${placeholders(ids.length)})
+         ORDER BY seq ASC`,
+      )
+      .all(taskId, ...ids) as unknown as Array<{
+      run_id: string;
+      timestamp: string;
+      usage: string | null;
+    }>;
+
+    const samples: Array<{ runId: string; at: string; tokens: number }> = [];
+    for (const row of rows) {
+      if (!row.usage) continue;
+      let tokens = 0;
+      try {
+        tokens = Number((JSON.parse(row.usage) as { inputTokens?: number }).inputTokens) || 0;
+      } catch {
+        continue;
+      }
+      if (tokens <= 0) continue;
+      samples.push({ runId: row.run_id, at: row.timestamp, tokens });
+    }
+
+    const latestModel = modelByRun[runRows[0]!.run_id];
+    return { samples, modelByRun, ...(latestModel ? { latestModel } : {}) };
+  }
+
+  /**
    * Finished runs that carry a usage payload, joined with their task row.
    * Used by the cross-task token-usage series endpoint.
    */

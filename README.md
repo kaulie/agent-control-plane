@@ -146,7 +146,10 @@ SQLite 表 **`billing_rules`**（模型价目 + 高峰/空闲时段规则，可�
 - 对比口径 = provider / SDK 自己上报的 `totalCost`：写在 `cost_json.chargedCents`，**只作对比**
   （实测 SDK 上报 ≈ $15，而按 DeepSeek 官方价目表算 ≈ ¥297 ≈ $42，不是一套价卡）；
 - 页面（`UsageBar`）把两个值**分开显示**，不要相加；
-- 没有规则命中的 run（例如 cursor：价目表还没入库）保留旧估算，绝不按 0 计；
+- **实际成本的取值顺序 = 计费表 > provider/SDK 上报 > 旧估算**（`cost_json.costSource`）：
+  没有规则命中的 run（例如 cursor：价目表还没入库）实际成本**就是上报值**；
+  连上报值也没有（cursor 的 SDK 就不返回成本）才用旧估算兜底 ——
+  这两种情况下两个格子都显示**同一个数**，两个字都有值（不会出现「—」）；
 - 旧的两张代码价目表（`backend/src/usage/pricing.ts`、cline 的 `DEEPSEEK_PRICING`）降级为
   兜底估算，只在「没规则命中 / 没注入计费模块」时用。
 

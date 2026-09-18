@@ -52,8 +52,17 @@ provider 适配器不再自带价目表，只把「用量 + 模型 + 时间」�
   已含缓存读，见 `usage/tokens.ts`）。
 - **命中优先级**：精确模型 id > 更长的包含片段 > `*`；同档先看 provider 是否精确，再看
   `priority`，最后按 `rule_id` 升序稳定排序。provider 不匹配 / 规则停用 → 不命中。
-- **兜底**：没有任何规则命中时**保留旧估算（`estimatedCents`）或 SDK 上报值**，绝不按 0 计。
-  cursor 的价目表还没入库，所以 cursor run 目前走的就是这条兜底路径。
+- **实际成本的取值顺序**（`resolveBilledCost`，写入口与读端/重算脚本共用同一函数）：
+  **计费表 > provider/SDK 上报 > 旧估算**，并记进 `cost_json.costSource`：
+  | `costSource` | 何时 | 页面表现 |
+  | --- | --- | --- |
+  | `rule` | 命中 `billing_rules` | Cost = 本币（如 `¥297.26`）；SDK cost = 上报值（如 `$14.96`）—— **两个口径不同，分开显示、不要相加** |
+  | `reported` | 没规则但有上报值（cursor / 未入库的模型） | 实际成本**就是上报值** → 两个格子显示**同一个数** |
+  | `estimate` | 没规则、SDK 也没返回成本 | 用旧本地估算兜底 → 两个格子同样显示**同一个数**（绝不按 0 计） |
+
+  cursor 现在属于最后一类：它的 SDK 不返回成本（现有 786 个 cursor run 里 `chargedCents` /
+  `rawCostCents` 一个都没有），所以实际成本只能用 `usage/pricing.ts` 的本地估算兜底。
+  要给 cursor 一个准数，把它的价目加进 `billing_rules`（一行 `provider = 'cursor'`）即可。
 
 ## 怎么改价
 
@@ -91,8 +100,10 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy            #
 npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply    # 落库
 ```
 
-只有命中规则的 run 会被改写；没命中的原样保留。脚本同时打印「按 provider/model」
-「高峰/空闲」「业务忙闲（工作日 9–12 / 14–18，仅对账用）」三张对照表。
+它按同一套口径把历史 `cost_json` 归一：命中规则的按表算，没规则的把实际成本对齐到上报值
+（并补上 `costSource`），只有连上报值都没有的行才保留旧估算。脚本打印「cost 来源轮数」
+「按 provider/model」「高峰/空闲」「业务忙闲（工作日 9–12 / 14–18，仅对账用）」等对照表，
+默认 dry-run。
 
 ## 文件
 

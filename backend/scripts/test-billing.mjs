@@ -23,6 +23,7 @@ import {
   matchBillingRule,
   normalizeBillingRuleInput,
   priceWithRule,
+  resolveBilledCost,
 } from "../src/billing/index.ts";
 import { Store, DEFAULT_PROJECT_ID } from "../src/store/db.ts";
 
@@ -140,7 +141,8 @@ assert.equal(
   undefined,
   "没规则命中且没有可保留的值 → 不写 cost",
 );
-const fallback = buildBilledCost({
+// 没命中规则 → 实际成本 = 上报值（两个口径一样）；旧估算只在连上报值都没有时用
+const noRule = buildBilledCost({
   rules,
   provider: "cursor",
   model: "composer-1",
@@ -149,9 +151,29 @@ const fallback = buildBilledCost({
   reported: { chargedCents: 3 },
   fallbackEstimatedCents: 5.5,
 });
-assert.equal(fallback.estimatedCents, 5.5, "没命中 → 保留旧估算");
-assert.equal(fallback.chargedCents, 3);
-assert.equal(fallback.billing, undefined);
+assert.equal(noRule.estimatedCents, 3, "没规则 → 实际成本 = SDK 上报值");
+assert.equal(noRule.estimatedCents, noRule.chargedCents, "没规则时两个口径必须同值");
+assert.equal(noRule.costSource, "reported");
+assert.equal(noRule.billing, undefined);
+const estimateOnly = buildBilledCost({
+  rules,
+  provider: "cursor",
+  model: "composer-1",
+  usage,
+  at: "x",
+  fallbackEstimatedCents: 5.5,
+});
+assert.equal(estimateOnly.estimatedCents, 5.5, "连上报值都没有 → 才用旧估算");
+assert.equal(estimateOnly.costSource, "estimate");
+assert.equal(billed.costSource, "rule", "命中规则 → rule");
+
+// 读取端（Store 统计 / 重算脚本）与写入端共用同一个取值函数
+assert.deepEqual(resolveBilledCost(billed), { cents: billed.billing.usdCents, source: "rule" });
+assert.deepEqual(resolveBilledCost(noRule), { cents: 3, source: "reported" });
+assert.deepEqual(resolveBilledCost(estimateOnly), { cents: 5.5, source: "estimate" });
+assert.deepEqual(resolveBilledCost({ currency: "USD", rawCostCents: 4 }), { cents: 4, source: "reported" });
+assert.equal(resolveBilledCost({ currency: "USD" }), undefined);
+assert.equal(resolveBilledCost(undefined), undefined);
 
 // ---- 6) 写接口校验 ---------------------------------------------------------
 const custom = normalizeBillingRuleInput("my-model", {
@@ -217,12 +239,40 @@ store.createRun({ runId: "run-2", taskId: task.taskId, agentId: "cls-1", provide
 store.updateRun("run-2", { status: "finished", usage, cost: { chargedCents: 3, estimatedCents: 5, currency: "USD" } });
 
 const stats = store.getTaskStats(task.taskId);
-assert.equal(stats.costCents, Math.round((billed.estimatedCents + 5) * 100) / 100, "主口径 = 表算的 + 老 run 退回值");
+assert.equal(stats.costCents, Math.round((billed.estimatedCents + 3) * 100) / 100, "主口径 = 表算的 + 没规则那轮的上报值");
 assert.equal(stats.billedAmount, billed.billing.amount, "本币金额只累计命中规则的 run");
 assert.equal(stats.billedCurrency, "CNY");
 assert.equal(stats.chargedCents, 10, "SDK 上报 = 7 + 3（对比口径，独立）");
-assert.equal(stats.estimatedCents, Math.round((billed.estimatedCents + 5) * 100) / 100);
+assert.deepEqual(stats.costSources, { rule: 1, reported: 1, estimate: 0 });
+
+// 全是「没规则」的任务（例如 cursor）：两个口径必须同值
+const cursorTask = store.createTask({
+  title: "cursor-only",
+  workspace: path.join(dir, "ws2"),
+  provider: "cursor",
+  model: "composer-1",
+  projectId: DEFAULT_PROJECT_ID,
+});
+store.createRun({ runId: "run-c", taskId: cursorTask.taskId, agentId: "agent-1", provider: "cursor", model: "composer-1" });
+store.updateRun("run-c", {
+  status: "finished",
+  usage,
+  cost: buildBilledCost({
+    rules,
+    provider: "cursor",
+    model: "composer-1",
+    usage,
+    at: "2026-09-18T02:00:00.000Z",
+    reported: { chargedCents: 42 },
+    fallbackEstimatedCents: 999,
+  }),
+});
+const cursorStats = store.getTaskStats(cursorTask.taskId);
+assert.equal(cursorStats.costCents, 42, "没规则 → 实际成本 = 上报值");
+assert.equal(cursorStats.chargedCents, cursorStats.costCents, "没规则时两个口径同值");
+assert.equal(cursorStats.billedAmount, undefined, "没有计费表明细 → 不给本币金额");
+assert.deepEqual(cursorStats.costSources, { rule: 0, reported: 1, estimate: 0 });
 
 store.close();
 fs.rmSync(dir, { recursive: true, force: true });
-console.log("PASS: billing rules table + module (prices, periods, matching, both cost口径)");
+console.log("PASS: billing rules table + module (prices, periods, matching, cost 顺序 rule > reported > estimate)");

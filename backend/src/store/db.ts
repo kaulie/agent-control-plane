@@ -28,6 +28,7 @@ import {
 } from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
 import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
+import { resolveBilledCost, type CostSource } from "../billing/cost.js";
 import type { BillingRule } from "../billing/types.js";
 import {
   sqlMarkerInList,
@@ -1322,7 +1323,9 @@ export class Store {
     let billedUsdCents = 0;
     let hasBilled = false;
     let billedAmount = 0;
-    let billedCurrency: string | undefined;
+    // 本币金额只在「全部命中的规则同一个币种」时才给（混币种就别假装能相加）。
+    const billingCurrencies = new Set<string>();
+    const costSources: Record<CostSource, number> = { rule: 0, reported: 0, estimate: 0 };
     let chargedCents: number | undefined;
     let estimatedCents: number | undefined;
     let durationMs = 0;
@@ -1341,15 +1344,15 @@ export class Store {
         const billing = run.cost.billing;
         if (billing) {
           billedAmount += billing.amount;
-          billedCurrency = billing.currency;
+          billingCurrencies.add(billing.currency);
         }
-        // 主口径：计费表算出来的钱；没有规则命中的历史 run 退化为旧估算 / 上报值，
-        // 这样同一列里历史与新增 run 仍然可比。
-        const billed =
-          billing?.usdCents ?? run.cost.estimatedCents ?? run.cost.chargedCents;
-        if (typeof billed === "number") {
-          billedUsdCents += billed;
+        // 主口径（= 实际成本）= resolveBilledCost：计费表 > provider/SDK 上报 > 旧估算。
+        // 没有规则时它就是上报值，所以页面上「Cost」与「SDK cost」显示同一个数。
+        const resolved = resolveBilledCost(run.cost);
+        if (resolved) {
+          billedUsdCents += resolved.cents;
           hasBilled = true;
+          costSources[resolved.source] += 1;
         }
         if (typeof run.cost.chargedCents === "number") {
           chargedCents = (chargedCents ?? 0) + run.cost.chargedCents;
@@ -1370,9 +1373,13 @@ export class Store {
       cacheWriteTokens,
       totalTokens,
       ...(hasBilled ? { costCents: roundCents(billedUsdCents) } : {}),
-      ...(billedCurrency
-        ? { billedAmount: roundCents(billedAmount), billedCurrency }
+      ...(billingCurrencies.size === 1
+        ? {
+            billedAmount: roundCents(billedAmount),
+            billedCurrency: [...billingCurrencies][0],
+          }
         : {}),
+      ...(hasBilled ? { costSources: { ...costSources } } : {}),
       ...(chargedCents != null ? { chargedCents: roundCents(chargedCents) } : {}),
       ...(estimatedCents != null
         ? { estimatedCents: roundCents(estimatedCents) }

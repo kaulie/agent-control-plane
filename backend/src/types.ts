@@ -193,6 +193,12 @@ export interface CostInfo {
   estimatedCents?: number;
   currency: string;
   model?: string;
+  /**
+   * 实际成本（`estimatedCents`）的来源：
+   * `rule` = 计费表；`reported` = provider/SDK 上报（没有规则时就是这个，两个口径同值）；
+   * `estimate` = 旧本地估算。
+   */
+  costSource?: "rule" | "reported" | "estimate";
   /** 计费表明细（命中规则时才有）：规则 id / 时段 / 本币金额 / 分项。 */
   billing?: BillingCostInfo;
 }
@@ -231,6 +237,8 @@ export interface TaskStats {
   chargedCents?: number;
   /** 旧口径（历史本地估算合计），只为兼容老数据保留。 */
   estimatedCents?: number;
+  /** `costCents` 里各来源的 run 数（rule / reported / estimate）。 */
+  costSources?: { rule: number; reported: number; estimate: number };
   currency: string;
   durationMs: number;
   modelCalls: number;

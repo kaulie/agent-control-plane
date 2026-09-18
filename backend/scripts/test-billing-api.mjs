@@ -143,17 +143,34 @@ store.updateRun("run-a", {
     },
   },
 });
-// 没命中规则的老 run：主口径退回旧估算，SDK 上报值单独累计
+// 没命中规则的老 run：实际成本 = SDK 上报值（两个口径同值），旧估算不参与
 store.createRun({ runId: "run-b", taskId: task.taskId, agentId: "cls-1", provider: "cursor", model: "composer-1" });
 store.updateRun("run-b", { status: "finished", usage, cost: { currency: "USD", chargedCents: 3, estimatedCents: 5 } });
 
 const detail = JSON.parse((await get(`/api/tasks/${task.taskId}`)).body);
-assert.equal(detail.stats.costCents, 146.41, "主口径 = 表算的 141.41 + 老 run 退回 5");
+assert.equal(detail.stats.costCents, 144.41, "主口径 = 表算的 141.41 + 没规则那轮的上报值 3");
 assert.equal(detail.stats.billedAmount, 10.04, "本币金额只累计命中规则的 run");
 assert.equal(detail.stats.billedCurrency, "CNY");
 assert.equal(detail.stats.chargedCents, 10, "SDK 上报 = 7 + 3（独立口径）");
+assert.deepEqual(detail.stats.costSources, { rule: 1, reported: 1, estimate: 0 });
 assert.equal(detail.runs.length, 2);
+
+// 全是「没规则」的任务（cursor）：实际成本 = 上报值，两个口径同值
+const cursorTask = store.createTask({
+  title: "cursor-only",
+  workspace: path.join(dataDir, "ws2"),
+  provider: "cursor",
+  model: "composer-1",
+  projectId: DEFAULT_PROJECT_ID,
+});
+store.createRun({ runId: "run-d", taskId: cursorTask.taskId, agentId: "agent-1", provider: "cursor", model: "composer-1" });
+store.updateRun("run-d", { status: "finished", usage, cost: { currency: "USD", chargedCents: 123, estimatedCents: 999 } });
+const cursorStats = JSON.parse((await get(`/api/tasks/${cursorTask.taskId}`)).body).stats;
+assert.equal(cursorStats.costCents, cursorStats.chargedCents, "没规则时两个口径同值");
+assert.equal(cursorStats.costCents, 123);
+assert.equal(cursorStats.billedAmount, undefined, "没有计费表明细 → 不给本币金额（前端退回美元）");
+assert.deepEqual(cursorStats.costSources, { rule: 0, reported: 1, estimate: 0 });
 
 store.close();
 fs.rmSync(dataDir, { recursive: true, force: true });
-console.log("PASS: /api/billing/rules CRUD + task stats expose both cost口径");
+console.log("PASS: /api/billing/rules CRUD + task stats expose both cost口径 (no rule => same value)");

@@ -20,7 +20,10 @@ export {
   buildBilledCost,
   priceWithRule,
   pricesForPeriod,
+  resolveBilledCost,
   type BuildBilledCostInput,
+  type CostSource,
+  type ResolvedBilledCost,
 } from "./cost.js";
 export {
   BillingService,

@@ -87,16 +87,43 @@ export interface BuildBilledCostInput {
   usage?: TokenUsage | null;
   /** 计费基准时刻（run 起始，ISO8601）——时段判定用它。 */
   at: string;
-  /** provider / SDK 自己上报的金额；原样留档，不参与本表计价。 */
+  /** provider / SDK 自己上报的金额；命中规则时只作对比，没规则时就是实际成本。 */
   reported?: { rawCostCents?: number; chargedCents?: number };
-  /** 没有任何规则命中时保留的旧本地估算（兼容历史口径）。 */
+  /** 没规则、也没上报值时保留的旧本地估算（兼容历史口径）。 */
   fallbackEstimatedCents?: number;
 }
 
+/** 实际成本（`cost_json.estimatedCents`）的来源。 */
+export type CostSource = "rule" | "reported" | "estimate";
+
+export interface ResolvedBilledCost {
+  cents: number;
+  source: CostSource;
+}
+
 /**
- * 产出 `run.cost_json`：
- * - 命中规则 → `estimatedCents` = 按表算出来的钱（USD cents）+ 明细 `billing`；
- * - 没命中规则但有上报值 / 兜底估算 → 原样保留（行为与改造前一致）；
+ * 一个 run 的「实际成本」取值顺序：**计费表 > provider/SDK 上报 > 旧本地估算**。
+ *
+ * 没有规则命中的 provider / 模型（例如 cursor，价目表还没入库）就落在 `reported`，
+ * 也就是说这时**实际成本 = 上报值** —— 页面上「Cost」与「SDK cost」两个格子显示同一个数
+ * （见 `web/src/usage-cost.ts`）。
+ */
+export function resolveBilledCost(
+  cost: CostInfo | undefined,
+): ResolvedBilledCost | undefined {
+  if (!cost) return undefined;
+  if (cost.billing) return { cents: cost.billing.usdCents, source: "rule" };
+  if (cost.chargedCents != null) return { cents: cost.chargedCents, source: "reported" };
+  if (cost.rawCostCents != null) return { cents: cost.rawCostCents, source: "reported" };
+  if (cost.estimatedCents != null) return { cents: cost.estimatedCents, source: "estimate" };
+  return undefined;
+}
+
+/**
+ * 产出 `run.cost_json`。`estimatedCents`（= 实际成本）的顺序：
+ * - 命中规则 → 按表算出来的钱（USD cents）+ 明细 `billing`，`costSource: "rule"`；
+ * - 没命中规则但有上报值 → **就等于上报值**，`costSource: "reported"`（两个口径一样）；
+ * - 只有旧估算 → `costSource: "estimate"`；
  * - 什么都没有 → `undefined`（run 不写 cost）。
  */
 export function buildBilledCost(
@@ -115,21 +142,16 @@ export function buildBilledCost(
     : undefined;
 
   if (!match || !input.usage) {
-    if (
-      reported.chargedCents == null &&
-      reported.rawCostCents == null &&
-      input.fallbackEstimatedCents == null
-    ) {
-      return undefined;
+    const reportedCents = reported.chargedCents ?? reported.rawCostCents;
+    if (reportedCents != null) {
+      return { ...base, estimatedCents: reportedCents, costSource: "reported" };
     }
-    return {
-      ...base,
-      ...(input.fallbackEstimatedCents != null
-        ? { estimatedCents: input.fallbackEstimatedCents }
-        : {}),
-    };
+    if (input.fallbackEstimatedCents != null) {
+      return { ...base, estimatedCents: input.fallbackEstimatedCents, costSource: "estimate" };
+    }
+    return undefined;
   }
 
   const billing = priceWithRule(match.rule, input.usage, input.at, match.matchedBy);
-  return { ...base, estimatedCents: billing.usdCents, billing };
+  return { ...base, estimatedCents: billing.usdCents, costSource: "rule", billing };
 }

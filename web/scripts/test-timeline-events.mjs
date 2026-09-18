@@ -111,6 +111,30 @@ assert.match(
   /切模式/,
 );
 
+// 7b) 模型摘要（默认关闭的能力）——生成这件事要可见，简报里也要说明含摘要
+const digest = buildRows([
+  ev("status", {
+    status: "digest",
+    message: "已生成会话摘要（模型 deepseek-v4-flash，18 字符，源 task-abc）",
+    digestChars: 18,
+  }),
+])[0];
+assert.equal(digest.body, "已生成会话摘要");
+assert.match(digest.detail, /18 字符/);
+
+const withDigest = buildRows([
+  ev("run_started", {
+    cwd: "/tmp/ws",
+    model: "deepseek-v4-flash",
+    sessionCreated: true,
+    bootstrapChars: 4200,
+    bootstrapDigestChars: 18,
+    bootstrapDigestModel: "deepseek-v4-flash",
+  }),
+])[0];
+assert.match(withDigest.detail, /简报 4\.2K 字符/);
+assert.match(withDigest.detail, /含模型摘要 18 字符（deepseek-v4-flash）/);
+
 // 8) 撞上模型窗口的原始报错 → 可操作中文（原文没人看得懂）
 const overflow = classifyRunError(
   "The request exceeds the model's context window and there is no conversation history to compact — the system prompt, tools, and current input alone are too large. (provider reported: This model's maximum context length is 1048576 tokens.)",
@@ -120,4 +144,4 @@ assert.match(overflow.message, /Fork 新 task/);
 assert.match(overflow.message, /完整历史仍在时间线里/);
 assert.equal(classifyRunError("already has active run").kind, "busy", "其它分类不受影响");
 
-console.log("PASS: 时间线透明化文案（会话重置 / seed 体量 / 简报裁剪 / 自动轮转 / 超限报错）");
+console.log("PASS: 时间线透明化文案（会话重置 / seed 体量 / 简报裁剪 / 自动轮转 / 模型摘要 / 超限报错）");

@@ -19,6 +19,18 @@ export interface TaskBootstrapInput {
    * —— 用户要求"历史不一定要显示在新 task 里"，但模型要能接着干。
    */
   carried?: TaskBootstrapCarried;
+  /**
+   * 模型生成的会话摘要（`CONTEXT_DIGEST=1` 时才有）：有它就**替代**原始 carried 行
+   * （这才是"compaction"），并保留"完整历史见 …"的指针。
+   */
+  digest?: TaskBootstrapDigest;
+}
+
+export interface TaskBootstrapDigest {
+  text: string;
+  sourceTaskId: string;
+  at: string;
+  model?: string;
 }
 
 export interface TaskBootstrapCarried {
@@ -38,6 +50,8 @@ export interface TaskBootstrap {
   kept: { userMessages: number; runResults: number };
   /** 带了别的 task 的历史时，说明来源与带了多少（透明化）。 */
   carried?: { taskId: string; userMessages: number; runResults: number };
+  /** 用了模型生成的摘要时，说明来源/字符数/模型（透明化）。 */
+  digestMeta?: { sourceTaskId: string; chars: number; at: string; model?: string };
 }
 
 function clip(text: string, max: number): string {
@@ -162,7 +176,9 @@ function fitLines(lines: string[], budget: number): { kept: string[]; used: numb
  */
 export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   const { task, project, events, runs } = input;
-  const carried = input.carried;
+  const digest = input.digest;
+  // 有模型摘要时，carried 的原始行不再塞进简报（摘要就是压缩后的它）。
+  const carried = digest ? undefined : input.carried;
   const carriedTag = carried ? `[fork:${carried.taskId.slice(-6)}] ` : "";
   // fork 过来的历史排在本 task 自己的历史**前面**（保尾部时优先留本 task 的最新内容）。
   const userMsgs = [
@@ -190,6 +206,15 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   const fittedUsers = fitLines(userMsgs, Math.max(0, budget - fittedRuns.used));
 
   const parts: string[] = [skeleton, "## History summary"];
+  if (digest) {
+    parts.push(
+      `## Session digest（模型生成摘要 · 源 ${digest.sourceTaskId} · ${digest.at}` +
+        `${digest.model ? ` · ${digest.model}` : ""}）`,
+      digest.text,
+      `- 完整历史见 \`GET /api/tasks/${digest.sourceTaskId}/events\``,
+      "",
+    );
+  }
   if (carried) {
     parts.push(
       `- 本任务由 ${carried.taskId}「${carried.title}」fork 而来（上下文已接近模型窗口，换个会话继续）。` +
@@ -214,6 +239,14 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   }
   const droppedUserMessages = userMsgs.length - fittedUsers.kept.length;
   const droppedRunResults = runResults.length - fittedRuns.kept.length;
+  const digestMeta = digest
+    ? {
+        sourceTaskId: digest.sourceTaskId,
+        chars: digest.text.length,
+        at: digest.at,
+        ...(digest.model ? { model: digest.model } : {}),
+      }
+    : undefined;
   const carriedKept = carried
     ? {
         taskId: carried.taskId,
@@ -228,6 +261,7 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
     dropped: { userMessages: droppedUserMessages, runResults: droppedRunResults },
     kept: { userMessages: fittedUsers.kept.length, runResults: fittedRuns.kept.length },
     ...(carriedKept ? { carried: carriedKept } : {}),
+    ...(digestMeta ? { digestMeta } : {}),
   };
 }
 
@@ -261,6 +295,14 @@ export function bootstrapEventPayload(
     bootstrapDroppedUserMessages: bootstrap.dropped.userMessages,
     bootstrapDroppedRunResults: bootstrap.dropped.runResults,
     bootstrapText: bootstrap.text,
+    ...(bootstrap.digestMeta
+      ? {
+          bootstrapDigestSourceTaskId: bootstrap.digestMeta.sourceTaskId,
+          bootstrapDigestChars: bootstrap.digestMeta.chars,
+          bootstrapDigestAt: bootstrap.digestMeta.at,
+          ...(bootstrap.digestMeta.model ? { bootstrapDigestModel: bootstrap.digestMeta.model } : {}),
+        }
+      : {}),
     ...(bootstrap.carried
       ? {
           bootstrapCarriedTaskId: bootstrap.carried.taskId,

@@ -136,6 +136,11 @@ export function buildRows(events: AgentEvent[]): Row[] {
         const parts: string[] = [];
         if (p.cwd) parts.push(String(p.cwd));
         // 透明化（PR-5）：新开会话时把"简报多大、裁掉了什么"写出来（details 也留了原文）。
+        if (p.bootstrapDigestChars != null) {
+          const digestChars = Number(p.bootstrapDigestChars);
+          const digestModel = p.bootstrapDigestModel ? String(p.bootstrapDigestModel) : "";
+          parts.push(`含模型摘要 ${formatTokens(digestChars)} 字符${digestModel ? `（${digestModel}）` : ""}`);
+        }
         if (p.bootstrapChars != null) {
           const droppedUsers = Number(p.bootstrapDroppedUserMessages ?? 0);
           const droppedRuns = Number(p.bootstrapDroppedRunResults ?? 0);
@@ -158,6 +163,10 @@ export function buildRows(events: AgentEvent[]): Row[] {
           );
         } else if (statusRaw.toLowerCase() === "retrying") {
           body = "自动重试";
+          detail = p.message ? String(p.message) : "";
+        } else if (statusRaw.toLowerCase() === "digest") {
+          // 透明化：模型摘要是**有损变换**，生成这件事要可见（原文在 /api/tasks/:id）。
+          body = "已生成会话摘要";
           detail = p.message ? String(p.message) : "";
         } else if (statusRaw.toLowerCase() === "context_rotation") {
           // 透明化（PR-4）：系统自动换会话（会话接近模型窗口），必须说出来。

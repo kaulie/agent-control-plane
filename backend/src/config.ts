@@ -125,6 +125,14 @@ export interface Config {
   clineCompaction: boolean;
   /** 上下文自动轮转兜底（CONTEXT_AUTO_ROTATE=0 关闭）。 */
   contextAutoRotate: boolean;
+  /** 压缩策略：basic（默认）/ agentic（LLM 摘要式，需 summarizer）。 */
+  clineCompactionStrategy: "basic" | "agentic";
+  /** agentic 压缩用的模型（缺省 = 会话模型）。 */
+  clineCompactionModel: string | undefined;
+  /** **模型生成 digest**：默认关（CONTEXT_DIGEST=1 开）。 */
+  contextDigest: boolean;
+  /** digest 用的模型（缺省 = 会话模型）。 */
+  contextDigestModel: string | undefined;
   dataDir: string;
   webDistDir: string;
   /**
@@ -248,6 +256,11 @@ export function loadConfig(): Config {
     clineSystemPrompt: process.env.CLINE_SYSTEM_PROMPT?.trim() || undefined,
     clineCompaction: process.env.CLINE_COMPACTION?.trim() !== "0",
     contextAutoRotate: process.env.CONTEXT_AUTO_ROTATE?.trim() !== "0",
+    clineCompactionStrategy: process.env.CLINE_COMPACTION?.trim() === "agentic" ? "agentic" : "basic",
+    clineCompactionModel: process.env.CLINE_COMPACTION_MODEL?.trim() || undefined,
+    contextDigest:
+      process.env.CONTEXT_DIGEST?.trim() === "1" || process.env.CONTEXT_DIGEST?.trim() === "true",
+    contextDigestModel: process.env.CONTEXT_DIGEST_MODEL?.trim() || undefined,
     dataDir: resolveFromBackend("data"),
     webDistDir: resolveFromBackend("..", "web", "dist"),
     gitViaProxyUrl,

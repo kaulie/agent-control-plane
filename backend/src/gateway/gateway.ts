@@ -35,7 +35,11 @@ import {
   type PromptImage,
   type StoredImageRef,
 } from "../attachments.js";
-import { buildTaskBootstrap, type TaskBootstrapCarried } from "../task-context.js";
+import {
+  buildTaskBootstrap,
+  type TaskBootstrapCarried,
+  type TaskBootstrapDigest,
+} from "../task-context.js";
 import type { RunSessionContext } from "../providers/types.js";
 import {
   buildSelfCheckPrompt,
@@ -76,6 +80,8 @@ import {
   modelContextLimit,
   type TaskContextSize,
 } from "../context/index.js";
+import { digestSourceText, generateDigest } from "../context/digest.js";
+import { shouldRotateContext } from "../context/rotate.js";
 import { tokenVolume } from "../usage/tokens.js";
 import {
   collectDecisionEvents,
@@ -116,6 +122,10 @@ export interface GatewayConfig {
   billing?: BillingService;
   /** 上下文自动轮转兜底开关（`CONTEXT_AUTO_ROTATE=0` 关掉；缺省开）。 */
   autoRotate?: boolean;
+  /** **模型生成 digest**（默认关，`CONTEXT_DIGEST=1` 开）。 */
+  contextDigest?: boolean;
+  /** digest 用的模型/凭据（缺省沿用 cline provider 的 DeepSeek 配置与任务模型）。 */
+  digest?: { apiKey?: string; baseUrl?: string; providerId?: string; model?: string; fetchImpl?: typeof fetch };
 }
 
 export interface SendMessageInput {
@@ -136,6 +146,8 @@ export interface TaskDetail {
   context?: TaskContextSize;
   /** 从这个 task fork 出去的新 task id（上下文将满时分流）。 */
   forkedTo?: string[];
+  /** 这个 task 上模型生成的会话摘要（默认关闭；开了以后可在这里看到原文）。 */
+  contextDigest?: { text: string; at: string; seq: number | null };
 }
 
 interface PendingRun {
@@ -353,6 +365,9 @@ export function agentSuccessionFromEvent(
     createdAt: event.timestamp,
   };
 }
+
+/** digest 新鲜度：源 task 新增事件超过这个数就重算。 */
+const DIGEST_REFRESH_EVENTS = 50;
 
 export class AgentGateway {
   /** In-flight run keyed by taskId (at most one active run per task). */
@@ -637,6 +652,71 @@ export class AgentGateway {
   }
 
   /**
+   * 模型生成的会话摘要（**默认关闭**，`CONTEXT_DIGEST=1` 开）。
+   *
+   * 只在真的会用上时才生成：fork 来的 task（给 carried 历史做压缩）或轮转在即；
+   * 按事件水位缓存（`context_digest_seq`，DIGEST_REFRESH_EVENTS 条内视为新鲜），避免每轮都调模型；
+   * 生成失败一律回退（返回 undefined / 旧摘要），绝不影响主流程。
+   */
+  async contextDigestFor(task: Task): Promise<TaskBootstrapDigest | undefined> {
+    if (!this.config.contextDigest) return undefined;
+    const sourceId = task.forkedFrom ?? task.taskId;
+    const source = sourceId === task.taskId ? task : this.store.getTask(sourceId);
+    if (!source) return undefined;
+    const watermark = this.store.latestEventSeq(sourceId);
+    const cached = this.store.getTaskDigest(task.taskId);
+    if (cached && cached.seq != null && watermark - cached.seq <= DIGEST_REFRESH_EVENTS) {
+      return { text: cached.digest, sourceTaskId: sourceId, at: cached.at };
+    }
+    const modelId = this.config.digest?.model?.trim() || task.model?.trim() || "";
+    const result = modelId
+      ? await generateDigest({
+          text: digestSourceText({
+            taskId: source.taskId,
+            title: source.title,
+            workspace: source.workspace,
+            ...(source.prUrl ? { prUrl: source.prUrl } : {}),
+            events: this.store.listEvents(source.taskId, { limit: 200 }).events,
+            runs: this.store.listRuns(source.taskId),
+          }),
+          provider: {
+            modelId,
+            ...(this.config.digest?.providerId ? { providerId: this.config.digest.providerId } : {}),
+            ...(this.config.digest?.apiKey ? { apiKey: this.config.digest.apiKey } : {}),
+            ...(this.config.digest?.baseUrl ? { baseUrl: this.config.digest.baseUrl } : {}),
+          },
+          ...(this.config.digest?.fetchImpl ? { fetchImpl: this.config.digest.fetchImpl } : {}),
+        })
+      : undefined;
+    if (!result) {
+      return cached ? { text: cached.digest, sourceTaskId: sourceId, at: cached.at } : undefined;
+    }
+    const at = new Date().toISOString();
+    this.store.setTaskDigest(task.taskId, result.summary, at, watermark);
+    // 透明化：摘要是**有损变换**，生成这件事必须留痕（时间线可见、原文可查）。
+    const lastRun = this.store.listRuns(task.taskId).slice(-1)[0];
+    const event: AgentEvent = {
+      eventId: newId("evt"),
+      taskId: task.taskId,
+      runId: lastRun?.runId ?? `run-digest-${Date.now()}`,
+      agentId: task.agentId ?? "",
+      timestamp: at,
+      eventType: "status",
+      payload: {
+        status: "digest",
+        message:
+          `已生成会话摘要（模型 ${result.model}，${result.chars} 字符，源 ${sourceId}）：` +
+          `换会话/新 task 时用它替代原始历史；完整历史见 GET /api/tasks/${sourceId}/events`,
+        sourceTaskId: sourceId,
+        digestModel: result.model,
+        digestChars: result.chars,
+      },
+    };
+    this.store.appendEvent(event);
+    this.publish({ type: "agent_event", event });
+    return { text: result.summary, sourceTaskId: sourceId, at, model: result.model };
+  }
+  /**
    * provider 侧"自动轮转"要的会话体量快照（口径见 `context/size.ts`）。
    *
    * - `tokens` / `limit`：当前会话请求体量与模型窗口（未知就给 undefined，provider 不会猜）；
@@ -686,12 +766,14 @@ export class AgentGateway {
     if (!task) return undefined;
     const context = this.getTaskContext(taskId);
     const forkedTo = this.store.listForkedTaskIds(taskId);
+    const digest = this.store.getTaskDigest(taskId);
     return {
       task,
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
       ...(context ? { context } : {}),
       ...(forkedTo.length ? { forkedTo } : {}),
+      ...(digest ? { contextDigest: { text: digest.digest, at: digest.at, seq: digest.seq } } : {}),
     };
   }
 
@@ -2126,12 +2208,19 @@ export class AgentGateway {
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
       const carried = this.carriedForTask(task);
+      const sessionContext = this.sessionContextFor(task, { text, images: images.length });
+      // 模型摘要**默认关闭**；只有真会用上时才生成（fork 来的历史要压缩 / 轮转在即）。
+      const digestWanted =
+        Boolean(this.config.contextDigest) &&
+        (Boolean(carried) || shouldRotateContext({ ...sessionContext }).rotate);
+      const digest = digestWanted ? await this.contextDigestFor(task) : undefined;
       const bootstrap = buildTaskBootstrap({
         task,
         project,
         events: historyEvents,
         runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
         ...(carried ? { carried } : {}),
+        ...(digest ? { digest } : {}),
       });
 
       // No plan-mode guidance is injected into the conversation: read-only
@@ -2150,7 +2239,7 @@ export class AgentGateway {
         mode,
         bootstrapText: bootstrap.text,
         bootstrap,
-        sessionContext: this.sessionContextFor(task, { text, images: images.length }),
+        sessionContext,
         agentName: task.title,
         onEvent: (event) => {
           if (event.agentId) bindAgentId(event.agentId);

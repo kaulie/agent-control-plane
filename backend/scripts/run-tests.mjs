@@ -30,6 +30,7 @@ const tests = [
   { file: "scripts/test-transparency.mjs", via: "tsx" },
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
+  { file: "scripts/test-digest.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },
   // 时间线的点线几何 / SVG 是纯前端逻辑，放在 web/src，直接用 tsx 跑源码

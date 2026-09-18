@@ -103,7 +103,29 @@ rotate  ⟺  tokens + 本次输入  ≥  min(limit × 88%, limit − 60k)   或 
 | 自动轮转 | `status: context_rotation`（含 tokens/limit/percent/reason）+ `agent_succession`（`reason: "context_rotation"`，带 `contextTokens/contextLimit/contextPercent/rotateReason`）| 时间线「已自动轮转会话」+ 「上下文轮转 · 当时约 88%」|
 | 撞上窗口（没救回来时）| 原始报错 | 页面把它翻成可操作中文：「上下文已超出模型窗口…请点 Fork 新 task」（`web/src/run-errors.ts`）|
 
-## 五、还没做
+## 五、两个「更好但不是必需」的增强（**默认关闭**）
+
+### 1. 模型生成 digest（`CONTEXT_DIGEST=1` 开）
+
+把工作历史**用模型压成交接摘要**，用在两个地方：
+
+- fork 来的 task：摘要**替代**原始 `carried` 行（这才是 compaction —— 原始行会挤掉 7.5KB 简报里更有用的内容）；
+- 上下文轮转在即：给新会话一份长期摘要（原始近况仍来自启动简报）。
+
+实现（`digest.ts` + `gateway.contextDigestFor()`）：
+
+- 只走 OpenAI 兼容的 `/chat/completions`（DeepSeek 就是），**不依赖 SDK**，另可 `CONTEXT_DIGEST_MODEL=…` 指定便宜模型；
+- **永不抛错**：超时/HTTP 错/解析失败 → 返回 `undefined`，调用方回退原始历史（摘要失败绝不能让用户发不出消息）；
+- **水位缓存**：写进 `tasks.context_digest/_at/_seq`，源 task 新增事件 ≤50 条就复用（不然每轮都烧一次模型）；
+- **透明化**：生成时记一条 `status: digest`（含模型/字符数/来源），`GET /api/tasks/:id` 的 `contextDigest` 能读到**原文**，
+  `run_started` 里带 `bootstrapDigestChars/Model`（时间线显示「含模型摘要 N 字符」）。
+
+### 2. agentic 压缩（`CLINE_COMPACTION=agentic` 开，默认 `basic`）
+
+core 的 `strategy: "agentic"` 是 **LLM 摘要式压缩**（比 basic 的截断投影保留更多信息），但需要 summarizer：
+默认**沿用本 provider 的凭据与模型**（`CLINE_COMPACTION_MODEL=…` 可换），缺 `apiKey` 时自动退回 basic。
+
+## 六、还没做
 
 - `strategy: "agentic"`（LLM 摘要式压缩）需要单独的 summarizer provider；
 - 轮转的"摘要式 digest"（目前直接用启动简报，含最近 20 条用户消息 + 10 个 run 结论）；

@@ -112,6 +112,10 @@ export class ClineProvider implements AgentProvider {
   private readonly billing?: BillingService;
   /** SDK 自带的上下文压缩（`config.compaction`）；默认开，见 config.ts 的探针结论。 */
   private readonly compactionEnabled: boolean;
+  /** basic（默认）/ agentic（LLM 摘要式，默认关）。 */
+  private readonly compactionStrategy: "basic" | "agentic";
+  /** agentic 摘要模型（缺省 = 本次会话模型）。 */
+  private readonly compactionModel?: string;
 
   private modelsCache: ModelInfo[] | undefined;
   private client: ClineCore | undefined;
@@ -127,6 +131,8 @@ export class ClineProvider implements AgentProvider {
     this.baseUrl = config.baseUrl?.trim() || undefined;
     this.billing = config.billing;
     this.compactionEnabled = config.compaction !== false;
+    this.compactionStrategy = config.compactionStrategy === "agentic" ? "agentic" : "basic";
+    this.compactionModel = config.compactionModel?.trim() || undefined;
   }
 
   // ---- infrastructure ----
@@ -523,9 +529,20 @@ export class ClineProvider implements AgentProvider {
       // 上下文压缩：opt-in 的能力，不显式打开等于没有（探针见 config.ts）。
       compaction: {
         enabled: this.compactionEnabled,
-        // basic = 内置 token 预算截断投影（不需要 summarizer，可确定性复现）；
-        // agentic 需要额外的 summarizer provider，留给后续。
-        strategy: "basic",
+        strategy: this.compactionStrategy,
+        // agentic（LLM 摘要式）需要 summarizer：默认沿用本 provider 的凭据/模型
+        // （`CLINE_COMPACTION=agentic` 才开；缺 key 时退回 basic，不让配置把会话搞挂）。
+        ...(this.compactionStrategy === "agentic" && this.apiKey
+          ? {
+              summarizer: {
+                providerId: this.providerId,
+                modelId: this.compactionModel ?? modelId,
+                apiKey: this.apiKey,
+                ...(this.baseUrl ? { baseUrl: this.baseUrl } : {}),
+                maxOutputTokens: 1_500,
+              },
+            }
+          : {}),
       },
     };
   }

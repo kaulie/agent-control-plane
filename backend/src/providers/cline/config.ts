@@ -32,6 +32,10 @@ export interface ClineProviderConfig {
    * 打开后 core 会在 90% 时自己压缩（basic = 内置 token 预算截断投影，不需要 summarizer）。
    */
   compaction?: boolean;
+  /** 压缩策略：basic（默认）/ agentic（LLM 摘要式，**默认关**，需要 summarizer）。 */
+  compactionStrategy?: "basic" | "agentic";
+  /** agentic 摘要用的模型（缺省 = 会话模型）。 */
+  compactionModel?: string;
 }
 
 export const DEFAULT_PROVIDER_ID = "deepseek";

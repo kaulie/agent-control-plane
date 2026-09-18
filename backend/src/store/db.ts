@@ -287,6 +287,12 @@ export class Store {
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     }
+    if (!taskCols.some((c) => c.name === "context_digest")) {
+      // 模型生成的会话摘要（默认关闭；开了以后按水位缓存，见 gateway.contextDigestFor）。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest TEXT`);
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest_at TEXT`);
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest_seq INTEGER`);
+    }
     if (!taskCols.some((c) => c.name === "forked_from")) {
       // fork 新 task 时记来源；老库自动补列（透明化：页面能显示"fork 自 #xxx"）。
       this.db.exec(`ALTER TABLE tasks ADD COLUMN forked_from TEXT`);
@@ -1037,6 +1043,37 @@ export class Store {
         row.seededTokens ?? null,
         row.createdAt,
       );
+  }
+
+  /** 这个 task 上模型生成的会话摘要（含水位：`seq` = 生成时的最新事件序号）。 */
+  getTaskDigest(taskId: string): { digest: string; at: string; seq: number | null } | undefined {
+    const row = this.db
+      .prepare(`SELECT context_digest, context_digest_at, context_digest_seq FROM tasks WHERE task_id = ?`)
+      .get(taskId) as
+      | { context_digest: string | null; context_digest_at: string | null; context_digest_seq: number | null }
+      | undefined;
+    if (!row?.context_digest) return undefined;
+    return {
+      digest: row.context_digest,
+      at: row.context_digest_at ?? "",
+      seq: row.context_digest_seq ?? null,
+    };
+  }
+
+  setTaskDigest(taskId: string, digest: string, at: string, seq: number | null): void {
+    this.db
+      .prepare(
+        `UPDATE tasks SET context_digest = ?, context_digest_at = ?, context_digest_seq = ? WHERE task_id = ?`,
+      )
+      .run(digest, at, seq, taskId);
+  }
+
+  /** 这个 task 的最新事件序号（digest 水位用；没有事件返回 0）。 */
+  latestEventSeq(taskId: string): number {
+    const row = this.db
+      .prepare(`SELECT MAX(seq) AS seq FROM events WHERE task_id = ?`)
+      .get(taskId) as { seq: number | null } | undefined;
+    return Number(row?.seq ?? 0) || 0;
   }
 
   /** `agent_successions` 的列名（诊断 / 测试用：确认老库补上了 seeded_tokens）。 */

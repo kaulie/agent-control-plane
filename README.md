@@ -177,6 +177,10 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
   原因与当时占比）→ 90% 由 SDK 的 **compaction** 自己压（已启用，`CLINE_COMPACTION=0` 可关；
   探针发现它是 opt-in 的：不显式打开等于没有 `prepareTurn`，长会话只能撞硬上限）。
   开关：`CONTEXT_AUTO_ROTATE=0` 关掉自动轮转（只留提示与可操作报错）；
+- **两个增强默认关**（要开就设环境变量）：
+  `CONTEXT_DIGEST=1` = 让模型把历史压成交接摘要（fork / 轮转时替代原始历史；失败自动回退原始历史，
+  生成时留 `status: digest` 事件、原文可读）；`CLINE_COMPACTION=agentic` = 用 LLM 摘要式压缩
+  （默认 `basic` 截断投影；summarizer 沿用本 provider 凭据，缺 key 退回 basic）。
 - **上下文将满（≥85%）= fork 出口**：UsageBar 下方常驻一条提示 + 「Fork 新 task」按钮；
   你**下一次发言**时会先弹窗（Fork / 仍然发送 / 不再提醒 / 取消）—— 不做"替用户决定"的默认动作。
   Fork 继承工作区与模型并带上最近历史，原 task 时间线留痕，也会显示 `已 fork → #xxx`；

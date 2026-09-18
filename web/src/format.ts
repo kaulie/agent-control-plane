@@ -10,6 +10,32 @@ export function formatCost(cents: number | undefined | null): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+/** 币种符号（不认识就退回 3 位代码 + 空格，例如 `CHF 12.30`）。 */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CNY: "¥",
+  RMB: "¥",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+};
+
+/**
+ * 本币金额（元 / 不带「分」）→ 文本。计费表算出来的钱是本币，别再当美元显示。
+ * 极小金额（< 0.01）保留 4 位，免得单轮成本显示成 `¥0.00`。
+ */
+export function formatMoney(
+  amount: number | undefined | null,
+  currency?: string | null,
+): string {
+  const code = (currency || "USD").trim().toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[code];
+  const prefix = symbol ?? `${code} `;
+  if (amount == null || Number.isNaN(amount)) return `${prefix}0.00`;
+  const digits = amount !== 0 && Math.abs(amount) < 0.01 ? 4 : 2;
+  return `${prefix}${amount.toFixed(digits)}`;
+}
+
 export function formatDuration(ms: number | undefined | null): string {
   if (ms == null || Number.isNaN(ms) || ms < 0) return "0秒";
   const totalSec = Math.round(ms / 1000);

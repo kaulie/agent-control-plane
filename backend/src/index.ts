@@ -10,6 +10,7 @@ import {
   assertMcpServerPresent,
 } from "./git-via-proxy.js";
 import { Store } from "./store/db.js";
+import { createBillingService } from "./billing/index.js";
 import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
@@ -109,8 +110,11 @@ if (mcpWanted && !assertMcpServerPresent(config.gitViaProxyServerPath)) {
 
 const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
+// 计费模块：provider 与 gateway 共用同一个实例（数据源 = billing_rules 表）。
+const billing = createBillingService(store);
 const providers = createProviderRegistry({
   defaultName: config.provider,
+  billing,
   apiKey: config.apiKey,
   model: config.model,
   gitViaProxyUrl: config.gitViaProxyUrl,
@@ -178,6 +182,7 @@ const gateway = new AgentGateway(
     maxConcurrentRuns: config.maxConcurrentRuns,
     agentRssLimitMb: config.agentRssLimitMb,
     deployGracefulWaitMs: config.deployGracefulWaitMs,
+    billing,
   },
   publish,
 );

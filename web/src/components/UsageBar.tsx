@@ -1,8 +1,10 @@
 import type { Task, TaskStats } from "../types";
-import { formatCost, formatDuration, formatTokens } from "../format";
+import { formatDuration, formatTokens } from "../format";
+import { usageCostView } from "../usage-cost";
 
 export default function UsageBar({ task, stats }: { task: Task; stats: TaskStats }) {
-  const cost = stats.costCents ?? stats.estimatedCents;
+  // 两个口径分开显示：计费表（本币）vs provider/SDK 上报值。
+  const cost = usageCostView(stats);
   return (
     <div className="usage-bar">
       <div className="usage-item">
@@ -39,7 +41,15 @@ export default function UsageBar({ task, stats }: { task: Task; stats: TaskStats
       </div>
       <div className="usage-item">
         <span className="usage-label">Cost</span>
-        <span className="usage-value">{formatCost(cost)}</span>
+        <span className="usage-value" title={cost.billedTitle}>
+          {cost.billed}
+        </span>
+      </div>
+      <div className="usage-item">
+        <span className="usage-label">SDK cost</span>
+        <span className="usage-value" title={cost.sdkTitle}>
+          {cost.sdk}
+        </span>
       </div>
       <div className="usage-item">
         <span className="usage-label">Duration</span>

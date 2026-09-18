@@ -76,6 +76,7 @@ interface TaskRow {
   pr_url: string | null;
   task_type: string | null;
   last_user_input_at: string | null;
+  forked_from: string | null;
 }
 
 interface RunRow {
@@ -285,6 +286,10 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "forked_from")) {
+      // fork 新 task 时记来源；老库自动补列（透明化：页面能显示"fork 自 #xxx"）。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN forked_from TEXT`);
     }
     if (!taskCols.some((c) => c.name === "last_user_input_at")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
@@ -904,6 +909,8 @@ export class Store {
     createdBy?: string;
     /** Optional pre-allocated id (used when workspace path embeds taskId). */
     taskId?: string;
+    /** 这个 task 是从哪个 task fork 来的（上下文将满时的分流）。 */
+    forkedFrom?: string;
   }): Task {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
@@ -921,11 +928,12 @@ export class Store {
       createdBy: input.createdBy,
       taskType: "general",
       lastUserInputAt: now,
+      ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, last_user_input_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, last_user_input_at, forked_from)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -940,8 +948,17 @@ export class Store {
         null,
         task.taskType,
         task.lastUserInputAt,
+        task.forkedFrom ?? null,
       );
     return task;
+  }
+
+  /** 从这个 task fork 出去的 task id（列表页显示"已 fork → #xxx"）。 */
+  listForkedTaskIds(taskId: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT task_id FROM tasks WHERE forked_from = ? ORDER BY created_at ASC`)
+      .all(taskId) as unknown as Array<{ task_id: string }>;
+    return rows.map((r) => r.task_id);
   }
 
   getTask(taskId: string): Task | undefined {
@@ -1090,6 +1107,7 @@ export class Store {
       ...(prUrl ? { prUrl } : {}),
       taskType: (r.task_type as Task["taskType"]) || "general",
       lastUserInputAt: r.last_user_input_at || r.created_at,
+      ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),
     };
   }
 

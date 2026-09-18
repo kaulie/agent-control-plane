@@ -105,6 +105,8 @@ export interface Task {
   taskType: TaskType;
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt: string;
+  /** 从哪个 task fork 而来（上下文将满时分流；页面显示"fork 自 #xxx"）。 */
+  forkedFrom?: string;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";

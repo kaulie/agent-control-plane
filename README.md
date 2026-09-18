@@ -173,6 +173,9 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
   ⚠️ 别和 `stats.inputTokens`（跨调用累加，38.9M）混；provider 推不出体量时（cursor）
   显示「未知 + 原因」，**不猜数**；
 - 模型窗口从 provider 的模型目录读（`@cline/llms`），查不到就是"窗口未知"；
+- **上下文将满（≥85%）= fork 出口**：UsageBar 下方常驻一条提示 + 「Fork 新 task」按钮；
+  你**下一次发言**时会先弹窗（Fork / 仍然发送 / 不再提醒 / 取消）—— 不做"替用户决定"的默认动作。
+  Fork 继承工作区与模型并带上最近历史，原 task 时间线留痕，也会显示 `已 fork → #xxx`；
 - **透明化契约**：任何改变 agent 上下文/记忆的动作都必须写一条用户可见的时间线消息 +
   一条可审计的事件 —— 已落地三类：网关重启/会话失效 → `session_reset`；切模式 seed →
   `agent_succession.seededTokens`（以前只有条数 `1630`，看不出搬走了 ≈1M 上下文）；新会话简报 →
@@ -200,6 +203,8 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/agents` | **Agent 看板**：`?scope=current\|all\|task`（默认 `current` = 每个 task 当前那个 agent；`all` = 连同被 succession 替换掉的 agent；`task` = 每个 task 一行、数字跨它历史上**所有** agent 相加）、`?projectId=` 过滤。每行带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长；另带 `taskTotals`（`completedRounds` / `runCount` / `totalTokens` / `durationMs` / `modelCalls` / `toolCalls` / `agentCount`）—— per-agent 的数字在 succession 之后会明显小于 task 的真实工作量，所以两个口径都给。`scope=task` 的行另有 `taskScope: true` / `currentAgentId`（`agentId` 为空，因为整行代表 task） |
 | GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」）+ `agentRunCount` / `agentCompletedRounds`（这个 agent 自己的累计，同样不限窗口：页面上的「run 轮次」只算窗口内） |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
+| POST | `/api/tasks/:id/fork` | **上下文将满时的分流**：fork 成新 task（继承 project / provider / model / **同一个 workspace** / prUrl，记 `forkedFrom`），原 task 时间线留一条 `status: forked` 提示；历史不复制事件，改为在新 task 的启动简报里带一份（`carried`，带 `[fork:*]` 前缀） |
+| GET | `/api/tasks/:id` | Task detail（含 `stats` / `context` / `forkedTo`） |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |
 | GET | `/api/billing/rules` | **计费规则表**（`billing_rules`）：每个模型的峰谷价目 + 错峰窗口（UTC 分钟） |

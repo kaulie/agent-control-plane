@@ -531,6 +531,19 @@ export async function registerRoutes(
     });
   });
 
+  /**
+   * 上下文将满时的分流：把 task fork 成新 task（继承工作区/模型/PR，带最近历史）。
+   * 透明化：原 task 时间线会留一条 `status: forked` 提示。
+   */
+  app.post<{ Params: { taskId: string }; Body: { title?: string } }>(
+    "/api/tasks/:taskId/fork",
+    async (req, reply) => {
+      const result = gateway.forkTask(req.params.taskId, { title: req.body?.title });
+      if (!result) return reply.code(404).send({ error: "task not found" });
+      return result;
+    },
+  );
+
   app.patch<{
     Params: { taskId: string };
     Body: { prUrl?: string | null };

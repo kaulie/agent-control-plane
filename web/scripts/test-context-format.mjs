@@ -9,7 +9,7 @@
  *   npx tsx web/scripts/test-context-format.mjs
  */
 import assert from "node:assert/strict";
-import { contextView } from "../src/context-format.ts";
+import { contextView, forkAckKey, needsForkPrompt } from "../src/context-format.ts";
 
 const run = (over = {}) => ({
   runId: "run-0001",
@@ -100,4 +100,21 @@ assert.match(bars.bars[1].title, /换了会话/);
 assert.match(bars.bars[0].title, /900\.0K → 960\.0K/);
 assert.equal(bars.runsLeftLabel, undefined, "没有窗口/增速就不给剩余轮数");
 
-console.log("PASS: context 徽标（百分比 / 阈值着色 / 未知不猜数 / 每轮增量柱）");
+// 6) fork 动线：≥85% 才提示；"不再提醒"按 task 记
+const at70 = contextView(ctx({ tokens: 700_000, percent: 70, limit: 1_000_000 }));
+const at85 = contextView(ctx({ tokens: 850_000, percent: 85, limit: 1_000_000 }));
+assert.equal(at70.needsFork, false, "70% 只是黄灯");
+assert.equal(at85.needsFork, true, "85% 起要给 fork 出口");
+assert.match(at85.forkHint, /建议 Fork 新 task/);
+assert.match(at85.forkHint, /无法再发言/);
+assert.equal(needsForkPrompt(at85, false), true);
+assert.equal(needsForkPrompt(at85, true), false, "用户选了「不再提醒」就别再弹");
+assert.equal(needsForkPrompt(at70, false), false);
+assert.equal(
+  needsForkPrompt(contextView({ provider: "cursor", available: false, runs: [], thresholds: { warn: 70, alert: 85 } }), false),
+  false,
+  "推不出体量就不该弹"
+);
+assert.equal(forkAckKey("task-abc"), "web-cursor:fork-ack:task-abc");
+
+console.log("PASS: context 徽标（百分比 / 阈值着色 / 未知不猜数 / 每轮增量柱 / fork 提示）");

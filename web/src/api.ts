@@ -295,6 +295,13 @@ export const api = {
       j<{ successions: import("./types").AgentSuccession[] }>(r),
     ),
 
+  /** 上下文将满时把 task 分流成新 task（继承工作区/模型/PR，带最近历史）。 */
+  forkTask: (id: string, title?: string) =>
+    write<{ task: import("./types").Task; source: import("./types").Task }>(
+      `/tasks/${id}/fork`,
+      { method: "POST", body: { ...(title?.trim() ? { title } : {}) } },
+    ),
+
   stopTask: (id: string) =>
     write<{ runId: string; stopped: boolean }>(`/tasks/${id}/stop`, {
       method: "POST",

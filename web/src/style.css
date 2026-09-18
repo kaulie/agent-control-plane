@@ -335,6 +335,68 @@ body {
   flex-direction: column;
 }
 
+.context-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--red);
+  font-size: 12px;
+}
+
+.context-alert-hint {
+  color: var(--text-dim);
+}
+
+.context-fork-btn {
+  border: 1px solid rgba(248, 113, 113, 0.6);
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.context-fork-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.context-forked {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.fork-facts {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.modal-primary {
+  border: 1px solid rgba(76, 141, 255, 0.6);
+  background: rgba(76, 141, 255, 0.25);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modal-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .context-percent {
   font-size: 15px;
   font-weight: 700;
@@ -1200,6 +1262,29 @@ body {
   color: var(--text);
   font-size: 13px;
   text-align: center;
+}
+
+.fork-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--amber) 18%, var(--bg-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border));
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}
+
+.fork-banner-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
 }
 
 .interrupt-banner {

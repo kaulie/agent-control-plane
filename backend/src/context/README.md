@@ -68,8 +68,8 @@ seed 体量落库）、`web/scripts/test-context-format.mjs`、`web/scripts/test
 
 ## 四、还没做（后续 PR）
 
-- **PR-2**：≥85% 时弹窗建议 fork 新 task（用户路径）；
-- **PR-3**：fork 流程（继承 workspace / provider / model / prUrl + `forkedFrom/To` + digest）；
+- ~~PR-2/PR-3：≥85% 提示 + fork 新 task~~（已做：`POST /api/tasks/:id/fork` + `ContextMeter` 常驻提示
+  + 发言时弹窗 + `forkedFrom/forkedTo` + `carried` 简报；详见根 README 的 `## Context`）；
 - **PR-4**：自动轮转（70% 主触发 / 溢出重试兜底 / 85% 只告警）+ 轮转的透明化四件套 + 可关闭开关；
 - 压缩探针：`@cline/core` 自带 compaction（触发比 0.9 / 目标 0.7 / 保留 20k），但实测没生效 ——
   需要确认是不是我们没把 `contextWindow/maxInputTokens` 喂给 runtime。

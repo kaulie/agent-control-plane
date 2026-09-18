@@ -232,6 +232,8 @@ export interface Task {
   taskType: "general";
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt?: string;
+  /** 从哪个 task fork 而来（上下文将满时分流）。 */
+  forkedFrom?: string;
 }
 
 /**
@@ -490,6 +492,8 @@ export interface TaskDetail {
   stats: TaskStats;
   /** 上下文体量（缺失 = 还没有可用的 usage 采样）。 */
   context?: TaskContextSize;
+  /** 从这个 task fork 出去的新 task id。 */
+  forkedTo?: string[];
 }
 
 export interface AuthStatus {

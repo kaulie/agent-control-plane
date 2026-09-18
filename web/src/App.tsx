@@ -5,6 +5,8 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from 
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import ContextMeter from "./components/ContextMeter";
+import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
+import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
 import AgentTimelinePage from "./components/AgentTimelinePage";
@@ -18,6 +20,23 @@ import Timeline from "./components/Timeline";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
+
+/** 「本任务不再提醒」标记（localStorage；读写都容错）。 */
+function forkAckFor(taskId: string): boolean {
+  try {
+    return localStorage.getItem(forkAckKey(taskId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function muteForkPrompt(taskId: string): void {
+  try {
+    localStorage.setItem(forkAckKey(taskId), "1");
+  } catch {
+    /* ignore */
+  }
+}
 import PlanQuestionsWizard from "./components/PlanQuestionsWizard";
 import {
   findPendingPlanQuestionBatch,
@@ -97,6 +116,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [backendDown, setBackendDown] = useState(false);
   const [interruptNotice, setInterruptNotice] = useState<string | null>(null);
+  /** fork 之后的提示（"已 fork 到 …"）。 */
+  const [forkNotice, setForkNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("chat");
   /** Agent 时间线要打开哪个 agent（从看板点过来时带上）。 */
   const [timelineAgentId, setTimelineAgentId] = useState<string | null>(null);
@@ -607,20 +628,22 @@ export default function App() {
     [applyRunState, refreshDetail],
   );
 
-  const sendMessage = useCallback(
-    async (payload: {
-      text: string;
-      images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
-      mode: "agent" | "plan";
-    }): Promise<boolean> => {
-      if (!selectedId) return false;
-      if (!payload.text.trim() && payload.images.length === 0) return false;
+  /** 真正把消息发到某个 task（不含上下文告警拦截）。 */
+  const sendTo = useCallback(
+    async (
+      taskId: string,
+      payload: {
+        text: string;
+        images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
+        mode: "agent" | "plan";
+      },
+    ): Promise<boolean> => {
       setError(null);
       setInterruptNotice(null);
       setStopping(false);
       try {
         const res = await api.sendMessage(
-          selectedId,
+          taskId,
           payload.text,
           payload.images.map(({ data, mimeType, width, height }) => ({
             data,
@@ -639,16 +662,88 @@ export default function App() {
         } else {
           setRunning(true);
         }
-        await refreshAfterSend(selectedId);
+        await refreshAfterSend(taskId);
         void refreshTasks();
         return true;
       } catch (e) {
         setError(errorText(e));
-        void refreshDetail(selectedId);
+        void refreshDetail(taskId);
         return false;
       }
     },
-    [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
+    [refreshAfterSend, refreshDetail, refreshTasks],
+  );
+
+  // ---- 上下文将满：fork 动线（弹窗 + 常驻按钮共用） ----
+
+  const forkChoiceRef = useRef<((choice: ForkChoice) => void) | null>(null);
+  const [forkDialog, setForkDialog] = useState<{ view: ContextView; taskId: string } | null>(
+    null,
+  );
+  const [forking, setForking] = useState(false);
+
+  /** 弹窗等待用户选择（Promise 化，发送逻辑才能"先问再发"）。 */
+  const askFork = useCallback((view: ContextView, taskId: string): Promise<ForkChoice> => {
+    return new Promise<ForkChoice>((resolve) => {
+      forkChoiceRef.current = (choice) => {
+        forkChoiceRef.current = null;
+        setForkDialog(null);
+        resolve(choice);
+      };
+      setForkDialog({ view, taskId });
+    });
+  }, []);
+
+  /** fork 成新 task：继承工作区/模型/PR + 带最近历史（后端做），成功后切过去。 */
+  const handleFork = useCallback(
+    async (taskId: string): Promise<string | null> => {
+      setForking(true);
+      setError(null);
+      setForkNotice(null);
+      try {
+        const res = await api.forkTask(taskId);
+        setForkNotice(
+          `已 fork 到「${res.task.title}」#${res.task.taskId.slice(-6)}：沿用同一个工作区并带上最近历史；` +
+            `完整历史仍在 #${taskId.slice(-6)} 的时间线里。`,
+        );
+        await refreshTasks(selectedProjectId);
+        await selectTask(res.task.taskId);
+        return res.task.taskId;
+      } catch (e) {
+        setError(errorText(e));
+        return null;
+      } finally {
+        setForking(false);
+      }
+    },
+    [refreshTasks, selectTask, selectedProjectId],
+  );
+
+  const sendMessage = useCallback(
+    async (payload: {
+      text: string;
+      images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
+      mode: "agent" | "plan";
+    }): Promise<boolean> => {
+      if (!selectedId) return false;
+      if (!payload.text.trim() && payload.images.length === 0) return false;
+
+      // 上下文已过告警线 → 先问再发（这个 task 没被"不再提醒"时）。
+      const view = contextView(detail?.context);
+      if (needsForkPrompt(view, forkAckFor(selectedId))) {
+        const choice = await askFork(view, selectedId);
+        if (choice === "cancel") return false;
+        if (choice === "send-muted") muteForkPrompt(selectedId);
+        if (choice === "fork") {
+          const newTaskId = await handleFork(selectedId);
+          if (!newTaskId) return false;
+          // 用户那句话跟着去新 task —— 这才是"接着干"。
+          return sendTo(newTaskId, payload);
+        }
+      }
+      return sendTo(selectedId, payload);
+    },
+    [selectedId, detail?.context, askFork, handleFork, sendTo],
   );
 
   const stopAgent = useCallback(async () => {
@@ -819,6 +914,14 @@ export default function App() {
           {interruptNotice}
         </div>
       )}
+      {forkNotice && (
+        <div className="fork-banner" role="status">
+          <span>{forkNotice}</span>
+          <button type="button" className="fork-banner-close" onClick={() => setForkNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
       <div className="body">
         {view === "global-settings" ? (
           <GlobalSettingsPage onBack={() => setView("chat")} />
@@ -876,7 +979,12 @@ export default function App() {
           {selectedId && detail ? (
             <>
               <UsageBar task={detail.task} stats={detail.stats} />
-              <ContextMeter context={detail.context} />
+              <ContextMeter
+                context={detail.context}
+                forkedTo={detail.forkedTo}
+                forking={forking}
+                onFork={() => void handleFork(detail.task.taskId)}
+              />
               <Timeline
                 events={events}
                 running={running}
@@ -1056,6 +1164,14 @@ export default function App() {
           </div>
         </div>
       ) : null}
+      {forkDialog && (
+        <ForkDialog
+          view={forkDialog.view}
+          taskId={forkDialog.taskId}
+          forking={forking}
+          onChoose={(choice) => forkChoiceRef.current?.(choice)}
+        />
+      )}
       {selectedProjectId && (
         <CreateTaskDialog
           open={showCreateTask}

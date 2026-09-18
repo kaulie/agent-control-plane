@@ -35,7 +35,7 @@ import {
   type PromptImage,
   type StoredImageRef,
 } from "../attachments.js";
-import { buildTaskBootstrap } from "../task-context.js";
+import { buildTaskBootstrap, type TaskBootstrapCarried } from "../task-context.js";
 import {
   buildSelfCheckPrompt,
   findTasksNeedingSelfCheck,
@@ -128,6 +128,8 @@ export interface TaskDetail {
   stats: TaskStats;
   /** 上下文体量（口径见 context/size.ts）；缺失 = 还没有可用的 usage 采样。 */
   context?: TaskContextSize;
+  /** 从这个 task fork 出去的新 task id（上下文将满时分流）。 */
+  forkedTo?: string[];
 }
 
 interface PendingRun {
@@ -580,15 +582,78 @@ export class AgentGateway {
     return this.store.listTasks(filter);
   }
 
+  /**
+   * 把一个上下文将满的 task 分流成新 task（用户点「Fork 新 task」）。
+   *
+   * 继承：project / provider / model / **workspace（必须是同一个目录，否则丢本地 clone 与未提交改动）**
+   * / prUrl（避免重复开 PR）；新 task 记 `forkedFrom`；**原 task 时间线留一条可见提示**（可审计）。
+   * 历史不复制事件，而是在新 task 的简报里带一份最近历史（`carried`）。
+   */
+  forkTask(taskId: string, opts?: { title?: string }): { task: Task; source: Task } | undefined {
+    const source = this.store.getTask(taskId);
+    if (!source) return undefined;
+    const title = opts?.title?.trim() || `${source.title} (fork)`;
+    const created = this.store.createTask({
+      title,
+      workspace: source.workspace,
+      provider: source.provider,
+      ...(source.model ? { model: source.model } : {}),
+      projectId: source.projectId,
+      ...(source.createdBy ? { createdBy: source.createdBy } : {}),
+      forkedFrom: source.taskId,
+    });
+    if (source.prUrl) this.store.updateTaskPrUrl(created.taskId, source.prUrl);
+    const task = this.store.getTask(created.taskId) ?? created;
+
+    const lastRun = this.store.listRuns(source.taskId).slice(-1)[0];
+    const note: AgentEvent = {
+      eventId: newId("evt"),
+      taskId: source.taskId,
+      runId: lastRun?.runId ?? `run-fork-${Date.now()}`,
+      agentId: source.agentId ?? "",
+      timestamp: new Date().toISOString(),
+      eventType: "status",
+      payload: {
+        status: "forked",
+        message:
+          `已 fork 到 ${task.taskId}「${task.title}」：新 task 沿用同一个工作区（${source.workspace}）` +
+          `并带上本 task 的最近历史；本 task 请勿继续发言（上下文已接近模型窗口）。`,
+        forkedTo: task.taskId,
+        workspace: source.workspace,
+      },
+    };
+    this.store.appendEvent(note);
+    this.publish({ type: "agent_event", event: note });
+    this.publish({ type: "task_created", task });
+    return { task, source };
+  }
+
+  /**
+   * fork 来的 task 要带进简报的来源历史（只进 prompt、**不落本 task 事件流**；
+   * 用户要的是"新 task 页面干净，但模型能接着干"）。不是 fork 来的就返回 undefined。
+   */
+  carriedForTask(task: Task): TaskBootstrapCarried | undefined {
+    const source = task.forkedFrom ? this.store.getTask(task.forkedFrom) : undefined;
+    if (!source) return undefined;
+    return {
+      taskId: source.taskId,
+      title: source.title,
+      events: this.store.listEvents(source.taskId, { limit: 200 }).events,
+      runs: this.store.listRuns(source.taskId),
+    };
+  }
+
   getTaskDetail(taskId: string): TaskDetail | undefined {
     const task = this.store.getTask(taskId);
     if (!task) return undefined;
     const context = this.getTaskContext(taskId);
+    const forkedTo = this.store.listForkedTaskIds(taskId);
     return {
       task,
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
       ...(context ? { context } : {}),
+      ...(forkedTo.length ? { forkedTo } : {}),
     };
   }
 
@@ -2022,11 +2087,13 @@ export class AgentGateway {
       });
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
+      const carried = this.carriedForTask(task);
       const bootstrap = buildTaskBootstrap({
         task,
         project,
         events: historyEvents,
         runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
+        ...(carried ? { carried } : {}),
       });
 
       // No plan-mode guidance is injected into the conversation: read-only

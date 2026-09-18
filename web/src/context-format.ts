@@ -22,6 +22,22 @@ export interface ContextRunBar {
   title: string;
 }
 
+/** 「本任务不再提醒」的 localStorage key 前缀。 */
+export const FORK_ACK_PREFIX = "web-cursor:fork-ack:";
+
+/** 某个 task 的"不再提醒"键。 */
+export function forkAckKey(taskId: string): string {
+  return `${FORK_ACK_PREFIX}${taskId}`;
+}
+
+/**
+ * 该不该弹「上下文将满」对话框：**超过告警线**且这个 task 还没被"不再提醒"。
+ * 常驻提示条不受这里控制（那条一直可见，属于透明化契约）。
+ */
+export function needsForkPrompt(view: ContextView, acked: boolean): boolean {
+  return view.needsFork && !acked;
+}
+
 export interface ContextView {
   hasData: boolean;
   percentLabel: string;
@@ -30,6 +46,9 @@ export interface ContextView {
   title: string;
   /** 还能跑几轮到告警线（可选）。 */
   runsLeftLabel?: string;
+  /** 已过告警线（≥ thresholds.alert）→ 建议 fork 新 task。 */
+  needsFork: boolean;
+  forkHint?: string;
   bars: ContextRunBar[];
 }
 
@@ -54,6 +73,7 @@ export function contextView(context?: TaskContextSize): ContextView {
       tokensLabel: "无数据",
       tone: "unknown",
       title: "还没有可用的上下文采样（这个 task 还没有带 usage 的 run）",
+      needsFork: false,
       bars: [],
     };
   }
@@ -65,6 +85,7 @@ export function contextView(context?: TaskContextSize): ContextView {
       tokensLabel: "—",
       tone: "unknown",
       title: `${context.note ?? "该 provider 不提供单次请求体量"}（不做估算，避免给错数）`,
+      needsFork: false,
       bars: [],
     };
   }
@@ -96,11 +117,21 @@ export function contextView(context?: TaskContextSize): ContextView {
   parts.push(`预警线 ${context.thresholds.warn}% / 建议 fork ${context.thresholds.alert}%`);
   if (context.avgGrowthTokens) parts.push(`平均每轮 +${formatTokens(context.avgGrowthTokens)}`);
 
+  const alert = context.thresholds.alert;
+  const needsFork = context.percent != null && context.percent >= alert;
   return {
     hasData: true,
     percentLabel: percentText(context.percent),
     tokensLabel,
     tone: toneFor(context.percent),
+    needsFork,
+    ...(needsFork
+      ? {
+          forkHint:
+            `上下文已占 ${percentText(context.percent)}（≥ ${alert}%）：建议 Fork 新 task 继续 —— ` +
+            `会话长到模型窗口后会**无法再发言**（且不可逆）。`,
+        }
+      : {}),
     title: parts.join(" · "),
     ...(context.estimatedRunsLeft != null
       ? { runsLeftLabel: `约 ${context.estimatedRunsLeft} 轮后到 ${context.thresholds.alert}%` }

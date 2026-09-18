@@ -14,6 +14,18 @@ export interface TaskBootstrapInput {
   project?: Project;
   events: AgentEvent[];
   runs: RunRecord[];
+  /**
+   * 从别的 task fork 过来的历史（上下文将满时的分流）：只进 prompt，**不落本 task 的事件流**
+   * —— 用户要求"历史不一定要显示在新 task 里"，但模型要能接着干。
+   */
+  carried?: TaskBootstrapCarried;
+}
+
+export interface TaskBootstrapCarried {
+  taskId: string;
+  title: string;
+  events: AgentEvent[];
+  runs: RunRecord[];
 }
 
 /** 简报的产出 + 它的"体检数据"（要写进 `run_started` 事件，便于事后核对）。 */
@@ -24,6 +36,8 @@ export interface TaskBootstrap {
   truncated: boolean;
   dropped: { userMessages: number; runResults: number };
   kept: { userMessages: number; runResults: number };
+  /** 带了别的 task 的历史时，说明来源与带了多少（透明化）。 */
+  carried?: { taskId: string; userMessages: number; runResults: number };
 }
 
 function clip(text: string, max: number): string {
@@ -32,13 +46,13 @@ function clip(text: string, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
-function collectUserMessages(events: AgentEvent[]): string[] {
+function collectUserMessages(events: AgentEvent[], tag = ""): string[] {
   const lines: string[] = [];
   for (const ev of events) {
     if (ev.eventType !== "user_message") continue;
     const text = typeof ev.payload.text === "string" ? ev.payload.text : "";
     if (!text.trim()) continue;
-    lines.push(`- [${ev.timestamp}] ${clip(text, MAX_LINE_CHARS)}`);
+    lines.push(`- ${tag}[${ev.timestamp}] ${clip(text, MAX_LINE_CHARS)}`);
   }
   return lines.slice(-MAX_USER_MESSAGES);
 }
@@ -60,7 +74,7 @@ function collectAttachments(events: AgentEvent[]): string[] {
   return lines.slice(-MAX_ATTACHMENT_LINES).map((line) => clip(line, 120));
 }
 
-function collectRunResults(runs: RunRecord[]): string[] {
+function collectRunResults(runs: RunRecord[], tag = ""): string[] {
   const done = runs.filter(
     (r) => r.status === "finished" || r.status === "error" || r.status === "cancelled",
   );
@@ -70,7 +84,7 @@ function collectRunResults(runs: RunRecord[]): string[] {
       r.status === "error"
         ? r.error || "(no error text)"
         : r.result || "(no result text)";
-    return `- [${r.createdAt}] ${r.status} ${r.runId.slice(-8)}: ${clip(body, MAX_LINE_CHARS)}`;
+    return `- ${tag}[${r.createdAt}] ${r.status} ${r.runId.slice(-8)}: ${clip(body, MAX_LINE_CHARS)}`;
   });
 }
 
@@ -148,9 +162,18 @@ function fitLines(lines: string[], budget: number): { kept: string[]; used: numb
  */
 export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   const { task, project, events, runs } = input;
-  const userMsgs = collectUserMessages(events);
+  const carried = input.carried;
+  const carriedTag = carried ? `[fork:${carried.taskId.slice(-6)}] ` : "";
+  // fork 过来的历史排在本 task 自己的历史**前面**（保尾部时优先留本 task 的最新内容）。
+  const userMsgs = [
+    ...(carried ? collectUserMessages(carried.events, carriedTag) : []),
+    ...collectUserMessages(events),
+  ];
   const attachments = collectAttachments(events);
-  const runResults = collectRunResults(runs);
+  const runResults = [
+    ...(carried ? collectRunResults(carried.runs, carriedTag) : []),
+    ...collectRunResults(runs),
+  ];
 
   const skeleton = skeletonSections(task, project).filter((s) => s !== "").join("\n");
   const attachmentText = attachments.length
@@ -167,6 +190,12 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   const fittedUsers = fitLines(userMsgs, Math.max(0, budget - fittedRuns.used));
 
   const parts: string[] = [skeleton, "## History summary"];
+  if (carried) {
+    parts.push(
+      `- 本任务由 ${carried.taskId}「${carried.title}」fork 而来（上下文已接近模型窗口，换个会话继续）。` +
+        `带 [fork:${carried.taskId.slice(-6)}] 前缀的行来自它；完整历史见 \`GET /api/tasks/${carried.taskId}/events\``,
+    );
+  }
   if (!fittedUsers.kept.length && !fittedRuns.kept.length && !attachmentText) {
     parts.push("- (no prior history on this task yet)");
   } else {
@@ -185,12 +214,20 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   }
   const droppedUserMessages = userMsgs.length - fittedUsers.kept.length;
   const droppedRunResults = runResults.length - fittedRuns.kept.length;
+  const carriedKept = carried
+    ? {
+        taskId: carried.taskId,
+        userMessages: fittedUsers.kept.filter((l) => l.includes(carriedTag)).length,
+        runResults: fittedRuns.kept.filter((l) => l.includes(carriedTag)).length,
+      }
+    : undefined;
   return {
     text,
     chars: text.length,
     truncated: truncated || droppedUserMessages > 0 || droppedRunResults > 0,
     dropped: { userMessages: droppedUserMessages, runResults: droppedRunResults },
     kept: { userMessages: fittedUsers.kept.length, runResults: fittedRuns.kept.length },
+    ...(carriedKept ? { carried: carriedKept } : {}),
   };
 }
 
@@ -224,5 +261,12 @@ export function bootstrapEventPayload(
     bootstrapDroppedUserMessages: bootstrap.dropped.userMessages,
     bootstrapDroppedRunResults: bootstrap.dropped.runResults,
     bootstrapText: bootstrap.text,
+    ...(bootstrap.carried
+      ? {
+          bootstrapCarriedTaskId: bootstrap.carried.taskId,
+          bootstrapCarriedUserMessages: bootstrap.carried.userMessages,
+          bootstrapCarriedRunResults: bootstrap.carried.runResults,
+        }
+      : {}),
   };
 }

@@ -1,3 +1,5 @@
+import type { BillingCostInfo } from "./billing/types.js";
+
 export type TaskStatus = "active" | "completed" | "error";
 
 export type TaskType = "general";
@@ -179,10 +181,20 @@ export interface TokenUsage {
 
 export interface CostInfo {
   rawCostCents?: number;
+  /**
+   * provider / SDK 自己上报的成本（USD cents）。只作对比展示：
+   * DeepSeek 上报值用的是它自己的价卡，和 `billing_rules` 不一致（见 billing/README.md）。
+   */
   chargedCents?: number;
+  /**
+   * 计费模块按 `billing_rules` 表算出的成本（USD cents，由规则本币折算）。
+   * 没有规则命中时退化为旧的本地估算。
+   */
   estimatedCents?: number;
   currency: string;
   model?: string;
+  /** 计费表明细（命中规则时才有）：规则 id / 时段 / 本币金额 / 分项。 */
+  billing?: BillingCostInfo;
 }
 
 export interface AgentEvent {
@@ -204,7 +216,20 @@ export interface TaskStats {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  /**
+   * **主口径**：按计费表 `billing_rules` 算出的成本合计（USD cents）。
+   * 没有规则命中的历史 run 退化为旧估算 / 上报值。
+   */
   costCents?: number;
+  /** 主口径的**本币**金额合计（币种见 `billedCurrency`）——账单就是这个数。 */
+  billedAmount?: number;
+  billedCurrency?: string;
+  /**
+   * 对比口径：provider / SDK 自己上报的成本合计（USD cents）。
+   * 与 `costCents` 分开显示，不要相加。
+   */
+  chargedCents?: number;
+  /** 旧口径（历史本地估算合计），只为兼容老数据保留。 */
   estimatedCents?: number;
   currency: string;
   durationMs: number;

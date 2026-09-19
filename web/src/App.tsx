@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
-import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskType } from "./types";
+import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskGoal, TaskType } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import ContextMeter from "./components/ContextMeter";
@@ -242,18 +242,21 @@ export default function App() {
     }
   }, [applyRunState]);
 
-  /** 保存「任务意图」（类型 / 标题 / 描述）——面板就地编辑用。 */
+  /** 保存「任务意图」（类型 / 目标 / 标题 / 描述）——面板就地编辑用。 */
   const saveTaskIntent = useCallback(
     async (input: {
       taskId: string;
       title?: string;
       description: string;
       taskType: TaskType;
+      /** `null` = 清掉目标（回到「开完 PR 即停」）。 */
+      goal: TaskGoal | null;
     }): Promise<void> => {
       const updated = await api.updateTaskIntent(input.taskId, {
         ...(input.title ? { title: input.title } : {}),
         description: input.description,
         taskType: input.taskType,
+        goal: input.goal,
       });
       setDetail((prev) =>
         prev && prev.task.taskId === updated.taskId
@@ -586,6 +589,7 @@ export default function App() {
       title?: string;
       description: string;
       taskType?: TaskType;
+      goal?: TaskGoal;
       provider?: string;
       model?: string;
     }) => {
@@ -594,6 +598,7 @@ export default function App() {
         title: input.title,
         description: input.description,
         taskType: input.taskType,
+        goal: input.goal,
         projectId: selectedProjectId,
         provider: input.provider,
         model: input.model,

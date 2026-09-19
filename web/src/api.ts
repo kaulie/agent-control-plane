@@ -14,6 +14,7 @@ import type {
   ProviderInfo,
   Task,
   TaskDetail,
+  TaskGoal,
   TaskType,
   TokenUsage,
   TokenUsageSeries,
@@ -180,16 +181,26 @@ export const api = {
     description: string;
     /** 任务类型标签（纯分类）；缺省 `general`。 */
     taskType?: TaskType;
+    /** 交付目标（会改变 agent 的动作）；缺省后端用 `merge`。 */
+    goal?: TaskGoal;
     workspace?: string;
     projectId?: string;
     provider?: string;
     model?: string;
   }) => write<Task>("/tasks", { method: "POST", body }),
 
-  /** 修改任务意图（标题 / 类型 / 描述）。描述不允许改成空。 */
+  /**
+   * 修改任务意图（标题 / 类型 / 目标 / 描述）。描述不允许改成空；
+   * 目标传 `null` = 清掉目标（回到「开完 PR 即停」）。
+   */
   updateTaskIntent: (
     taskId: string,
-    body: { title?: string; description?: string; taskType?: TaskType },
+    body: {
+      title?: string;
+      description?: string;
+      taskType?: TaskType;
+      goal?: TaskGoal | null;
+    },
   ) => write<Task>(`/tasks/${taskId}`, { method: "PATCH", body }),
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),

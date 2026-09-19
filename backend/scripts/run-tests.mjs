@@ -49,6 +49,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 任务目标（创建对话框的「目标」选项 + 面板徽标）前端口径
+  {
+    file: "../web/scripts/test-task-goal-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
   {
     file: "../web/scripts/test-timeline-render.mjs",
     via: "tsx",

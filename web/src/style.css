@@ -319,6 +319,45 @@ body {
   display: inline;
 }
 
+/* ---- 任务目标徽标（目标**会改变 agent 的动作**：合入主分支 / 再部署上线）---- */
+
+.task-goal-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: 1px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  background: color-mix(in srgb, #2fbf9b 18%, var(--bg-3));
+  color: #60d9b6;
+}
+
+.task-goal-badge.goal-deploy {
+  background: color-mix(in srgb, #a06bff 20%, var(--bg-3));
+  color: #c2a1ff;
+}
+
+/* 老任务没设目标：灰一点，别抢眼。 */
+.task-goal-badge.goal-none {
+  background: var(--bg-3);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.intent-type-chip.goal-merge.selected {
+  border-color: #2fbf9b;
+  background: color-mix(in srgb, #2fbf9b 24%, var(--bg-3));
+}
+
+.intent-type-chip.goal-deploy.selected {
+  border-color: #a06bff;
+  background: color-mix(in srgb, #a06bff 26%, var(--bg-3));
+}
+
 /* ---- 任务意图面板：pin 在聊天框上方 ---- */
 
 .task-intent {

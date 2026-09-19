@@ -18,6 +18,11 @@ import {
   MAX_TASK_DESCRIPTION_CHARS,
   TASK_TYPE_IDS,
 } from "../task-types.js";
+import {
+  DEFAULT_TASK_GOAL,
+  isTaskGoal,
+  TASK_GOAL_IDS,
+} from "../task-goals.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -450,6 +455,11 @@ export async function registerRoutes(
       description?: string;
       /** 任务类型标签（纯分类，不改变行为）；缺省 `general`。 */
       taskType?: string;
+      /**
+       * 交付目标（**会改变 agent 的动作**）：`merge` 合入主分支 /
+       * `deploy` 合入主分支并部署上线。缺省 `merge`。
+       */
+      goal?: string;
     };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
@@ -471,6 +481,12 @@ export async function registerRoutes(
         error: `unknown taskType "${body.taskType}". Supported: ${TASK_TYPE_IDS.join(", ")}`,
       });
     }
+    // 目标会改变 agent 的动作，所以非法值必须拦在门外（不能静默回落）。
+    if (body.goal !== undefined && !isTaskGoal(body.goal)) {
+      return reply.code(400).send({
+        error: `unknown goal "${body.goal}". Supported: ${TASK_GOAL_IDS.join(", ")}`,
+      });
+    }
     try {
       const task = gateway.createTask({
         title: body.title,
@@ -480,6 +496,8 @@ export async function registerRoutes(
         projectId: body.projectId,
         description,
         taskType: body.taskType,
+        // 没传 = 用默认目标（合入主分支），保证新建的任务都有明确交付目标。
+        goal: body.goal ?? DEFAULT_TASK_GOAL,
       });
       // 系统自动投递需求 → agent 立刻开跑（并发满/部署 drain 时自动进入队列）。
       // 投递失败不回滚任务：任务已创建，用户可以自己在面板上重试/直接发消息。
@@ -500,11 +518,11 @@ export async function registerRoutes(
   });
 
   /**
-   * 任务意图（标题 / 类型 / 描述）+ PR 链接的统一 PATCH。
+   * 任务意图（标题 / 类型 / 目标 / 描述）+ PR 链接的统一 PATCH。
    *
    * `prUrl` 是 agent 开完 PR 后回写的（见 BRANCHING.md 的 `prUrl` 约定）；
-   * `title/description/taskType` 是「理解随对话变清晰」时用户在面板上就地修正的。
-   * 描述是任务的必填属性 → 不允许改成空。
+   * `title/description/taskType/goal` 是「理解随对话变清晰」时用户在面板上就地修正的。
+   * 描述是任务的必填属性 → 不允许改成空；目标传 `null` = 清掉目标（回到老行为）。
    */
   app.patch<{
     Params: { taskId: string };
@@ -513,6 +531,8 @@ export async function registerRoutes(
       title?: string;
       description?: string;
       taskType?: string;
+      /** `merge` / `deploy`；`null` = 清掉目标（回到「开完 PR 即停」）。 */
+      goal?: string | null;
     };
   }>("/api/tasks/:taskId", async (req, reply) => {
     const body = req.body ?? {};
@@ -520,9 +540,10 @@ export async function registerRoutes(
     const hasTitle = body.title !== undefined;
     const hasDescription = body.description !== undefined;
     const hasType = body.taskType !== undefined;
-    if (!hasPrUrl && !hasTitle && !hasDescription && !hasType) {
+    const hasGoal = body.goal !== undefined;
+    if (!hasPrUrl && !hasTitle && !hasDescription && !hasType && !hasGoal) {
       return reply.code(400).send({
-        error: "prUrl, title, description or taskType is required",
+        error: "prUrl, title, description, taskType or goal is required",
       });
     }
     const description = body.description?.trim() ?? "";
@@ -544,16 +565,23 @@ export async function registerRoutes(
         error: `unknown taskType "${body.taskType}". Supported: ${TASK_TYPE_IDS.join(", ")}`,
       });
     }
+    // 目标：`null` = 清掉（回到老行为）；字符串必须是已知目标，否则 400。
+    if (hasGoal && body.goal !== null && !isTaskGoal(body.goal)) {
+      return reply.code(400).send({
+        error: `unknown goal "${body.goal}". Supported: ${TASK_GOAL_IDS.join(", ")} (or null to clear)`,
+      });
+    }
     if (hasPrUrl) {
       const withPr = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl ?? null);
       if (!withPr) return reply.code(404).send({ error: "task not found" });
       // 只回写 prUrl（agent 的常规动作）：无需再走意图更新。
-      if (!hasTitle && !hasDescription && !hasType) return withPr;
+      if (!hasTitle && !hasDescription && !hasType && !hasGoal) return withPr;
     }
     const task = gateway.updateTaskIntent(req.params.taskId, {
       ...(hasTitle ? { title: body.title! } : {}),
       ...(hasDescription ? { description } : {}),
       ...(hasType ? { taskType: body.taskType! } : {}),
+      ...(hasGoal ? { goal: body.goal ?? null } : {}),
     });
     if (!task) return reply.code(404).send({ error: "task not found" });
     return task;

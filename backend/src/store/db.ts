@@ -15,6 +15,7 @@ import type {
   RunRecord,
   RunStatus,
   Task,
+  TaskGoal,
   TaskStats,
   TaskStatus,
   TaskType,
@@ -29,6 +30,7 @@ import {
 } from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
 import { normalizeTaskType } from "../task-types.js";
+import { normalizeTaskGoal } from "../task-goals.js";
 import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
 import { resolveBilledCost, type CostSource } from "../billing/cost.js";
 import type { BillingRule } from "../billing/types.js";
@@ -77,6 +79,7 @@ interface TaskRow {
   agent_id: string | null;
   pr_url: string | null;
   task_type: string | null;
+  goal: string | null;
   description: string | null;
   last_user_input_at: string | null;
   forked_from: string | null;
@@ -289,6 +292,11 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "goal")) {
+      // 任务目标（合入主分支 / 合入并部署）。历史任务为 NULL = 没有目标，
+      // 保持老行为（开完 PR 停），所以这里**不做** backfill。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN goal TEXT`);
     }
     if (!taskCols.some((c) => c.name === "description")) {
       // 任务描述（需求原文）：新建时必填；老任务为 NULL（面板会提示补上）。
@@ -924,6 +932,8 @@ export class Store {
     description?: string;
     /** 任务类型标签；缺省 `general`（= 老行为）。 */
     taskType?: TaskType;
+    /** 交付目标；缺省 = 没有目标（老行为：开完 PR 停）。 */
+    goal?: TaskGoal;
     /** Optional pre-allocated id (used when workspace path embeds taskId). */
     taskId?: string;
     /** 这个 task 是从哪个 task fork 来的（上下文将满时的分流）。 */
@@ -934,6 +944,7 @@ export class Store {
     }
     const now = new Date().toISOString();
     const description = input.description?.trim();
+    const goal = normalizeTaskGoal(input.goal);
     const task: Task = {
       taskId: input.taskId?.trim() || newId("task"),
       projectId: input.projectId,
@@ -945,14 +956,15 @@ export class Store {
       model: input.model,
       createdBy: input.createdBy,
       taskType: normalizeTaskType(input.taskType),
+      ...(goal ? { goal } : {}),
       ...(description ? { description } : {}),
       lastUserInputAt: now,
       ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, description, last_user_input_at, forked_from)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, goal, description, last_user_input_at, forked_from)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -966,6 +978,7 @@ export class Store {
         task.createdBy ?? null,
         null,
         task.taskType,
+        task.goal ?? null,
         task.description ?? null,
         task.lastUserInputAt,
         task.forkedFrom ?? null,
@@ -1143,14 +1156,19 @@ export class Store {
   }
 
   /**
-   * 修改任务意图（标题 / 类型 / 描述）——「理解随对话变清晰」时用户就地修正。
+   * 修改任务意图（标题 / 类型 / 目标 / 描述）——「理解随对话变清晰」时用户就地修正。
    *
    * 语义：`undefined` = 不动这个字段；`description` 传空串/NULL 视为**清空**，
    * 由调用方（gateway）负责「描述不允许清空」这条业务规则，store 只做落库。
    */
   updateTaskIntent(
     taskId: string,
-    patch: { title?: string; taskType?: TaskType; description?: string | null },
+    patch: {
+      title?: string;
+      taskType?: TaskType;
+      goal?: TaskGoal | null;
+      description?: string | null;
+    },
   ): Task | undefined {
     const current = this.getTask(taskId);
     if (!current) return undefined;
@@ -1163,6 +1181,11 @@ export class Store {
     if (patch.taskType !== undefined) {
       sets.push("task_type = ?");
       values.push(normalizeTaskType(patch.taskType));
+    }
+    if (patch.goal !== undefined) {
+      sets.push("goal = ?");
+      // 传 null / 未知值 = 清掉目标（回到老行为），不是回落到默认目标。
+      values.push(normalizeTaskGoal(patch.goal) ?? null);
     }
     if (patch.description !== undefined) {
       sets.push("description = ?");
@@ -1178,6 +1201,7 @@ export class Store {
   private toTask(r: TaskRow): Task {
     const prUrl = r.pr_url?.trim();
     const description = r.description?.trim();
+    const goal = normalizeTaskGoal(r.goal);
     return {
       taskId: r.task_id,
       projectId: r.project_id || DEFAULT_PROJECT_ID,
@@ -1192,6 +1216,8 @@ export class Store {
       ...(prUrl ? { prUrl } : {}),
       // 历史脏值（未知类型）一律读成 general，避免 UI 出现空标签。
       taskType: normalizeTaskType(r.task_type),
+      // 目标没有默认值：历史 / 脏值一律读成「没设目标」（老行为）。
+      ...(goal ? { goal } : {}),
       ...(description ? { description } : {}),
       lastUserInputAt: r.last_user_input_at || r.created_at,
       ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),

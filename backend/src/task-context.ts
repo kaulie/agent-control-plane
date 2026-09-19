@@ -1,5 +1,6 @@
 import type { AgentEvent, Project, RunRecord, Task } from "./types.js";
 import { normalizeTaskType, taskTypeLabel } from "./task-types.js";
+import { taskGoalInfo } from "./task-goals.js";
 
 const MAX_BOOTSTRAP_CHARS = 7500;
 const MAX_USER_MESSAGES = 20;
@@ -118,6 +119,18 @@ function skeletonSections(task: Task, project: Project | undefined): string[] {
     taskType === "general"
       ? []
       : [`- type: ${taskTypeLabel(taskType)} (${taskType})`];
+  // 目标**会改变 agent 的动作**（做到哪一步算交付完成）；老任务没有目标 →
+  // 不写这一行，也不改下面那句「不要 merge / 不要部署」，老行为逐字节不变。
+  const goalInfo = taskGoalInfo(task.goal);
+  const goalLines = goalInfo
+    ? [`- goal: ${goalInfo.label} (${goalInfo.id})`]
+    : [];
+  const mergePolicy =
+    goalInfo?.id === "merge"
+      ? "**Delivery goal = 合入主分支 (merge):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and stop there (do not deploy). If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first."
+      : goalInfo?.id === "deploy"
+        ? "**Delivery goal = 合入主分支并部署上线 (merge + deploy):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and then deploy it. If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first."
+        : "Do not merge the PR and do not deploy unless the user asks.";
   // 描述是"需求原文"：会话被重建（重启 / 轮转 / fork）后必须还在，
   // 所以进骨架而不是只依赖事件流（事件会被简报的"保尾部"裁掉）。
   const descriptionLines = description
@@ -136,6 +149,7 @@ function skeletonSections(task: Task, project: Project | undefined): string[] {
     `- taskId: ${task.taskId}`,
     `- title: ${task.title}`,
     ...typeLines,
+    ...goalLines,
     `- project: ${project?.name ?? task.projectId} (${task.projectId})`,
     `- workspace: ${task.workspace}`,
     `- createdAt: ${task.createdAt}`,
@@ -148,7 +162,7 @@ function skeletonSections(task: Task, project: Project | undefined): string[] {
           `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,
           "- Follow [`BRANCHING.md`](BRANCHING.md): clone **this** GitHub URL into the task workspace, branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
           "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides the project git URL.",
-          "- Do not merge the PR and do not deploy unless the user asks. The app itself has **no** deploy entry point: after the PR is merged into `main`, every deploy goes through the **deployment platform** (`~/runtime/agent-control-plane-deployment`, `:4220` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.",
+          `- ${mergePolicy} The app itself has **no** deploy entry point: after the PR is merged into \`main\`, every deploy goes through the **deployment platform** (\`~/runtime/agent-control-plane-deployment\`, \`:4220\` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.`,
         ].join("\n")
       : [
           "- Clone the repo you need into that directory (or a subfolder), then develop only there.",

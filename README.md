@@ -257,6 +257,7 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
 | GET | `/api/projects` | list Projects（含各自的 `department`，供左栏「所属部门」显示） |
+| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `gitRepoUrl` / `department`）；不存在 → 404 |
 | POST | `/api/projects` | create Project `{ name, department, gitRepoUrl? }`；`department` **必填**（缺失 → 400），与项目同一次写入 |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |

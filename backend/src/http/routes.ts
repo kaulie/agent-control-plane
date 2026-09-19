@@ -323,6 +323,22 @@ export async function registerRoutes(
 
   app.get("/api/projects", async () => gateway.listProjects());
 
+  /**
+   * 单个项目（按 projectId 查）。列表里的每个元素和这里返回的是同一个形状：
+   * 名字 / `gitRepoUrl` / `department`（organization 的部门 id + 名字快照）。
+   * 不知道 / 已删掉的项目 → 404（调用方不用自己去列表里翻）。
+   */
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId",
+    async (req, reply) => {
+      const project = gateway.getProject(req.params.projectId);
+      if (!project) {
+        return reply.code(404).send({ error: "project not found" });
+      }
+      return project;
+    },
+  );
+
   app.post<{
     Body: {
       name?: string;

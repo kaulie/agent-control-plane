@@ -54,6 +54,10 @@ import {
 } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
 import {
+  normalizeTaskType,
+  taskTypeLabel,
+} from "../task-types.js";
+import {
   mergeSettings,
   resolveRuntimeDefaults,
   resolveWorkspaceRoot,
@@ -136,6 +140,11 @@ export interface SendMessageInput {
   planAnswerBatch?: PlanAnswerBatch;
   /** Startup self-check for a run that never received terminal feedback. */
   selfCheck?: { resumesRunId: string; cause?: UnclosedCause };
+  /**
+   * `system` = 这条「用户消息」不是人打的，而是系统投递的（新建任务自动下发需求）。
+   * 会写进事件 `payload.deliveredBy`，时间线据此渲染成独立的系统卡片。
+   */
+  origin?: "system";
 }
 
 export interface TaskDetail {
@@ -369,6 +378,27 @@ export function agentSuccessionFromEvent(
 /** digest 新鲜度：源 task 新增事件超过这个数就重算。 */
 const DIGEST_REFRESH_EVENTS = 50;
 
+/**
+ * 新建任务后系统投递的「需求」消息文本（纯函数，导出给测试用）。
+ *
+ * 为什么把标题 / 类型 / 描述都带上：这条消息就是**对话里的第一条需求**，
+ * 用户能在时间线上看到系统投递了什么，agent 也不用去猜（描述同时进了会话简报骨架，
+ * 保证轮转 / 重启后需求不丢）。
+ */
+export function formatTaskIntentMessage(task: Task): string {
+  const type = normalizeTaskType(task.taskType);
+  const lines = [
+    `【需求投递】${task.title}`,
+    `类型：${taskTypeLabel(type)}（${type}）`,
+    "",
+    "描述：",
+    task.description?.trim() ?? "(无描述)",
+    "",
+    "以上为本任务需求，请开始工作。信息不足时先提出你的疑问。",
+  ];
+  return lines.join("\n");
+}
+
 export class AgentGateway {
   /** In-flight run keyed by taskId (at most one active run per task). */
   private activeRuns = new Map<string, ActiveRunSlot>();
@@ -551,6 +581,10 @@ export class AgentGateway {
     model?: string;
     projectId?: string;
     createdBy?: string;
+    /** 任务描述（需求原文）。HTTP 新建入口会强制必填（见 routes）。 */
+    description?: string;
+    /** 任务类型标签（纯分类，不改变行为）；缺省 `general`。 */
+    taskType?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
@@ -596,9 +630,95 @@ export class AgentGateway {
       model,
       projectId,
       createdBy: input.createdBy,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      // 非法类型不报错（老客户端/内部调用），静默回落到 general。
+      taskType: normalizeTaskType(input.taskType),
     });
     this.publish({ type: "task_created", task });
     return task;
+  }
+
+  /**
+   * 修改任务意图（标题 / 类型 / 描述）——创建后在面板上就地修正。
+   *
+   * 规则（和 UI 约定一致）：
+   * - 描述**不允许清空**（它是任务的必填属性），传空串 → undefined（由 routes 报 400）；
+   * - 类型非法 → undefined（routes 报 400）；
+   * - 落库后 publish `task_updated`（前端已有 handler，会自动刷新面板/列表）；
+   * - 时间线留一条 `status: task_intent_updated`（可审计）。
+   *   ⚠️ 已创建的会话**看不到**这次修改，新描述在**下一次**会话简报（重启/轮转/fork）生效，
+   *   所以事件文本里明确写出这一点，不假装正在跑的 agent 立刻知道了。
+   */
+  updateTaskIntent(
+    taskId: string,
+    patch: { title?: string; taskType?: string; description?: string },
+  ): Task | undefined {
+    const before = this.store.getTask(taskId);
+    if (!before) return undefined;
+    const title = patch.title?.trim();
+    const description = patch.description?.trim();
+    const nextType =
+      patch.taskType !== undefined ? normalizeTaskType(patch.taskType) : undefined;
+
+    const updated = this.store.updateTaskIntent(taskId, {
+      ...(title ? { title } : {}),
+      ...(nextType ? { taskType: nextType } : {}),
+      // 描述必填：只接受非空修改，空 = 不改（routes 会在真正传了空值时拦 400）。
+      ...(description ? { description } : {}),
+    });
+    if (!updated) return undefined;
+
+    const changes: string[] = [];
+    if (title && title !== before.title) changes.push(`标题 →「${title}」`);
+    if (nextType && nextType !== before.taskType) {
+      changes.push(`类型 → ${taskTypeLabel(nextType)}`);
+    }
+    if (description && description !== before.description) changes.push("描述已更新");
+    if (changes.length) {
+      const lastRun = this.store.listRuns(taskId).slice(-1)[0];
+      const note: AgentEvent = {
+        eventId: newId("evt"),
+        taskId,
+        runId: lastRun?.runId ?? `run-intent-${Date.now()}`,
+        agentId: updated.agentId ?? "",
+        timestamp: new Date().toISOString(),
+        eventType: "status",
+        payload: {
+          status: "task_intent_updated",
+          message:
+            `任务意图已更新（${changes.join("，")}）。当前会话已开始，看不到新描述；` +
+            `下一次会话（重启 / 轮转 / fork）会带上最新描述。`,
+          taskType: updated.taskType,
+          ...(updated.description ? { description: updated.description } : {}),
+        },
+      };
+      this.store.appendEvent(note);
+      this.publish({ type: "agent_event", event: note });
+    }
+    this.publish({ type: "task_updated", task: updated });
+    return updated;
+  }
+
+  /**
+   * 「系统自动投递需求」：新建任务后把描述当成一条系统消息下发，agent 随即开跑。
+   *
+   * 复用 `sendMessage`，因此并发上限 / 排队 / 部署 drain（admissionPaused）全部自动正确
+   * —— 槽位满时这次投递会进入 queued 队列，而不是失败。
+   *
+   * 没有描述的任务（内部创建的 watchdog 任务、老任务）直接跳过：投递的语义就是「把描述给 agent」。
+   */
+  async dispatchTaskIntent(taskId: string): Promise<{ runId: string; queued: boolean } | undefined> {
+    const task = this.store.getTask(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task.description) return undefined;
+    const result = await this.sendMessage(taskId, {
+      text: formatTaskIntentMessage(task),
+      mode: "agent",
+      origin: "system",
+    });
+    return { runId: result.runId, queued: result.queued };
   }
 
   listTasks(filter?: { projectId?: string }): Task[] {
@@ -609,8 +729,11 @@ export class AgentGateway {
    * 把一个上下文将满的 task 分流成新 task（用户点「Fork 新 task」）。
    *
    * 继承：project / provider / model / **workspace（必须是同一个目录，否则丢本地 clone 与未提交改动）**
-   * / prUrl（避免重复开 PR）；新 task 记 `forkedFrom`；**原 task 时间线留一条可见提示**（可审计）。
+   * / prUrl（避免重复开 PR）/ **taskType + description（同一个意图换个会话继续）**；
+   * 新 task 记 `forkedFrom`；**原 task 时间线留一条可见提示**（可审计）。
    * 历史不复制事件，而是在新 task 的简报里带一份最近历史（`carried`）。
+   *
+   * fork **不**自动投递需求（源会话已经投过、agent 已开过工）；新 task 的描述只进简报。
    */
   forkTask(taskId: string, opts?: { title?: string }): { task: Task; source: Task } | undefined {
     const source = this.store.getTask(taskId);
@@ -623,6 +746,9 @@ export class AgentGateway {
       ...(source.model ? { model: source.model } : {}),
       projectId: source.projectId,
       ...(source.createdBy ? { createdBy: source.createdBy } : {}),
+      taskType: source.taskType,
+      // 描述是必填属性：老任务没有描述时用标题兜底，保证 fork 出来的 task 也有需求。
+      description: source.description ?? source.title,
       forkedFrom: source.taskId,
     });
     if (source.prUrl) this.store.updateTaskPrUrl(created.taskId, source.prUrl);
@@ -1955,6 +2081,8 @@ export class AgentGateway {
       planAnswerBatch?: PlanAnswerBatch;
       selfCheck?: { resumesRunId: string; cause?: UnclosedCause };
       queued?: boolean;
+      /** 系统投递（新任务自动下发需求）——渲染成系统卡片，不显示成 "You"。 */
+      origin?: "system";
     },
     persistAndPublish: (event: AgentEvent) => void,
   ): void {
@@ -1962,6 +2090,10 @@ export class AgentGateway {
       text: input.text,
       mode: input.mode,
     };
+    if (input.origin === "system") {
+      payload.deliveredBy = "system";
+      payload.kind = "task_intent";
+    }
     if (input.queued) payload.queued = true;
     if (input.planAnswerBatch) payload.planAnswerBatch = input.planAnswerBatch;
     if (input.selfCheck) {
@@ -2060,6 +2192,7 @@ export class AgentGateway {
           planAnswerBatch: input.planAnswerBatch,
           selfCheck: input.selfCheck,
           queued: isQueued,
+          origin: input.origin,
         },
         persistAndPublish,
       );

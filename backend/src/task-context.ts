@@ -1,10 +1,16 @@
 import type { AgentEvent, Project, RunRecord, Task } from "./types.js";
+import { normalizeTaskType, taskTypeLabel } from "./task-types.js";
 
 const MAX_BOOTSTRAP_CHARS = 7500;
 const MAX_USER_MESSAGES = 20;
 const MAX_RUN_RESULTS = 10;
 const MAX_LINE_CHARS = 400;
 const MAX_ATTACHMENT_LINES = 20;
+/**
+ * 简报骨架里任务描述的上限：描述是"需求原文"，但骨架先占预算，
+ * 太长会把 History 挤没（旧的 bug 就是把最近历史裁掉了）。超出截断并注明。
+ */
+const MAX_DESCRIPTION_CHARS = 2000;
 
 /** 历史段预算的分配（骨架先占，剩下来的按这个比例分给两段）。 */
 const RUN_RESULTS_SHARE = 0.4;
@@ -104,15 +110,36 @@ function collectRunResults(runs: RunRecord[], tag = ""): string[] {
 
 /** 固定骨架（任务身份 / 隔离规则 / 代理 / 角色）—— 不参与裁剪。 */
 function skeletonSections(task: Task, project: Project | undefined): string[] {
+  const taskType = normalizeTaskType(task.taskType);
+  const description = task.description?.trim() ?? "";
+  // 类型是纯标签：只在**非 general** 时写一行（历史任务全是 general，
+  // 保持它们的简报逐字节不变）。
+  const typeLines =
+    taskType === "general"
+      ? []
+      : [`- type: ${taskTypeLabel(taskType)} (${taskType})`];
+  // 描述是"需求原文"：会话被重建（重启 / 轮转 / fork）后必须还在，
+  // 所以进骨架而不是只依赖事件流（事件会被简报的"保尾部"裁掉）。
+  const descriptionLines = description
+    ? [
+        "",
+        "## 任务描述",
+        description.length > MAX_DESCRIPTION_CHARS
+          ? `${description.slice(0, MAX_DESCRIPTION_CHARS)}…（已截断，完整见 \`GET /api/tasks/${task.taskId}\`）`
+          : description,
+      ]
+    : [];
   return [
     "[Web Cursor task bootstrap — injected once on agent create; not a user message]",
     "",
     "## Task identity",
     `- taskId: ${task.taskId}`,
     `- title: ${task.title}`,
+    ...typeLines,
     `- project: ${project?.name ?? task.projectId} (${task.projectId})`,
     `- workspace: ${task.workspace}`,
     `- createdAt: ${task.createdAt}`,
+    ...descriptionLines,
     "",
     "## Workspace isolation",
     `- workspace: ${task.workspace}`,

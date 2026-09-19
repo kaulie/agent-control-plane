@@ -29,6 +29,7 @@ const tests = [
   { file: "scripts/test-context-size.mjs", via: "tsx" },
   { file: "scripts/test-transparency.mjs", via: "tsx" },
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
+  { file: "scripts/test-task-intent.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
   { file: "scripts/test-digest.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
@@ -41,6 +42,12 @@ const tests = [
   { file: "../web/scripts/test-usage-cost.mjs", via: "tsx" },
   { file: "../web/scripts/test-context-format.mjs", via: "tsx" },
   { file: "../web/scripts/test-timeline-events.mjs", via: "tsx" },
+  // 任务意图（类型标签 + 系统投递卡片）前端口径
+  {
+    file: "../web/scripts/test-task-intent-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
   {
     file: "../web/scripts/test-timeline-render.mjs",
     via: "tsx",

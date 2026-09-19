@@ -13,6 +13,11 @@ import {
   type IncomingImage,
 } from "../attachments.js";
 import { registerUiVersionGuard } from "./ui-version.js";
+import {
+  isTaskType,
+  MAX_TASK_DESCRIPTION_CHARS,
+  TASK_TYPE_IDS,
+} from "../task-types.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -441,9 +446,31 @@ export async function registerRoutes(
       provider?: string;
       model?: string;
       projectId?: string;
+      /** 任务描述（需求原文）——**必填**：它就是 agent 要干的事。 */
+      description?: string;
+      /** 任务类型标签（纯分类，不改变行为）；缺省 `general`。 */
+      taskType?: string;
     };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
+    // 描述必填（和产品约定的"优化流程"）：没有描述就没法把需求投递给 agent，
+    // 也就回到了"只有标题、全靠对话猜"的老问题。
+    const description = body.description?.trim() ?? "";
+    if (!description) {
+      return reply
+        .code(400)
+        .send({ error: "description is required (任务描述必填)" });
+    }
+    if (description.length > MAX_TASK_DESCRIPTION_CHARS) {
+      return reply.code(400).send({
+        error: `description too long (max ${MAX_TASK_DESCRIPTION_CHARS} chars)`,
+      });
+    }
+    if (body.taskType !== undefined && !isTaskType(body.taskType)) {
+      return reply.code(400).send({
+        error: `unknown taskType "${body.taskType}". Supported: ${TASK_TYPE_IDS.join(", ")}`,
+      });
+    }
     try {
       const task = gateway.createTask({
         title: body.title,
@@ -451,13 +478,85 @@ export async function registerRoutes(
         provider: body.provider,
         model: body.model,
         projectId: body.projectId,
+        description,
+        taskType: body.taskType,
       });
+      // 系统自动投递需求 → agent 立刻开跑（并发满/部署 drain 时自动进入队列）。
+      // 投递失败不回滚任务：任务已创建，用户可以自己在面板上重试/直接发消息。
+      try {
+        await gateway.dispatchTaskIntent(task.taskId);
+      } catch (err) {
+        req.log?.warn?.(
+          { err, taskId: task.taskId },
+          "task intent dispatch failed",
+        );
+      }
       reply.code(201);
       return task;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
     }
+  });
+
+  /**
+   * 任务意图（标题 / 类型 / 描述）+ PR 链接的统一 PATCH。
+   *
+   * `prUrl` 是 agent 开完 PR 后回写的（见 BRANCHING.md 的 `prUrl` 约定）；
+   * `title/description/taskType` 是「理解随对话变清晰」时用户在面板上就地修正的。
+   * 描述是任务的必填属性 → 不允许改成空。
+   */
+  app.patch<{
+    Params: { taskId: string };
+    Body: {
+      prUrl?: string | null;
+      title?: string;
+      description?: string;
+      taskType?: string;
+    };
+  }>("/api/tasks/:taskId", async (req, reply) => {
+    const body = req.body ?? {};
+    const hasPrUrl = body.prUrl !== undefined;
+    const hasTitle = body.title !== undefined;
+    const hasDescription = body.description !== undefined;
+    const hasType = body.taskType !== undefined;
+    if (!hasPrUrl && !hasTitle && !hasDescription && !hasType) {
+      return reply.code(400).send({
+        error: "prUrl, title, description or taskType is required",
+      });
+    }
+    const description = body.description?.trim() ?? "";
+    if (hasDescription && !description) {
+      return reply
+        .code(400)
+        .send({ error: "description cannot be empty (任务描述必填)" });
+    }
+    if (description.length > MAX_TASK_DESCRIPTION_CHARS) {
+      return reply.code(400).send({
+        error: `description too long (max ${MAX_TASK_DESCRIPTION_CHARS} chars)`,
+      });
+    }
+    if (hasTitle && !body.title?.trim()) {
+      return reply.code(400).send({ error: "title cannot be empty" });
+    }
+    if (hasType && !isTaskType(body.taskType)) {
+      return reply.code(400).send({
+        error: `unknown taskType "${body.taskType}". Supported: ${TASK_TYPE_IDS.join(", ")}`,
+      });
+    }
+    if (hasPrUrl) {
+      const withPr = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl ?? null);
+      if (!withPr) return reply.code(404).send({ error: "task not found" });
+      // 只回写 prUrl（agent 的常规动作）：无需再走意图更新。
+      if (!hasTitle && !hasDescription && !hasType) return withPr;
+    }
+    const task = gateway.updateTaskIntent(req.params.taskId, {
+      ...(hasTitle ? { title: body.title! } : {}),
+      ...(hasDescription ? { description } : {}),
+      ...(hasType ? { taskType: body.taskType! } : {}),
+    });
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    return task;
   });
 
   app.get<{ Params: { taskId: string } }>(
@@ -543,20 +642,6 @@ export async function registerRoutes(
       return result;
     },
   );
-
-  app.patch<{
-    Params: { taskId: string };
-    Body: { prUrl?: string | null };
-  }>("/api/tasks/:taskId", async (req, reply) => {
-    if (req.body?.prUrl === undefined) {
-      return reply.code(400).send({ error: "prUrl is required" });
-    }
-    const task = gateway.updateTaskPrUrl(req.params.taskId, req.body.prUrl);
-    if (!task) {
-      return reply.code(404).send({ error: "task not found" });
-    }
-    return task;
-  });
 
   app.post<{
     Params: { taskId: string };

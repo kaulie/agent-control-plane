@@ -510,6 +510,8 @@ export interface TaskContextSize {
 
 export interface TaskDetail {
   task: Task;
+  /** 任务所属项目（名字 / `gitRepoUrl` / 所属部门 `department`，见 Project）。 */
+  project?: Project;
   runs: RunRecord[];
   stats: TaskStats;
   /** 上下文体量（缺失 = 还没有可用的 usage 采样）。 */

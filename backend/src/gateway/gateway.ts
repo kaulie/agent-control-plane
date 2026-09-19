@@ -155,6 +155,15 @@ export interface SendMessageInput {
 
 export interface TaskDetail {
   task: Task;
+  /**
+   * 任务所属项目（名字 / `gitRepoUrl` / 所属部门快照 `department`）。
+   *
+   * 「部门」就是组织（organization）口径：`department.departmentId` 是
+   * organization 服务里的部门 id，`departmentName` 是选中时的名字快照
+   * （服务不可达也能渲染）；实时目录见 `GET /api/org/departments`。
+   * 任务的 project 已被删掉时缺省（老数据）。
+   */
+  project?: Project;
   runs: RunRecord[];
   stats: TaskStats;
   /** 上下文体量（口径见 context/size.ts）；缺失 = 还没有可用的 usage 采样。 */
@@ -932,11 +941,14 @@ export class AgentGateway {
   getTaskDetail(taskId: string): TaskDetail | undefined {
     const task = this.store.getTask(taskId);
     if (!task) return undefined;
+    const project = this.store.getProject(task.projectId);
     const context = this.getTaskContext(taskId);
     const forkedTo = this.store.listForkedTaskIds(taskId);
     const digest = this.store.getTaskDigest(taskId);
     return {
       task,
+      // 一次调用就拿到 project（含部门/仓库地址）：详情接口是「按 task_id 查一切」的入口。
+      ...(project ? { project } : {}),
       runs: this.store.listRuns(taskId),
       stats: this.store.getTaskStats(taskId),
       ...(context ? { context } : {}),

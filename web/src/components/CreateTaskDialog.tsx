@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
-import type { ModelInfo, ProviderInfo } from "../types";
+import type { ModelInfo, ProviderInfo, TaskType } from "../types";
+import {
+  DEFAULT_TASK_TYPE,
+  TASK_TYPE_OPTIONS,
+  taskTypeOption,
+} from "../task-types";
+
+export interface CreateTaskInput {
+  title?: string;
+  description: string;
+  taskType: TaskType;
+  provider?: string;
+  model?: string;
+}
 
 interface Props {
   open: boolean;
@@ -8,11 +21,7 @@ interface Props {
   projectDefaultProvider?: string;
   projectDefaultModel?: string;
   onClose: () => void;
-  onCreate: (input: {
-    title?: string;
-    provider?: string;
-    model?: string;
-  }) => Promise<void>;
+  onCreate: (input: CreateTaskInput) => Promise<void>;
 }
 
 export default function CreateTaskDialog({
@@ -24,6 +33,8 @@ export default function CreateTaskDialog({
   onCreate,
 }: Props) {
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [taskType, setTaskType] = useState<TaskType>(DEFAULT_TASK_TYPE);
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -36,6 +47,8 @@ export default function CreateTaskDialog({
   useEffect(() => {
     if (!open) return;
     setTitle("");
+    setDescription("");
+    setTaskType(DEFAULT_TASK_TYPE);
     setProvider(projectDefaultProvider ?? "");
     setModel(projectDefaultModel ?? "");
     setError(null);
@@ -71,12 +84,30 @@ export default function CreateTaskDialog({
 
   if (!open) return null;
 
+  const option = taskTypeOption(taskType);
+  const canSubmit = description.trim().length > 0 && !saving;
+
+  /** 标题可选：留空时用描述首行兜底，避免出现 "Task 9/19/2026, …" 这种标题。 */
+  const titleOrFallback = (): string | undefined => {
+    const t = title.trim();
+    if (t) return t;
+    const firstLine = description
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (!firstLine) return undefined;
+    return firstLine.length > 60 ? `${firstLine.slice(0, 59)}…` : firstLine;
+  };
+
   const submit = async (): Promise<void> => {
+    if (!canSubmit) return;
     setSaving(true);
     setError(null);
     try {
       await onCreate({
-        title: title.trim() || undefined,
+        title: titleOrFallback(),
+        description: description.trim(),
+        taskType,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
       });
@@ -91,7 +122,7 @@ export default function CreateTaskDialog({
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
-        className="modal-dialog"
+        className="modal-dialog modal-dialog-wide"
         role="dialog"
         aria-labelledby="create-task-title"
         onClick={(e) => e.stopPropagation()}
@@ -99,15 +130,60 @@ export default function CreateTaskDialog({
         <h2 id="create-task-title" className="modal-title">
           New Task
         </h2>
-        <label className="runtime-field">
-          <span className="runtime-field-label">Title</span>
+        <div className="runtime-field runtime-field-wide">
+          <span className="runtime-field-label">类型</span>
+          <div className="intent-type-chips">
+            {TASK_TYPE_OPTIONS.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className={`intent-type-chip type-${o.id} ${
+                  o.id === taskType ? "selected" : ""
+                }`}
+                title={o.hint}
+                onClick={() => setTaskType(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <span className="intent-hint">{option.hint}</span>
+        </div>
+        <label className="runtime-field runtime-field-wide">
+          <span className="runtime-field-label">Title（可选）</span>
           <input
             className="settings-path-input"
             value={title}
-            placeholder="可选标题"
+            placeholder="留空则用描述首行"
             onChange={(e) => setTitle(e.target.value)}
-            autoFocus
           />
+        </label>
+        <label className="runtime-field runtime-field-wide">
+          <span className="runtime-field-label">
+            任务描述 <b className="intent-required">必填</b>
+          </span>
+          <textarea
+            className="intent-textarea"
+            value={description}
+            placeholder={option.placeholder}
+            rows={6}
+            autoFocus
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <span className="intent-hint">
+            创建后会作为第一条消息自动投递给 agent，它随即开始工作。
+            {option.template ? (
+              <button
+                type="button"
+                className="intent-template-btn"
+                onClick={() =>
+                  setDescription((prev) => (prev.trim() ? prev : option.template!))
+                }
+              >
+                插入模板
+              </button>
+            ) : null}
+          </span>
         </label>
         <div className="runtime-fields">
           <label className="runtime-field">
@@ -164,10 +240,11 @@ export default function CreateTaskDialog({
           <button
             type="button"
             className="settings-save"
-            disabled={saving}
+            disabled={!canSubmit}
+            title={canSubmit ? undefined : "任务描述必填"}
             onClick={() => void submit()}
           >
-            {saving ? "创建中…" : "创建"}
+            {saving ? "创建中…" : "创建并开始"}
           </button>
         </div>
       </div>

@@ -14,6 +14,7 @@ import type {
   ProviderInfo,
   Task,
   TaskDetail,
+  TaskType,
   TokenUsage,
   TokenUsageSeries,
   UsageGranularity,
@@ -175,11 +176,21 @@ export const api = {
 
   createTask: (body: {
     title?: string;
+    /** 任务描述（需求原文）——后端必填，缺了会 400。 */
+    description: string;
+    /** 任务类型标签（纯分类）；缺省 `general`。 */
+    taskType?: TaskType;
     workspace?: string;
     projectId?: string;
     provider?: string;
     model?: string;
   }) => write<Task>("/tasks", { method: "POST", body }),
+
+  /** 修改任务意图（标题 / 类型 / 描述）。描述不允许改成空。 */
+  updateTaskIntent: (
+    taskId: string,
+    body: { title?: string; description?: string; taskType?: TaskType },
+  ) => write<Task>(`/tasks/${taskId}`, { method: "PATCH", body }),
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 

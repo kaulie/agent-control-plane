@@ -82,7 +82,10 @@ npm run dev:web       # frontend :5174
 ## Usage
 
 1. Pick or create a **Project** in the sidebar (default: `Default`).
-2. Click **+ New Task** (or create one via `POST /api/tasks` with `projectId`).
+2. Click **+ New Task**: pick a **类型**（新功能开发 / 缺陷修复 / 问题定位 / 通用）and write
+   the **任务描述**（必填 —— 它就是 agent 要干的事），optionally a title. On create the
+   backend **自动把需求投递给 agent 并开跑**（见「任务意图」）；`POST /api/tasks` 需要
+   `projectId` 与 `description`。
 3. Type an instruction and press **Send**. Use the **Agent / Plan** dropdown
    next to the input to switch conversation mode (Plan focuses on planning;
    Agent can edit files and run tools). The last choice is remembered in the
@@ -135,6 +138,35 @@ npm run dev:web       # frontend :5174
 > The agent runs in the `workspace/` directory by default (set `AGENT_WORKSPACE`
 > in `backend/.env` to change it). Each run is billed to the authenticated
 > Cursor account.
+
+## 任务意图（类型 + 描述 + 自动投递）
+
+**问题**：以前任务只有一个标题，意图全靠对话一轮轮猜 —— agent 第一轮经常先问一遍
+"你到底要什么"，甚至直接做偏。
+
+现在每个任务有两个意图字段（`tasks` 表 + `Task` API）：
+
+| 字段 | 说明 |
+| --- | --- |
+| **`description`（任务描述）** | 需求原文。**新建必填**（没有描述 → `POST /api/tasks` 400），创建后可在主界面的「任务意图」面板上改（`PATCH`），但**不允许改成空**（它是任务的必填属性）。 |
+| **`taskType`（任务类型）** | `feature` 新功能开发 / `bugfix` 缺陷修复 / `diagnose` 问题定位 / `general` 通用（缺省）。**它只是分类标签，不改变 agent 的行为** —— 用途是列表/面板徽标、创建时切换描述模板、落库供以后按类型统计；历史任务全是 `general`，行为与以前逐字节一致。 |
+
+三条动线：
+
+1. **新建**（`CreateTaskDialog`）：选类型 → 描述框按类型给 placeholder/模板（"什么算做完"比
+   "要做什么"重要）→ 描述为空时「创建并开始」按钮不可点；标题可留空（用描述首行兜底）。
+2. **自动投递**：`POST /api/tasks` 创建成功后会**自动把描述当成第一条消息投递给 agent**，
+  它随即开跑（`payload.deliveredBy: "system"` + `kind: "task_intent"`，时间线上渲染成
+  「⚙️ 系统投递 · 需求」卡片，不会冒充用户发言）。这次投递复用 `sendMessage`，所以
+  **并发上限 / 排队 / 部署 drain** 全部照常：槽位满时它是 `queued`，不是失败。
+  没有描述的内部任务（watchdog 崩溃分析等）跳过投递；`fork` 也不重复投递。
+3. **修正**：主界面聊天框上方的「任务意图」面板（pin 在输入框上方，可折叠）显示
+   类型 + 标题 + 描述 + 投递状态，点「✎ 编辑」就地修改。⚠️ 修改只进**下一次**会话
+   （重启 / 轮转 / fork）的简报，正在跑的 agent 看不到 —— 时间线会留一条
+   `status: task_intent_updated` 说明这一点，不假装 agent 立刻知道。
+
+描述同时进**会话简报骨架**（`## 任务描述`，上限 2000 字符）：会话因重启/轮转被重建后，
+需求还在（事件流里的首条需求可能被"保尾部"裁掉，骨架不会）。
 
 ## Cost
 
@@ -206,12 +238,13 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/projects/:id/settings` | Project settings (`runtime` / `department` + 只读 `cwdRules`) |
 | PATCH | `/api/projects/:id/settings` | 更新 Project settings `{ runtime?, department? }`（`department` 传空即清除） |
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
-| POST | `/api/tasks` | create Task `{ title?, workspace?, model?, projectId? }` |
+| POST | `/api/tasks` | create Task `{ title?, description, taskType?, workspace?, model?, projectId? }` —— **`description` 必填**（缺失/纯空白 → 400，超 4000 字 → 400），`taskType` ∈ `general\|feature\|bugfix\|diagnose`（非法 → 400）。创建成功后会**自动投递需求**并开跑（见「任务意图」） |
 | GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
+| PATCH | `/api/tasks/:id` | 改任务意图 `{ title?, description?, taskType? }`（**描述不允许改成空** → 400；非法类型 → 400）或回写 PR 链接 `{ prUrl }`；成功 publish `task_updated`，改意图时时间线留 `status: task_intent_updated` |
 | GET | `/api/agents` | **Agent 看板**：`?scope=current\|all\|task`（默认 `current` = 每个 task 当前那个 agent；`all` = 连同被 succession 替换掉的 agent；`task` = 每个 task 一行、数字跨它历史上**所有** agent 相加）、`?projectId=` 过滤。每行带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长；另带 `taskTotals`（`completedRounds` / `runCount` / `totalTokens` / `durationMs` / `modelCalls` / `toolCalls` / `agentCount`）—— per-agent 的数字在 succession 之后会明显小于 task 的真实工作量，所以两个口径都给。`scope=task` 的行另有 `taskScope: true` / `currentAgentId`（`agentId` 为空，因为整行代表 task） |
 | GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」）+ `agentRunCount` / `agentCompletedRounds`（这个 agent 自己的累计，同样不限窗口：页面上的「run 轮次」只算窗口内） |
 | GET | `/api/tasks/:id/events` | event timeline (`?after=<seq>`) |
-| POST | `/api/tasks/:id/fork` | **上下文将满时的分流**：fork 成新 task（继承 project / provider / model / **同一个 workspace** / prUrl，记 `forkedFrom`），原 task 时间线留一条 `status: forked` 提示；历史不复制事件，改为在新 task 的启动简报里带一份（`carried`，带 `[fork:*]` 前缀） |
+| POST | `/api/tasks/:id/fork` | **上下文将满时的分流**：fork 成新 task（继承 project / provider / model / **taskType + description** / **同一个 workspace** / prUrl，记 `forkedFrom`），原 task 时间线留一条 `status: forked` 提示；历史不复制事件，改为在新 task 的启动简报里带一份（`carried`，带 `[fork:*]` 前缀）。**不**自动重复投递需求（源会话已经投过） |
 | GET | `/api/tasks/:id` | Task detail（含 `stats` / `context` / `forkedTo`） |
 | POST | `/api/tasks/:id/messages` | send `{ message, mode?, images? }` → starts an Agent Run (`mode`: `agent` \| `plan`, default `agent`) |
 | POST | `/api/tasks/:id/stop` | stop the in-flight Agent Run |

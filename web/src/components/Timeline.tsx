@@ -100,6 +100,8 @@ interface Row {
   images: Array<{ id: string; mimeType: string }>;
   mode?: "agent" | "plan";
   queued?: boolean;
+  /** 这条「用户消息」是系统投递的（新建任务自动下发需求），不是人打的。 */
+  deliveredBySystem?: boolean;
 }
 
 /** 导出给测试用：事件 → 行文案（透明化文案都在这里，必须可测）。 */
@@ -318,14 +320,18 @@ export function buildRows(events: AgentEvent[]): Row[] {
       mode = p.mode;
     }
     const queued = type === "user_message" && p.queued === true;
+    // 新建任务时系统自动投递的需求：渲染成系统卡片（label/图标都换掉），
+    // 否则用户会以为这条"用户消息"是自己打的。
+    const deliveredBySystem = type === "user_message" && p.deliveredBy === "system";
+    const systemDelivery = deliveredBySystem && p.kind === "task_intent";
 
     rows.push({
       key: ev.eventId,
       time: formatTime(ev.timestamp),
       type,
       role: eventRole(type),
-      label: LABELS[type] ?? type,
-      icon: ICONS[type] ?? "•",
+      label: systemDelivery ? "系统投递 · 需求" : (LABELS[type] ?? type),
+      icon: systemDelivery ? "⚙️" : (ICONS[type] ?? "•"),
       body,
       detail,
       agentId: ev.agentId ?? "",
@@ -334,6 +340,7 @@ export function buildRows(events: AgentEvent[]): Row[] {
       images,
       mode,
       queued,
+      deliveredBySystem,
     });
   }
   return rows;
@@ -570,8 +577,10 @@ function EventCard({
   return (
     <div
       className={`event event-${row.type} event-${row.role}${
-        collapsed ? " event-collapsed" : ""
-      }${isGroupProxy ? " event-group-proxy" : ""}`}
+        row.deliveredBySystem ? " event-system-delivery" : ""
+      }${collapsed ? " event-collapsed" : ""}${
+        isGroupProxy ? " event-group-proxy" : ""
+      }`}
     >
       <div
         className={`event-head${showToggle ? " event-head-toggle" : ""}`}

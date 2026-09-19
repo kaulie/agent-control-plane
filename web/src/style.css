@@ -284,6 +284,211 @@ body {
   font-size: 12px;
 }
 
+/* ---- 任务类型徽标（类型只是分类标签，不改变 agent 行为）---- */
+
+.task-type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: 1px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-3));
+  color: var(--accent);
+}
+
+.task-type-badge.type-feature {
+  background: color-mix(in srgb, #4c9aff 18%, var(--bg-3));
+  color: #7cb6ff;
+}
+
+.task-type-badge.type-bugfix {
+  background: color-mix(in srgb, #ff6b5e 18%, var(--bg-3));
+  color: #ff9086;
+}
+
+.task-type-badge.type-diagnose {
+  background: color-mix(in srgb, #f5a623 18%, var(--bg-3));
+  color: #f3b64e;
+}
+
+.task-title-text {
+  display: inline;
+}
+
+/* ---- 任务意图面板：pin 在聊天框上方 ---- */
+
+.task-intent {
+  border-top: 1px solid var(--border);
+  background: var(--bg-2);
+  padding: 7px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.task-intent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-intent-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.task-intent-delivery {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.intent-btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.intent-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.task-intent-body .task-intent-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.task-intent-body.collapsed .task-intent-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-dim);
+}
+
+.task-intent-body .task-intent-desc.is-empty {
+  color: var(--amber);
+}
+
+.task-intent-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intent-type-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intent-type-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.intent-type-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.intent-type-chip.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-3));
+  color: #fff;
+  font-weight: 600;
+}
+
+.intent-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.intent-required {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.intent-template-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.intent-template-btn:hover {
+  border-color: var(--accent);
+}
+
+.intent-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.intent-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal-dialog-wide {
+  width: min(560px, 100%);
+}
+
+/* 系统投递的需求卡片：不要让人误以为是自己打的。 */
+.event-user.event-system-delivery {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-2));
+}
+
+.event-user.event-system-delivery .event-label {
+  color: var(--accent);
+}
+
 .main {
   flex: 1;
   display: flex;

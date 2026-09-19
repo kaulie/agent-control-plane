@@ -1,5 +1,6 @@
 import type { Project, Task } from "../types";
 import { formatDateTime } from "../format";
+import { taskTypeLabel, taskTypeOption } from "../task-types";
 
 interface Props {
   projects: Project[];
@@ -126,7 +127,17 @@ export default function TaskList({
               aria-current={t.taskId === selectedId ? "true" : undefined}
               onClick={() => onSelect(t.taskId)}
             >
-              <div className="task-title">{t.title || t.taskId}</div>
+              <div className="task-title">
+                <span
+                  className={`task-type-badge type-${t.taskType ?? "general"}`}
+                  title={`任务类型：${taskTypeLabel(t.taskType)}（仅作分类，不改变 agent 行为）`}
+                >
+                  {taskTypeOption(t.taskType).short}
+                </span>
+                <span className="task-title-text" title={t.description}>
+                  {t.title || t.taskId}
+                </span>
+              </div>
               <div className="task-meta">
                 #{t.taskId.slice(-6)} · {t.provider}
                 {t.model ? `/${t.model}` : ""} · {t.status} ·{" "}

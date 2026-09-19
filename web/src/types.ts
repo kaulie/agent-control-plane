@@ -217,6 +217,8 @@ export interface AgentTimeline {
   note: string;
 }
 
+export type TaskType = "general" | "feature" | "bugfix" | "diagnose";
+
 export interface Task {
   taskId: string;
   projectId: string;
@@ -229,7 +231,13 @@ export interface Task {
   agentId?: string;
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
-  taskType: "general";
+  /** 任务类型（纯分类标签，见 `./task-types.ts`）。 */
+  taskType: TaskType;
+  /**
+   * 任务描述（需求原文）。新建时必填；创建后可在「任务意图」面板上修改。
+   * 老任务可能没有。
+   */
+  description?: string;
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt?: string;
   /** 从哪个 task fork 而来（上下文将满时分流）。 */

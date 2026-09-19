@@ -1,7 +1,8 @@
 /**
  * HTTP-level checks for project creation: `POST /api/projects` requires a
  * department and stores it with the project (settings_json), name/gitRepoUrl
- * still behave as before.
+ * still behave as before. Also covers「按 task_id 查详情」：`GET /api/tasks/:taskId`
+ * 必须带 project（名字 / gitRepoUrl / 部门），项目被删掉时也不能 500。
  *
  * Usage: npm run build --workspace backend && node backend/scripts/test-project-api.mjs
  */
@@ -155,6 +156,52 @@ const legacy = await listedProject(legacyId);
 assert.equal(legacy.department, undefined);
 assert.equal(legacy.name, "Legacy");
 
+// 10) 按 task_id 查详情：project（名字 / gitRepoUrl / 部门）一并返回。
+const task = store.createTask({
+  taskId: "task-detail-1",
+  title: "详情任务",
+  workspace: path.join(dataDir, "ws", "task-detail-1"),
+  provider: "cursor",
+  projectId: project.projectId,
+});
+const detail = JSON.parse(
+  (await app.inject({ method: "GET", url: `/api/tasks/${task.taskId}` })).body,
+);
+assert.equal(detail.task.taskId, task.taskId);
+assert.equal(detail.task.projectId, project.projectId);
+assert.equal(detail.project.projectId, project.projectId, "详情要带 project");
+assert.equal(detail.project.name, "Smoke Project");
+assert.equal(detail.project.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+assert.deepEqual(
+  detail.project.department,
+  { departmentId: "D0002", departmentName: "工程效能部门" },
+  "详情里的部门跟着项目设置走",
+);
+
+// 11) 没有部门的项目（老数据）→ project 仍在，只是不带 department 字段。
+const legacyTask = store.createTask({
+  taskId: "task-detail-legacy",
+  title: "老项目任务",
+  workspace: path.join(dataDir, "ws", "task-detail-legacy"),
+  provider: "cursor",
+  projectId: legacyId,
+});
+const legacyDetail = JSON.parse(
+  (await app.inject({ method: "GET", url: `/api/tasks/${legacyTask.taskId}` })).body,
+);
+assert.equal(legacyDetail.project.name, "Legacy");
+assert.equal(legacyDetail.project.department, undefined);
+
+// 12) 项目已被删掉的老数据 → 详情照常返回 task，只是没有 project（不能 500）。
+store.db.prepare(`DELETE FROM projects WHERE project_id = ?`).run(legacyId);
+const orphanDetail = JSON.parse(
+  (await app.inject({ method: "GET", url: `/api/tasks/${legacyTask.taskId}` })).body,
+);
+assert.equal(orphanDetail.task.taskId, legacyTask.taskId);
+assert.equal(orphanDetail.project, undefined);
+
 await app.close();
 fs.rmSync(dataDir, { recursive: true, force: true });
-console.log("PASS: POST /api/projects requires + stores department, list carries it");
+console.log(
+  "PASS: POST /api/projects requires + stores department, list carries it, task detail carries project+department",
+);

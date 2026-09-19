@@ -25,7 +25,7 @@ export interface RuntimeConfig {
   defaultModel?: string;
 }
 
-/** System-wide agent sandbox root; cwd = `<root>/<project-name>/<taskId>/`. */
+/** System-wide agent sandbox root; 每个 agent 的 cwd = `<root>/agent-<agentid>/`. */
 export interface WorkspaceConfig {
   /** Absolute path; empty/omit = `/Users/gaolei/agent-workspace`. */
   root?: string;
@@ -112,6 +112,14 @@ export interface Task {
   createdBy?: string;
   /** Current bound SDK agent for this task. Replaced on succession; history is in agent_successions. */
   agentId?: string;
+  /**
+   * `true` = `agentId` 是**新建任务时预分配**的（网关生成，用于工作区目录名
+   * `agent-<agentid>`），还没有被 provider 真正建出会话。
+   *
+   * 首个 run 会拿它去**开新会话**（而不是 resume）；provider 报回真实会话 id 后
+   * 这个标记就被清掉（见 `gateway.bindAgentId`）。
+   */
+  agentPreallocated?: boolean;
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
   /** Task category (label only — it does NOT change agent behaviour). */

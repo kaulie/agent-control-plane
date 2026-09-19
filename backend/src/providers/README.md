@@ -16,6 +16,11 @@ See [`types.ts`](./types.ts):
 | `dispose?` | Release long-lived resources on shutdown |
 
 `RunInput.agentId` is an opaque **session handle** for the adapter (resume / bind).  
+`RunInput.preallocatedAgentId` (optional) means "this run opens a **new** session, and if
+the SDK lets the caller pick the session id, use this one" — it is the id the gateway
+allocated when the task was created (= the agent's workspace directory name
+`agent-<agentid>`). Cline honors it; Cursor's SDK generates its own id (the gateway binds
+whatever comes back). Never `resume` it.  
 `RunInput.mode` (`agent` \| `plan`) is a **product conversation mode**; each adapter maps it to its runtime if supported.
 
 ## Layout

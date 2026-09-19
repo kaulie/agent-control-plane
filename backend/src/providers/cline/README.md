@@ -18,6 +18,10 @@ One Cline session = one Web Cursor task (`task.agentId` stores the **current**
 opaque Cline session id):
 
 - First message → `cline.start(...)` (new session; task bootstrap text is prepended).
+  For a brand-new task the session id is **not** generated here: the gateway passes
+  `RunInput.preallocatedAgentId` (the id it allocated at task creation = the agent's
+  workspace directory `agent-<agentid>`), and Cline's host accepts a caller-owned
+  session id, so the agent id and the workspace stay identical.
 - Follow-up message → `cline.send(...)` on the resident session when the product
   mode matches the mode the session was created with.
 - Mode change (plan ↔ agent/yolo) → rebuild like the Cline desktop host:

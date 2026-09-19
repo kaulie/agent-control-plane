@@ -2,11 +2,11 @@
 
 You are the agent behind **Web Cursor**. These rules always apply.
 
-## Per-task workspace (isolation)
+## Per-agent workspace (isolation)
 
 | Path | Action |
 |---|---|
-| `/Users/gaolei/agent-workspace/<taskId>/` | **Your sandbox** — cwd for this task; clone/work here（**开发 only**） |
+| `/Users/gaolei/agent-workspace/agent-<agentid>/` | **Your sandbox** — cwd for this task (`agentid` = your agent id, 见 bootstrap 的 `- workspace:`); clone/work here（**开发 only**） |
 | Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
 | [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
 | `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
@@ -17,7 +17,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 
 **How to start work**
 
-1. Your task workspace is already created (empty) under `agent-workspace/<taskId>/`.
+1. Your agent workspace is already created (empty) at `/Users/gaolei/agent-workspace/agent-<agentid>/`（以 bootstrap 里的 `- workspace:` 为准）。
 2. Clone the project's **GitHub** `gitRepoUrl` into that directory, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
 3. Do **not** edit other tasks' directories. Do **not** edit runtime or `deployment-<hash>/` snapshots.
 

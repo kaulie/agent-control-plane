@@ -9,7 +9,7 @@
 
 | 路径 / 配置 | 角色 | Agent 可否改 |
 |---|---|---|
-| `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 的独立工作区（clone 后在此开发） | 是（唯一**开发**目录） |
+| `/Users/gaolei/agent-workspace/agent-<agentid>/` | 本 agent 的独立工作区（clone 后在此开发）；`agentid` 就是目录名里的那段 id | 是（唯一**开发**目录） |
 | 项目 `gitRepoUrl`（GitHub） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源 | 否（只读配置；用它作 remote） |
 | [`kaulie/agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment) | **独立部署服务**源码（HTTP + SQLite 契约） | 仅在用户要求改部署系统时（在该仓库改） |
 | `~/runtime/agent-control-plane-deployment` | 部署服务安装目录（API `:4220`、packages、sqlite） | 否（install 产物） |
@@ -26,7 +26,7 @@
 ### 1. 进入自己的开发目录
 
 ```bash
-cd /Users/gaolei/agent-workspace/<taskId>
+cd /Users/gaolei/agent-workspace/agent-<agentid>
 ```
 
 ### 2. Clone 形成独立 workspace
@@ -150,7 +150,7 @@ curl -sS -X POST http://127.0.0.1:4220/api/deploys \
 
 ## 交付检查清单（止于开 PR）
 
-- [ ] 工作区在 `/Users/gaolei/agent-workspace/<taskId>/`
+- [ ] 工作区在 `/Users/gaolei/agent-workspace/agent-<agentid>/`（以 bootstrap 的 `- workspace:` 为准）
 - [ ] `origin` 为项目 GitHub `gitRepoUrl`
 - [ ] 当前分支为 `feature|fix|issue/<taskId>`
 - [ ] 变更已 commit

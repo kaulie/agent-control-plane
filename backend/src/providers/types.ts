@@ -42,6 +42,16 @@ export interface RunInput {
    * Empty = create a new session; non-empty = resume/reuse that session.
    */
   agentId: string;
+  /**
+   * 新建任务时网关**预分配**的 agent id（= 它的工作区目录名 `agent-<agentid>`）。
+   *
+   * 非空表示「这次 run 要开一个新会话」：如果 SDK 允许调用方指定会话 id，就用这个
+   * id 开会话（Cline 如此 → task.agentId / 工作区目录 / UI 上的 agent 名完全一致）；
+   * SDK 自己生成 id 的（Cursor）忽略它即可（网关会绑定真实 id）。
+   *
+   * ⚠️ **不要**拿它去 resume：它是网关生成的，还不是活会话。
+   */
+  preallocatedAgentId?: string;
   prompt: RunPrompt;
   cwd: string;
   model?: string;

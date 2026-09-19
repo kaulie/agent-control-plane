@@ -139,6 +139,24 @@ npm run dev:web       # frontend :5174
 > in `backend/.env` to change it). Each run is billed to the authenticated
 > Cursor account.
 
+### Agent 工作区（每个 agent 一个目录）
+
+新建任务时网关会**先给这个 agent 分配一个 id**（`agent-<16hex>`），并把它的工作区建在
+
+```
+<AGENT_WORKSPACE_ROOT>/agent-<agentid>/
+```
+
+—— 目录名**就是** agent id（不再有 `<project>/<taskId>` 那层），所以「这个目录属于哪个
+agent」不用查库；`- workspace:` 这一行（启动简报）注入的就是它，agent 一开工就知道自己在哪。
+
+| 环节 | 行为 |
+| --- | --- |
+| 建任务（`POST /api/tasks`） | 分配 `agent_id`（落库 + `agent_preallocated=1`）、`mkdir` 工作区；显式传 `workspace` 时仍以它为准（不建默认目录） |
+| 首个 run | 预分配 id 走 `RunInput.preallocatedAgentId`，**开新会话**（不是 resume）：Cline 的宿主会话 id 由调用方指定，所以直接用它 → `task.agentId` / 目录名 / 看板上的 agent 名完全一致；Cursor 的 SDK 自己生成 id → 网关绑定真实 id，目录名保持预分配值（工作区**不搬家**） |
+| 会话建起来后 | 预分配标记清掉 → 后续 run 回到正常 resume 路径 |
+| 老任务 / fork | 老任务没有预分配 id（行为逐字不变）；fork 沿用源任务的同一个工作区（否则丢本地 clone / 未提交改动） |
+
 ## 任务意图（类型 + 目标 + 描述 + 自动投递）
 
 **问题**：以前任务只有一个标题，意图全靠对话一轮轮猜 —— agent 第一轮经常先问一遍
@@ -245,8 +263,8 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/projects/:id/settings` | Project settings (`runtime` / `department` + 只读 `cwdRules`) |
 | PATCH | `/api/projects/:id/settings` | 更新 Project settings `{ runtime?, department? }`（`department` 传空即清除） |
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
-| POST | `/api/tasks` | create Task `{ title?, description, taskType?, goal?, workspace?, model?, projectId? }` —— **`description` 必填**（缺失/纯空白 → 400，超 4000 字 → 400），`taskType` ∈ `general\|feature\|bugfix\|diagnose`（非法 → 400），`goal` ∈ `merge\|deploy`（非法 → 400；缺省 `merge`）。创建成功后会**自动投递需求**并开跑（见「任务意图」） |
-| GET | `/api/tasks/:id` | Task detail (task + runs + stats) |
+| POST | `/api/tasks` | create Task `{ title?, description, taskType?, goal?, workspace?, model?, projectId? }` —— **`description` 必填**（缺失/纯空白 → 400，超 4000 字 → 400），`taskType` ∈ `general\|feature\|bugfix\|diagnose`（非法 → 400），`goal` ∈ `merge\|deploy`（非法 → 400；缺省 `merge`），`workspace` 缺省 = `<AGENT_WORKSPACE_ROOT>/agent-<agentid>`（agent id 建任务时预分配，见「Agent 工作区」）。创建成功后会**自动投递需求**并开跑（见「任务意图」） |
+| GET | `/api/tasks/:id` | Task detail（task + runs + stats + context + forkedTo + **`project`**）；`project` = 任务所属项目（名字 / `gitRepoUrl` / 所属部门快照 `department.departmentId`+`departmentName`），项目的实时部门目录见 `GET /api/org/departments`；项目已被删掉时缺省 |
 | PATCH | `/api/tasks/:id` | 改任务意图 `{ title?, description?, taskType?, goal? }`（**描述不允许改成空** → 400；非法类型 → 400；`goal` 非法 → 400，传 `null` = 清掉目标）或回写 PR 链接 `{ prUrl }`；成功 publish `task_updated`，改意图时时间线留 `status: task_intent_updated` |
 | GET | `/api/agents` | **Agent 看板**：`?scope=current\|all\|task`（默认 `current` = 每个 task 当前那个 agent；`all` = 连同被 succession 替换掉的 agent；`task` = 每个 task 一行、数字跨它历史上**所有** agent 相加）、`?projectId=` 过滤。每行带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长；另带 `taskTotals`（`completedRounds` / `runCount` / `totalTokens` / `durationMs` / `modelCalls` / `toolCalls` / `agentCount`）—— per-agent 的数字在 succession 之后会明显小于 task 的真实工作量，所以两个口径都给。`scope=task` 的行另有 `taskScope: true` / `currentAgentId`（`agentId` 为空，因为整行代表 task） |
 | GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」）+ `agentRunCount` / `agentCompletedRounds`（这个 agent 自己的累计，同样不限窗口：页面上的「run 轮次」只算窗口内） |
@@ -306,5 +324,5 @@ web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
   timeline-line.ts  状态点线的几何（idle / thinking / working → 三条互不相连的水平线）
   board-format.ts   看板数字口径文案（per-agent vs 整个 task，两处都写清）
 web/scripts/     前端纯逻辑测试（点线几何 + SVG 渲染，由 backend 的 run-tests 统一起跑）
-workspace/        default sandbox for the local agent
+workspace/        legacy relative sandbox (旧版；新 agent 的工作区是 `<AGENT_WORKSPACE_ROOT>/agent-<agentid>/`)
 ```

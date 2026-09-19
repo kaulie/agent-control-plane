@@ -111,6 +111,10 @@ const task = JSON.parse(created.body);
 assert.equal(task.taskType, "bugfix");
 assert.match(task.description, /最后一列缺失/);
 assert.ok(task.workspace, "workspace 仍然自动分配");
+assert.ok(
+  task.workspace.endsWith(path.join("ws", task.agentId)),
+  `新任务的 workspace 应该是 <root>/agent-<agentid>，实际 ${task.workspace}`,
+);
 
 const events = store.listEvents(task.taskId, { limit: 50 }).events;
 const delivered = events.filter(

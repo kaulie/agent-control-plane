@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
-import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail } from "./types";
+import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskType } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import ContextMeter from "./components/ContextMeter";
@@ -12,6 +12,7 @@ import AgentBoardPage from "./components/AgentBoardPage";
 import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
+import TaskIntentPanel from "./components/TaskIntentPanel";
 import ProjectDialog, {
   type ProjectDialogMode,
   type ProjectDialogResult,
@@ -240,6 +241,29 @@ export default function App() {
       setError(String(e));
     }
   }, [applyRunState]);
+
+  /** 保存「任务意图」（类型 / 标题 / 描述）——面板就地编辑用。 */
+  const saveTaskIntent = useCallback(
+    async (input: {
+      taskId: string;
+      title?: string;
+      description: string;
+      taskType: TaskType;
+    }): Promise<void> => {
+      const updated = await api.updateTaskIntent(input.taskId, {
+        ...(input.title ? { title: input.title } : {}),
+        description: input.description,
+        taskType: input.taskType,
+      });
+      setDetail((prev) =>
+        prev && prev.task.taskId === updated.taskId
+          ? { ...prev, task: updated }
+          : prev,
+      );
+      void refreshTasks();
+    },
+    [refreshTasks],
+  );
 
   const clearSelection = useCallback(() => {
     setSelectedId(null);
@@ -543,11 +567,33 @@ export default function App() {
     setShowCreateTask(true);
   }, [selectedProjectId]);
 
+  /**
+   * 任务意图面板上的「投递状态」：找第一条系统投递的需求消息，
+   * 以及它那次 run 是否还在排队（并发满 / 部署 drain）。
+   */
+  const intentDelivery = useMemo(() => {
+    const delivered = events.find(
+      (ev) =>
+        ev.eventType === "user_message" && ev.payload?.deliveredBy === "system",
+    );
+    if (!delivered) return undefined;
+    const run = detail?.runs.find((r) => r.runId === delivered.runId);
+    return { at: delivered.timestamp, queued: run?.status === "queued" };
+  }, [events, detail]);
+
   const createTask = useCallback(
-    async (input: { title?: string; provider?: string; model?: string }) => {
+    async (input: {
+      title?: string;
+      description: string;
+      taskType?: TaskType;
+      provider?: string;
+      model?: string;
+    }) => {
       if (!selectedProjectId) return;
       const task = await api.createTask({
         title: input.title,
+        description: input.description,
+        taskType: input.taskType,
         projectId: selectedProjectId,
         provider: input.provider,
         model: input.model,
@@ -1005,6 +1051,13 @@ export default function App() {
                   onSubmit={(answers) => void submitPlanAnswers(answers)}
                 />
               )}
+              <TaskIntentPanel
+                task={detail.task}
+                delivery={intentDelivery}
+                onSave={(patch) =>
+                  saveTaskIntent({ taskId: detail.task.taskId, ...patch })
+                }
+              />
               <ChatInput
                 onSend={sendMessage}
                 onStop={() => void stopAgent()}

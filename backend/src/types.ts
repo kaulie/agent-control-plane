@@ -2,7 +2,12 @@ import type { BillingCostInfo } from "./billing/types.js";
 
 export type TaskStatus = "active" | "completed" | "error";
 
-export type TaskType = "general";
+/**
+ * 任务类型：**纯分类标签，不改变 agent 行为**（目录见 `./task-types.ts`）。
+ * 用途：任务列表徽标 / 创建时切换描述模板 / 后续按类型统计。
+ * - `general` = 缺省值，也是所有历史任务的值（老行为逐字节不变）。
+ */
+export type TaskType = "general" | "feature" | "bugfix" | "diagnose";
 
 /** Per-project (or global) defaults for which agent runtime to use. */
 export interface RuntimeConfig {
@@ -101,8 +106,14 @@ export interface Task {
   agentId?: string;
   /** GitHub pull request URL once opened for this task. */
   prUrl?: string;
-  /** Task category; phase 1 only supports general. */
+  /** Task category (label only — it does NOT change agent behaviour). */
   taskType: TaskType;
+  /**
+   * 任务描述（需求原文）：新建时**必填**，创建后可在面板上修改。
+   * - 创建时作为第一条「系统投递」消息下发给 agent（见 gateway.dispatchTaskIntent）；
+   * - 同时注入会话简报骨架，保证会话被重建（重启 / 轮转 / fork）后需求不丢。
+   */
+  description?: string;
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt: string;
   /** 从哪个 task fork 而来（上下文将满时分流；页面显示"fork 自 #xxx"）。 */

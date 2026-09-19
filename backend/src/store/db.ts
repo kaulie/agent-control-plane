@@ -17,6 +17,7 @@ import type {
   Task,
   TaskStats,
   TaskStatus,
+  TaskType,
   TokenUsage,
   UsageRunSample,
 } from "../types.js";
@@ -27,6 +28,7 @@ import {
   serializeSettings,
 } from "../settings.js";
 import { tokenVolume } from "../usage/tokens.js";
+import { normalizeTaskType } from "../task-types.js";
 import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
 import { resolveBilledCost, type CostSource } from "../billing/cost.js";
 import type { BillingRule } from "../billing/types.js";
@@ -75,6 +77,7 @@ interface TaskRow {
   agent_id: string | null;
   pr_url: string | null;
   task_type: string | null;
+  description: string | null;
   last_user_input_at: string | null;
   forked_from: string | null;
 }
@@ -286,6 +289,10 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "pr_url")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "description")) {
+      // 任务描述（需求原文）：新建时必填；老任务为 NULL（面板会提示补上）。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN description TEXT`);
     }
     if (!taskCols.some((c) => c.name === "context_digest")) {
       // 模型生成的会话摘要（默认关闭；开了以后按水位缓存，见 gateway.contextDigestFor）。
@@ -913,6 +920,10 @@ export class Store {
     model?: string;
     projectId: string;
     createdBy?: string;
+    /** 任务描述（需求原文）。新建入口必填；内部调用（watchdog 等）可空。 */
+    description?: string;
+    /** 任务类型标签；缺省 `general`（= 老行为）。 */
+    taskType?: TaskType;
     /** Optional pre-allocated id (used when workspace path embeds taskId). */
     taskId?: string;
     /** 这个 task 是从哪个 task fork 来的（上下文将满时的分流）。 */
@@ -922,6 +933,7 @@ export class Store {
       throw new Error(`project ${input.projectId} not found`);
     }
     const now = new Date().toISOString();
+    const description = input.description?.trim();
     const task: Task = {
       taskId: input.taskId?.trim() || newId("task"),
       projectId: input.projectId,
@@ -932,14 +944,15 @@ export class Store {
       provider: input.provider,
       model: input.model,
       createdBy: input.createdBy,
-      taskType: "general",
+      taskType: normalizeTaskType(input.taskType),
+      ...(description ? { description } : {}),
       lastUserInputAt: now,
       ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, last_user_input_at, forked_from)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, description, last_user_input_at, forked_from)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -953,6 +966,7 @@ export class Store {
         task.createdBy ?? null,
         null,
         task.taskType,
+        task.description ?? null,
         task.lastUserInputAt,
         task.forkedFrom ?? null,
       );
@@ -1128,8 +1142,42 @@ export class Store {
     return this.getTask(taskId);
   }
 
+  /**
+   * 修改任务意图（标题 / 类型 / 描述）——「理解随对话变清晰」时用户就地修正。
+   *
+   * 语义：`undefined` = 不动这个字段；`description` 传空串/NULL 视为**清空**，
+   * 由调用方（gateway）负责「描述不允许清空」这条业务规则，store 只做落库。
+   */
+  updateTaskIntent(
+    taskId: string,
+    patch: { title?: string; taskType?: TaskType; description?: string | null },
+  ): Task | undefined {
+    const current = this.getTask(taskId);
+    if (!current) return undefined;
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (patch.title !== undefined) {
+      sets.push("title = ?");
+      values.push(patch.title);
+    }
+    if (patch.taskType !== undefined) {
+      sets.push("task_type = ?");
+      values.push(normalizeTaskType(patch.taskType));
+    }
+    if (patch.description !== undefined) {
+      sets.push("description = ?");
+      values.push(patch.description?.trim() ? patch.description.trim() : null);
+    }
+    if (!sets.length) return current;
+    this.db
+      .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE task_id = ?`)
+      .run(...(values as never[]), taskId);
+    return this.getTask(taskId);
+  }
+
   private toTask(r: TaskRow): Task {
     const prUrl = r.pr_url?.trim();
+    const description = r.description?.trim();
     return {
       taskId: r.task_id,
       projectId: r.project_id || DEFAULT_PROJECT_ID,
@@ -1142,7 +1190,9 @@ export class Store {
       createdBy: r.created_by ?? undefined,
       agentId: r.agent_id || undefined,
       ...(prUrl ? { prUrl } : {}),
-      taskType: (r.task_type as Task["taskType"]) || "general",
+      // 历史脏值（未知类型）一律读成 general，避免 UI 出现空标签。
+      taskType: normalizeTaskType(r.task_type),
+      ...(description ? { description } : {}),
       lastUserInputAt: r.last_user_input_at || r.created_at,
       ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),
     };

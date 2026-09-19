@@ -131,7 +131,7 @@ export default function ProjectSettingsPage({
           {view?.cwdRules && (
             <AgentRulesSection
               title="工作区规则（只读）"
-              description="来自项目本地目录（`agent-workspace/<project-name>/<taskId>/`）的 AGENTS.md / .cursor/rules（由 SDK 额外加载）。"
+              description="来自项目本地目录（`agent-workspace/<project-name>/`）的 AGENTS.md / .cursor/rules（由 SDK 额外加载；每个 agent 自己的工作区是 `agent-workspace/agent-<agentid>/`）。"
               value={view.cwdRules}
               mode="readonly"
             />

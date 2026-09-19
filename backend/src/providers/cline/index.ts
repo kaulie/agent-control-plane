@@ -611,7 +611,10 @@ export class ClineProvider implements AgentProvider {
       prependBootstrap?: boolean;
     },
   ): Promise<AgentResult | undefined> {
-    const sessionId = newId("cls");
+    // 预分配的 agent id：新建任务时网关已经把这个 id 给了这个 agent（= 它的工作区
+    // 目录名 `agent-<agentid>`），这里就用它开会话 —— task.agentId / 工作区目录 /
+    // 看板上的 agent 名因此完全一致。网关没给（老任务 / 轮转 / 换个新会话）才自己生成。
+    const sessionId = input.preallocatedAgentId?.trim() || newId("cls");
     handle.sessionId = sessionId;
     const config = this.buildConfig(input, modelId, mode, sessionId);
     const prependBootstrap = opts?.prependBootstrap !== false;

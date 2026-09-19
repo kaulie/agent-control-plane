@@ -6,7 +6,7 @@
 
 | 目录 | 含义 | 谁改 |
 |---|---|---|
-| `/Users/gaolei/agent-workspace/<taskId>/` | 本 task 独立 workspace（clone GitHub + task 分支） | agent 在此改**应用**代码 |
+| `/Users/gaolei/agent-workspace/agent-<agentid>/` | 本 agent 独立 workspace（clone GitHub + task 分支）；`agentid` = 这个 agent 的 id，目录名就是它 | agent 在此改**应用**代码 |
 | 项目 `gitRepoUrl`（GitHub） | 开发远程 origin（clone / push / PR）；发版唯一源 | 在项目设置中配置；agent 不改配置本身 |
 | `/Users/gaolei/deployment/web-cursor/bin/` | 旧版独立发版工具（**已废弃**，构建/部署现由部署平台 pipeline 完成） | 不要使用 |
 | `~/runtime/agent-control-plane-deployment/packages/` | 部署平台构建出的 `deployment-<hash>/` 快照（禁止手改） | 平台自己生成 |
@@ -120,7 +120,7 @@ curl -sS -X PUT http://127.0.0.1:4220/api/services/web-cursor \
 
 - `backend/` —— Agent Gateway（Fastify + `@cursor/sdk` + `node:sqlite`）
 - `web/` —— 前端（React + Vite）
-- `workspace/` —— 旧版相对沙盒（遗留；新 task 默认用 `/Users/gaolei/agent-workspace/<taskId>/`）
+- `workspace/` —— 旧版相对沙盒（遗留；新 task 默认用 `/Users/gaolei/agent-workspace/agent-<agentid>/`）
 - `scripts/` —— 运行时启停等（`start` / `stop` / `restart` / `watchdog`）；发版 / 部署在部署平台，不在本仓库
 
 ## 开发与上线流程

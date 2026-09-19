@@ -50,6 +50,7 @@ import {
 import {
   CANONICAL_DEV_REPO,
   DEFAULT_AGENT_WORKSPACE_ROOT,
+  agentWorkspaceDir,
   projectAgentWorkspaceRoot,
 } from "../config.js";
 import { readCwdRules } from "../cwd-rules.js";
@@ -106,7 +107,7 @@ import {
 export type Publish = (message: Record<string, unknown>) => void;
 
 export interface GatewayConfig {
-  /** Root for per-task sandboxes (`<root>/<taskId>/`). */
+  /** Root for per-agent sandboxes (`<root>/agent-<agentid>/`). */
   agentWorkspaceRoot: string;
   /** @deprecated alias of agentWorkspaceRoot */
   agentWorkspace?: string;
@@ -626,13 +627,14 @@ export class AgentGateway {
       undefined;
 
     const taskId = newId("task");
-    // cwd = WorkspaceRoot/{project_name}/{task_id}
-    const projectRoot = projectAgentWorkspaceRoot(
-      project.name,
-      this.effectiveWorkspaceRoot(),
-    );
+    // 每个 agent 一个工作区：`<WorkspaceRoot>/agent-<agentid>`。
+    // agent id 在这里**预分配**（provider 用得上就直接拿它开会话，例如 Cline；
+    // Cursor 的 SDK 自己生成 id，工作区目录名保持预分配的那个），
+    // 所以目录从建立那一刻起就带着这个 agent 的 id。
+    const agentId = newId("agent");
     const workspace =
-      input.workspace?.trim() || path.join(projectRoot, taskId);
+      input.workspace?.trim() ||
+      agentWorkspaceDir(agentId, this.effectiveWorkspaceRoot());
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({
@@ -643,6 +645,8 @@ export class AgentGateway {
       model,
       projectId,
       createdBy: input.createdBy,
+      // 预分配的 agent id：落库 + 标记「还不是活会话」（首个 run 用它开新会话）。
+      agentId,
       ...(input.description !== undefined
         ? { description: input.description }
         : {}),
@@ -2324,7 +2328,12 @@ export class AgentGateway {
   private async executeRun(task: Task, pending: PendingRun): Promise<void> {
     const taskId = task.taskId;
     const { runId, text, images, mode, selfCheck } = pending;
-    let agentId = task.agentId ?? "";
+    // 新建任务时 agent id 是**预分配**的（工作区目录名就是它），还不是活会话：
+    // 这次 run 要拿它去**开新会话**，不能拿它去 resume（provider 侧会当句柄用）。
+    const preallocatedAgentId = task.agentPreallocated
+      ? task.agentId?.trim()
+      : undefined;
+    let agentId = preallocatedAgentId ? "" : task.agentId ?? "";
     const startedAt = Date.now();
 
     const persistAndPublish = (event: AgentEvent): void => {
@@ -2370,6 +2379,11 @@ export class AgentGateway {
         this.store.setTaskAgentId(taskId, agentId);
         task.agentId = agentId;
       }
+      if (task.agentPreallocated) {
+        // provider 已经真的建出会话了 → 预分配标记完成使命（下次 run 走 resume）。
+        this.store.clearTaskAgentPreallocation(taskId);
+        delete task.agentPreallocated;
+      }
     };
 
     try {
@@ -2401,6 +2415,8 @@ export class AgentGateway {
         taskId,
         runId,
         agentId,
+        // 预分配的 agent id：provider 允许自定义会话 id 时就照用（目录名 = agent id）。
+        ...(preallocatedAgentId ? { preallocatedAgentId } : {}),
         prompt: {
           text,
           images: images.length ? images : undefined,

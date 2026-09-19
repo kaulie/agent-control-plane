@@ -84,7 +84,10 @@ export function resolvePort(
 /**
  * Project-level local workspace:
  * `<agentWorkspaceRoot>/<project-name>/`.
- * New tasks use `<projectRoot>/<taskId>/`.
+ *
+ * ⚠️ 它**不再**是新 task 的工作区（老版本是 `<projectRoot>/<taskId>/`）；
+ * 现在只用来读「项目级规则」（`GET /api/projects/:id/settings` → cwdRules）。
+ * 新 task 的工作区见 {@link agentWorkspaceDir}。
  */
 export function projectAgentWorkspaceRoot(
   projectName: string,
@@ -98,6 +101,35 @@ export function projectAgentWorkspaceRoot(
   return path.join(root, safe);
 }
 
+/**
+ * Agent 工作区目录名：`agent-<agentid>`（统一 `agent-` 前缀，provider 自己的
+ * 前缀 `cls-` 去掉）。
+ *
+ * 目录名**就是**这个 agent 的 id → 「目录属于哪个 agent」不用查库：
+ * - `agent-7362ceb1-…`（Cursor）→ `agent-7362ceb1-…`
+ * - `cls-5f7393dd40a44b06`（Cline）→ `agent-5f7393dd40a44b06`
+ */
+export function agentWorkspaceDirName(agentId: string): string {
+  const bare = agentId
+    .trim()
+    .replace(/^(agent|cls)-/i, "")
+    .replace(/[/\\:\0\s]+/g, "-");
+  return `agent-${bare || "unknown"}`;
+}
+
+/**
+ * 每个 agent 自己的工作区：`<agentWorkspaceRoot>/agent-<agentid>`。
+ *
+ * 新建任务时 agent id 由网关**预分配**（`agent-…`），所以目录一创建就带上了
+ * 这个 agent 的 id（不再有 `<project>/<taskId>` 那层）。
+ */
+export function agentWorkspaceDir(
+  agentId: string,
+  root: string = DEFAULT_AGENT_WORKSPACE_ROOT,
+): string {
+  return path.join(root, agentWorkspaceDirName(agentId));
+}
+
 export interface Config {
   /** Git short SHA baked into web build; exposed via /health and X-App-Version. */
   appVersion: string;
@@ -105,7 +137,7 @@ export interface Config {
   port: number;
   host: string;
   apiKey: string | undefined;
-  /** Root directory; new tasks use `<root>/<project-name>/<taskId>/`. */
+  /** Root directory; new tasks use `<root>/agent-<agentid>/`. */
   agentWorkspaceRoot: string;
   /** @deprecated alias of agentWorkspaceRoot (logging / gateway ctor). */
   agentWorkspace: string;

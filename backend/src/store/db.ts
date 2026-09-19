@@ -77,6 +77,8 @@ interface TaskRow {
   model: string | null;
   created_by: string | null;
   agent_id: string | null;
+  /** 1 = `agent_id` 是新建任务时预分配的（还没被 provider 真的建出会话）。 */
+  agent_preallocated: number | null;
   pr_url: string | null;
   task_type: string | null;
   goal: string | null;
@@ -286,6 +288,13 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "agent_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "agent_preallocated")) {
+      // 预分配标记：新建任务时 agent id 由网关生成（= 工作区目录名 `agent-<agentid>`），
+      // 那时它还不是活的会话。历史任务没有这个标记 → 0（老行为：resume 老会话）。
+      this.db.exec(
+        `ALTER TABLE tasks ADD COLUMN agent_preallocated INTEGER NOT NULL DEFAULT 0`,
+      );
     }
     if (!taskCols.some((c) => c.name === "task_type")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN task_type TEXT`);
@@ -936,6 +945,11 @@ export class Store {
     goal?: TaskGoal;
     /** Optional pre-allocated id (used when workspace path embeds taskId). */
     taskId?: string;
+    /**
+     * 预分配的 agent id（新建任务时由网关生成）。有值 = 落库为 `agent_id` 并标记
+     * `agent_preallocated`：工作区目录名就是这个 id，首个 run 用它开新会话。
+     */
+    agentId?: string;
     /** 这个 task 是从哪个 task fork 来的（上下文将满时的分流）。 */
     forkedFrom?: string;
   }): Task {
@@ -945,6 +959,7 @@ export class Store {
     const now = new Date().toISOString();
     const description = input.description?.trim();
     const goal = normalizeTaskGoal(input.goal);
+    const preallocatedAgentId = input.agentId?.trim();
     const task: Task = {
       taskId: input.taskId?.trim() || newId("task"),
       projectId: input.projectId,
@@ -955,6 +970,9 @@ export class Store {
       provider: input.provider,
       model: input.model,
       createdBy: input.createdBy,
+      ...(preallocatedAgentId
+        ? { agentId: preallocatedAgentId, agentPreallocated: true }
+        : {}),
       taskType: normalizeTaskType(input.taskType),
       ...(goal ? { goal } : {}),
       ...(description ? { description } : {}),
@@ -963,8 +981,8 @@ export class Store {
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, task_type, goal, description, last_user_input_at, forked_from)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -976,7 +994,8 @@ export class Store {
         task.provider,
         task.model ?? null,
         task.createdBy ?? null,
-        null,
+        input.agentId?.trim() || null,
+        preallocatedAgentId ? 1 : 0,
         task.taskType,
         task.goal ?? null,
         task.description ?? null,
@@ -1043,6 +1062,16 @@ export class Store {
     this.db
       .prepare(`UPDATE tasks SET agent_id = ? WHERE task_id = ?`)
       .run(agentId, taskId);
+  }
+
+  /**
+   * 清掉「agent id 是预分配的」标记：provider 已经真的建出会话了，
+   * 之后这次 run 的 `agent_id` 就是可 resume 的会话句柄。
+   */
+  clearTaskAgentPreallocation(taskId: string): void {
+    this.db
+      .prepare(`UPDATE tasks SET agent_preallocated = 0 WHERE task_id = ?`)
+      .run(taskId);
   }
 
   // ---- agent successions (explicit agent id lineage) ----
@@ -1213,6 +1242,8 @@ export class Store {
       model: r.model ?? undefined,
       createdBy: r.created_by ?? undefined,
       agentId: r.agent_id || undefined,
+      // 预分配标记只对「还没有活会话」的新任务为真；老任务读到 NULL/0 → 不带这个字段。
+      ...(r.agent_preallocated ? { agentPreallocated: true } : {}),
       ...(prUrl ? { prUrl } : {}),
       // 历史脏值（未知类型）一律读成 general，避免 UI 出现空标签。
       taskType: normalizeTaskType(r.task_type),

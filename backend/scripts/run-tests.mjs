@@ -31,6 +31,7 @@ const tests = [
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
   { file: "scripts/test-task-intent.mjs", via: "tsx" },
   { file: "scripts/test-task-goal.mjs", via: "tsx" },
+  { file: "scripts/test-agent-workspace.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
   { file: "scripts/test-digest.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },

@@ -9,6 +9,14 @@ export type TaskStatus = "active" | "completed" | "error";
  */
 export type TaskType = "general" | "feature" | "bugfix" | "diagnose";
 
+/**
+ * 任务目标：**会改变 agent 的交付动作**（目录见 `./task-goals.ts`）。
+ * - `merge`：做完合入主分支，不部署；
+ * - `deploy`：合入主分支后再部署上线。
+ * 缺省（`undefined`）= 历史任务 / 内部任务，没有目标 → 老行为（开完 PR 停）。
+ */
+export type TaskGoal = "merge" | "deploy";
+
 /** Per-project (or global) defaults for which agent runtime to use. */
 export interface RuntimeConfig {
   /** Provider name (`cursor` | `cline`). Empty = fall back to AGENT_PROVIDER. */
@@ -108,6 +116,11 @@ export interface Task {
   prUrl?: string;
   /** Task category (label only — it does NOT change agent behaviour). */
   taskType: TaskType;
+  /**
+   * 交付目标（**会改变 agent 的动作**：做到哪一步才算交付完成）。
+   * 老任务 / 内部任务没有这个字段 → 保持老行为（开完 PR 就停）。
+   */
+  goal?: TaskGoal;
   /**
    * 任务描述（需求原文）：新建时**必填**，创建后可在面板上修改。
    * - 创建时作为第一条「系统投递」消息下发给 agent（见 gateway.dispatchTaskIntent）；

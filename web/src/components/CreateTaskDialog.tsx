@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
-import type { ModelInfo, ProviderInfo, TaskType } from "../types";
+import type { ModelInfo, ProviderInfo, TaskGoal, TaskType } from "../types";
 import {
   DEFAULT_TASK_TYPE,
   TASK_TYPE_OPTIONS,
   taskTypeOption,
 } from "../task-types";
+import { DEFAULT_TASK_GOAL, TASK_GOAL_OPTIONS } from "../task-goals";
 
 export interface CreateTaskInput {
   title?: string;
   description: string;
   taskType: TaskType;
+  /** 交付目标（会改变 agent 的动作：合入主分支 / 合入并部署上线）。 */
+  goal: TaskGoal;
   provider?: string;
   model?: string;
 }
@@ -35,6 +38,7 @@ export default function CreateTaskDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [taskType, setTaskType] = useState<TaskType>(DEFAULT_TASK_TYPE);
+  const [goal, setGoal] = useState<TaskGoal>(DEFAULT_TASK_GOAL);
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -49,6 +53,7 @@ export default function CreateTaskDialog({
     setTitle("");
     setDescription("");
     setTaskType(DEFAULT_TASK_TYPE);
+    setGoal(DEFAULT_TASK_GOAL);
     setProvider(projectDefaultProvider ?? "");
     setModel(projectDefaultModel ?? "");
     setError(null);
@@ -85,6 +90,7 @@ export default function CreateTaskDialog({
   if (!open) return null;
 
   const option = taskTypeOption(taskType);
+  const goalOption = TASK_GOAL_OPTIONS.find((g) => g.id === goal)!;
   const canSubmit = description.trim().length > 0 && !saving;
 
   /** 标题可选：留空时用描述首行兜底，避免出现 "Task 9/19/2026, …" 这种标题。 */
@@ -108,6 +114,7 @@ export default function CreateTaskDialog({
         title: titleOrFallback(),
         description: description.trim(),
         taskType,
+        goal,
         provider: provider.trim() || undefined,
         model: model.trim() || undefined,
       });
@@ -148,6 +155,29 @@ export default function CreateTaskDialog({
             ))}
           </div>
           <span className="intent-hint">{option.hint}</span>
+        </div>
+        {/* 目标：和「类型」不同 —— 它会改变 agent 的交付动作（做到哪一步算完），
+            所以默认选中「合入主分支」，并把「不部署 / 要部署」写清楚。 */}
+        <div className="runtime-field runtime-field-wide">
+          <span className="runtime-field-label">目标</span>
+          <div className="intent-type-chips">
+            {TASK_GOAL_OPTIONS.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                className={`intent-type-chip goal-${g.id} ${
+                  g.id === goal ? "selected" : ""
+                }`}
+                title={g.hint}
+                onClick={() => setGoal(g.id)}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
+          <span className="intent-hint">
+            {goalOption.hint}（会写进投递给 agent 的需求里）
+          </span>
         </div>
         <label className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">Title（可选）</span>

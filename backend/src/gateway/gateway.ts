@@ -58,6 +58,11 @@ import {
   taskTypeLabel,
 } from "../task-types.js";
 import {
+  normalizeTaskGoal,
+  taskGoalInfo,
+  taskGoalLabel,
+} from "../task-goals.js";
+import {
   mergeSettings,
   resolveRuntimeDefaults,
   resolveWorkspaceRoot,
@@ -387,13 +392,19 @@ const DIGEST_REFRESH_EVENTS = 50;
  */
 export function formatTaskIntentMessage(task: Task): string {
   const type = normalizeTaskType(task.taskType);
+  const goal = normalizeTaskGoal(task.goal);
+  const goalInfo = goal ? taskGoalInfo(goal) : undefined;
   const lines = [
     `【需求投递】${task.title}`,
     `类型：${taskTypeLabel(type)}（${type}）`,
+    // 目标会改变 agent 的交付动作，所以投递消息里必须写明（老任务没有 → 不出现这一行）。
+    ...(goal && goalInfo ? [`目标：${goalInfo.label}（${goal}）`] : []),
     "",
     "描述：",
     task.description?.trim() ?? "(无描述)",
     "",
+    // 收尾：目标不同 → 明确的交付边界（老任务保持原话，逐字不变）。
+    ...(goalInfo ? [`交付目标：${goalInfo.directive}`] : []),
     "以上为本任务需求，请开始工作。信息不足时先提出你的疑问。",
   ];
   return lines.join("\n");
@@ -585,6 +596,8 @@ export class AgentGateway {
     description?: string;
     /** 任务类型标签（纯分类，不改变行为）；缺省 `general`。 */
     taskType?: string;
+    /** 交付目标（**会改变 agent 的动作**）；缺省 = 没设目标（老行为）。 */
+    goal?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
@@ -635,6 +648,8 @@ export class AgentGateway {
         : {}),
       // 非法类型不报错（老客户端/内部调用），静默回落到 general。
       taskType: normalizeTaskType(input.taskType),
+      // 目标：非法 / 缺省 → 没设目标（HTTP 入口已在 routes 里校验 + 补默认值）。
+      goal: normalizeTaskGoal(input.goal),
     });
     this.publish({ type: "task_created", task });
     return task;
@@ -653,7 +668,13 @@ export class AgentGateway {
    */
   updateTaskIntent(
     taskId: string,
-    patch: { title?: string; taskType?: string; description?: string },
+    patch: {
+      title?: string;
+      taskType?: string;
+      /** 传 `null` = 清掉目标（回到老行为）；非法值同样视为清掉。 */
+      goal?: string | null;
+      description?: string;
+    },
   ): Task | undefined {
     const before = this.store.getTask(taskId);
     if (!before) return undefined;
@@ -661,10 +682,13 @@ export class AgentGateway {
     const description = patch.description?.trim();
     const nextType =
       patch.taskType !== undefined ? normalizeTaskType(patch.taskType) : undefined;
+    const nextGoal =
+      patch.goal !== undefined ? normalizeTaskGoal(patch.goal) : undefined;
 
     const updated = this.store.updateTaskIntent(taskId, {
       ...(title ? { title } : {}),
       ...(nextType ? { taskType: nextType } : {}),
+      ...(patch.goal !== undefined ? { goal: nextGoal ?? null } : {}),
       // 描述必填：只接受非空修改，空 = 不改（routes 会在真正传了空值时拦 400）。
       ...(description ? { description } : {}),
     });
@@ -674,6 +698,16 @@ export class AgentGateway {
     if (title && title !== before.title) changes.push(`标题 →「${title}」`);
     if (nextType && nextType !== before.taskType) {
       changes.push(`类型 → ${taskTypeLabel(nextType)}`);
+    }
+    const goalChanged =
+      patch.goal !== undefined &&
+      (nextGoal ?? undefined) !== (before.goal ?? undefined);
+    if (goalChanged) {
+      changes.push(
+        nextGoal
+          ? `目标 → ${taskGoalLabel(nextGoal)}`
+          : "目标已清除（回到「开完 PR 即停」）",
+      );
     }
     if (description && description !== before.description) changes.push("描述已更新");
     if (changes.length) {
@@ -691,6 +725,7 @@ export class AgentGateway {
             `任务意图已更新（${changes.join("，")}）。当前会话已开始，看不到新描述；` +
             `下一次会话（重启 / 轮转 / fork）会带上最新描述。`,
           taskType: updated.taskType,
+          ...(updated.goal ? { goal: updated.goal } : {}),
           ...(updated.description ? { description: updated.description } : {}),
         },
       };
@@ -729,7 +764,7 @@ export class AgentGateway {
    * 把一个上下文将满的 task 分流成新 task（用户点「Fork 新 task」）。
    *
    * 继承：project / provider / model / **workspace（必须是同一个目录，否则丢本地 clone 与未提交改动）**
-   * / prUrl（避免重复开 PR）/ **taskType + description（同一个意图换个会话继续）**；
+   * / prUrl（避免重复开 PR）/ **taskType + goal + description（同一个意图换个会话继续）**；
    * 新 task 记 `forkedFrom`；**原 task 时间线留一条可见提示**（可审计）。
    * 历史不复制事件，而是在新 task 的简报里带一份最近历史（`carried`）。
    *
@@ -747,6 +782,9 @@ export class AgentGateway {
       projectId: source.projectId,
       ...(source.createdBy ? { createdBy: source.createdBy } : {}),
       taskType: source.taskType,
+      // 交付目标必须一起继承：否则 fork 出来的 task 会退回「开完 PR 停」，
+      // 而源任务的目标（可能还要部署）就丢了。
+      goal: source.goal,
       // 描述是必填属性：老任务没有描述时用标题兜底，保证 fork 出来的 task 也有需求。
       description: source.description ?? source.title,
       forkedFrom: source.taskId,

@@ -30,6 +30,7 @@ const tests = [
   { file: "scripts/test-transparency.mjs", via: "tsx" },
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
   { file: "scripts/test-task-intent.mjs", via: "tsx" },
+  { file: "scripts/test-task-goal.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
   { file: "scripts/test-digest.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
@@ -45,6 +46,12 @@ const tests = [
   // 任务意图（类型标签 + 系统投递卡片）前端口径
   {
     file: "../web/scripts/test-task-intent-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
+  // 任务目标（创建对话框的「目标」选项 + 面板徽标）前端口径
+  {
+    file: "../web/scripts/test-task-goal-ui.mjs",
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },

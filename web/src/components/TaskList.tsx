@@ -1,6 +1,7 @@
 import type { Project, Task } from "../types";
 import { formatDateTime } from "../format";
 import { taskTypeLabel, taskTypeOption } from "../task-types";
+import { taskGoalLabel, taskGoalOption } from "../task-goals";
 
 interface Props {
   projects: Project[];
@@ -134,6 +135,15 @@ export default function TaskList({
                 >
                   {taskTypeOption(t.taskType).short}
                 </span>
+                {/* 目标会改变 agent 的交付动作：列表上也标出来（老任务没有目标 → 不显示）。 */}
+                {t.goal ? (
+                  <span
+                    className={`task-goal-badge goal-${t.goal}`}
+                    title={`交付目标：${taskGoalLabel(t.goal)}`}
+                  >
+                    {taskGoalOption(t.goal)?.short ?? taskGoalLabel(t.goal)}
+                  </span>
+                ) : null}
                 <span className="task-title-text" title={t.description}>
                   {t.title || t.taskId}
                 </span>

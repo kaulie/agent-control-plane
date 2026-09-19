@@ -131,7 +131,7 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
             setEditing((v) => !v);
             setExpanded(true);
           }}
-          title="修改类型 / 标题 / 描述"
+          title="修改类型 / 目标 / 标题 / 描述"
         >
           ✎ 编辑
         </button>

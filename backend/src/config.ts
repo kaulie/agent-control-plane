@@ -20,6 +20,13 @@ export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 export const DEFAULT_PORT = 4211;
 
 /**
+ * Fallback cap on concurrently running agent runs
+ * (`AGENT_MAX_CONCURRENT_RUNS`). Bumped 2 → 4 so a fresh deploy runs four
+ * agents at once without env tweaks.
+ */
+export const DEFAULT_MAX_CONCURRENT_RUNS = 4;
+
+/**
  * Organization service (department / person catalogue). Local runtime contract:
  * port 4244, `GET /api/v1/departments`.
  */
@@ -114,6 +121,29 @@ export function resolvePort(
     );
   }
   return DEFAULT_PORT;
+}
+
+/**
+ * Global cap on concurrently running agent runs, resolved from
+ * `AGENT_MAX_CONCURRENT_RUNS`:
+ *
+ *   AGENT_MAX_CONCURRENT_RUNS (positive integer)  →  DEFAULT_MAX_CONCURRENT_RUNS
+ *
+ * A blank / malformed / non-positive value is ignored instead of turning into
+ * `NaN`, which would make every `runningCount >= cap` comparison false and
+ * silently lift the cap (unbounded concurrency).
+ */
+export function resolveMaxConcurrentRuns(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const trimmed = env.AGENT_MAX_CONCURRENT_RUNS?.trim();
+  if (!trimmed) return DEFAULT_MAX_CONCURRENT_RUNS;
+  const parsed = Number(trimmed);
+  if (Number.isInteger(parsed) && parsed >= 1) return parsed;
+  console.warn(
+    `[config] ignoring invalid AGENT_MAX_CONCURRENT_RUNS="${trimmed}" (expected integer >= 1); falling back to ${DEFAULT_MAX_CONCURRENT_RUNS}`,
+  );
+  return DEFAULT_MAX_CONCURRENT_RUNS;
 }
 
 /**
@@ -362,10 +392,7 @@ export function loadConfig(): Config {
     organizationTimeoutMs: resolveOrganizationTimeoutMs(process.env),
     serviceRegistryApiUrl: resolveServiceRegistryApiUrl(process.env),
     serviceRegistryTimeoutMs: resolveServiceRegistryTimeoutMs(process.env),
-    maxConcurrentRuns: Math.max(
-      1,
-      Number(process.env.AGENT_MAX_CONCURRENT_RUNS || 2),
-    ),
+    maxConcurrentRuns: resolveMaxConcurrentRuns(process.env),
     agentRssLimitMb: Math.max(
       0,
       Number(process.env.AGENT_RSS_LIMIT_MB || 2048),

@@ -36,6 +36,20 @@ export interface ClineProviderConfig {
   compactionStrategy?: "basic" | "agentic";
   /** agentic 摘要用的模型（缺省 = 会话模型）。 */
   compactionModel?: string;
+  /**
+   * 网关重启后是否用**磁盘历史**续接会话（默认 true，`CLINE_RESUME_SEED=0` 关）。
+   *
+   * 关掉就是老行为：只注一份启动简报、整段对话丢掉（时间线写「会话已重置」）。
+   * 机制与边界见 `restart-resume.ts` 头部注释。
+   */
+  resumeSeed?: boolean;
+  /**
+   * 续接时 seed 的字符预算（默认 60000，`CLINE_RESUME_SEED_CHARS`）；<= 0 视为关闭。
+   *
+   * 参照：一次 run 的磁盘 transcript 实测 270KB ≈ 58.6k tokens（task-8c6b，2026-09-20），
+   * 所以「全量 seed」很贵；默认只带最近这一段（≈9.4k tokens 实测口径）。
+   */
+  resumeSeedChars?: number;
 }
 
 export const DEFAULT_PROVIDER_ID = "deepseek";

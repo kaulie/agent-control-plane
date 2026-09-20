@@ -233,7 +233,13 @@ export type AgentSuccessionReason =
   | "mode_change"
   | "session_unusable"
   /** 上下文接近模型窗口，系统自动换会话（兜底；见 context/README.md）。 */
-  | "context_rotation";
+  | "context_rotation"
+  /**
+   * 网关重启后，按磁盘 transcript 续接（新会话 + seed 旧历史；见
+   * `providers/cline/restart-resume.ts`）。以前这种情况只会写 `session_reset`
+   * 并且整段对话丢掉。
+   */
+  | "gateway_restart";
 
 /**
  * Explicit lineage when a task gets a new SDK agent/session while inheriting

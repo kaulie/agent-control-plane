@@ -373,7 +373,9 @@ export function agentSuccessionFromEvent(
   if (!fromAgentId || !toAgentId) return undefined;
   const reasonRaw = typeof p.reason === "string" ? p.reason.trim() : "";
   const reason: AgentSuccessionReason =
-    reasonRaw === "session_unusable" || reasonRaw === "context_rotation"
+    reasonRaw === "session_unusable" ||
+    reasonRaw === "context_rotation" ||
+    reasonRaw === "gateway_restart"
       ? reasonRaw
       : "mode_change";
   return {

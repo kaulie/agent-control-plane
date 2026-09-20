@@ -132,6 +132,9 @@ const providers = createProviderRegistry({
     compaction: config.clineCompaction,
     compactionStrategy: config.clineCompactionStrategy,
     ...(config.clineCompactionModel ? { compactionModel: config.clineCompactionModel } : {}),
+    // 网关重启后按磁盘历史续接会话（见 providers/cline/restart-resume.ts）。
+    resumeSeed: config.clineResumeSeed,
+    resumeSeedChars: config.clineResumeSeedChars,
   },
 });
 // 预热模型窗口（上下文占比要用；失败只是"窗口未知"，不影响启动）。

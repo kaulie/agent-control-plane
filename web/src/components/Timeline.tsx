@@ -178,6 +178,20 @@ export function buildRows(events: AgentEvent[]): Row[] {
           // 透明化（PR-5）：网关重启/会话失效导致"换会话、模型失忆"，以前完全无感。
           body = "会话已重置";
           detail = p.message ? String(p.message) : "";
+        } else if (statusRaw.toLowerCase() === "session_resumed") {
+          // 透明化（PR-6）：网关重启后按磁盘 transcript 续接（不是失忆，是"接着上次说"）。
+          body = "已续接上次会话";
+          detail = [
+            p.message ? String(p.message) : "",
+            p.seededMessages != null
+              ? `seed ${Number(p.seededMessages)} msgs${
+                  p.seededTokens != null ? ` ≈ ${formatTokens(Number(p.seededTokens))} tokens` : ""
+                }${Number(p.droppedMessages ?? 0) > 0 ? `（丢最旧 ${Number(p.droppedMessages)} 条）` : ""}`
+              : "",
+            p.previousAgentId ? `from=${String(p.previousAgentId)}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
         } else if (statusRaw.toLowerCase() === "working") {
           body = "仍在执行";
           detail = p.message ? String(p.message) : "";
@@ -280,7 +294,9 @@ export function buildRows(events: AgentEvent[]): Row[] {
             ? "上下文轮转"
             : reasonRaw === "session_unusable"
               ? "会话失效"
-              : "切模式";
+              : reasonRaw === "gateway_restart"
+                ? "网关重启后续接"
+                : "切模式";
         const contextPercent =
           p.contextPercent != null && Number.isFinite(Number(p.contextPercent))
             ? Number(p.contextPercent)

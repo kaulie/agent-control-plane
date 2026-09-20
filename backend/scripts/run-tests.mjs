@@ -35,6 +35,7 @@ const tests = [
   { file: "scripts/test-agent-workspace.mjs", via: "tsx" },
   { file: "scripts/test-openapi-contract.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
+  { file: "scripts/test-restart-resume.mjs", via: "tsx" },
   { file: "scripts/test-digest.mjs", via: "tsx" },
   { file: "scripts/test-queue.mjs", via: "node" },
   { file: "scripts/test-self-check.mjs", via: "node" },

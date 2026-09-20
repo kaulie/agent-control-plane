@@ -241,11 +241,20 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 - **上下文将满（≥85%）= fork 出口**：UsageBar 下方常驻一条提示 + 「Fork 新 task」按钮；
   你**下一次发言**时会先弹窗（Fork / 仍然发送 / 不再提醒 / 取消）—— 不做"替用户决定"的默认动作。
   Fork 继承工作区与模型并带上最近历史，原 task 时间线留痕，也会显示 `已 fork → #xxx`；
+- **网关重启 → 续接而不是失忆**（默认开，`CLINE_RESUME_SEED=0` 关）：cline 的会话 runtime 只在进程内存里，
+  但 SDK 会把每个会话的清单 + 完整消息**落盘**（`~/.cline/data/sessions/<id>/<id>.messages.json`，
+  索引 `~/.cline/data/db/sessions.db`），`readLiveMessages()` 在会话不驻留时会自动回落磁盘 transcript。
+  所以重启后的第一个 run 先按旧会话 id 读回历史 → 裁到预算（`CLINE_RESUME_SEED_CHARS`，默认 60000 字符
+  ≈ 9.4k tokens，尾部优先）→ **seed 新会话**，时间线写「已续接上次会话」+ `session_resumed` 事件 +
+  一条 `agent_succession`（reason=`gateway_restart`，带 seed 体量）。磁盘上捞不到（新任务/索引里没有/
+  cwd 对不上/被配置关掉）才退回老行为：只注简报 + `session_reset`。**不跨任务借历史**（cwd 守卫）；
+  原地复活同一个 sessionId 是不可能的（local 模式非驻留 → `session_not_found`），所以语义是
+  「新会话 + 旧 transcript」。
 - **透明化契约**：任何改变 agent 上下文/记忆的动作都必须写一条用户可见的时间线消息 +
-  一条可审计的事件 —— 已落地三类：网关重启/会话失效 → `session_reset`；切模式 seed →
-  `agent_succession.seededTokens`（以前只有条数 `1630`，看不出搬走了 ≈1M 上下文）；新会话简报 →
-  `run_started.bootstrap*`（含原文，能回答"模型看到了什么"，且超预算时**保尾部**不再整段砍掉
-  「近几轮 run 结论」）。
+  一条可审计的事件 —— 已落地四类：网关重启 → `session_resumed`（续上）/ `session_reset`（没得续）；
+  切模式 seed → `agent_succession.seededTokens`（以前只有条数 `1630`，看不出搬走了 ≈1M 上下文）；
+  新会话简报 → `run_started.bootstrap*`（含原文，能回答"模型看到了什么"，且超预算时**保尾部**不再
+  整段砍掉「近几轮 run 结论」）。
 
 细节与后续计划见 [`backend/src/context/README.md`](backend/src/context/README.md)。
 

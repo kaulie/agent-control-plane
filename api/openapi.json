@@ -1,0 +1,524 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "agent-control-plane",
+    "version": "0.1.0",
+    "description": "Web Cursor Agent Gateway：任务 / Agent 编排（创建 · 投递需求 · 消息 · fork · PR）+ 看板 / 时间线 + 计费与用量。"
+  },
+  "tags": [
+    {
+      "name": "ops",
+      "description": "运维：健康检查、优雅重启契约、进程与并发状态"
+    },
+    {
+      "name": "catalog",
+      "description": "运行目录：provider 鉴权状态、provider 列表、模型目录"
+    },
+    {
+      "name": "settings",
+      "description": "全局设置"
+    },
+    {
+      "name": "projects",
+      "description": "项目与项目设置"
+    },
+    {
+      "name": "org",
+      "description": "组织：部门目录（organization 服务）"
+    },
+    {
+      "name": "tasks",
+      "description": "任务：创建 / 详情 / 事件 / 消息 / 停止 / fork / PR / 附件"
+    },
+    {
+      "name": "agents",
+      "description": "Agent 看板与时间线"
+    },
+    {
+      "name": "billing",
+      "description": "计费规则（峰谷价目与时段）"
+    },
+    {
+      "name": "usage",
+      "description": "用量统计"
+    }
+  ],
+  "paths": {
+    "/api/agents": {
+      "get": {
+        "summary": "Agent 看板（per-agent / per-task 两个口径）",
+        "operationId": "getApiAgents",
+        "tags": [
+          "agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/agents/{agentId}/timeline": {
+      "get": {
+        "summary": "Agent 时间线（idle / thinking / working + 输入与 run 标记）",
+        "operationId": "getApiAgentsAgentIdTimeline",
+        "tags": [
+          "agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth": {
+      "get": {
+        "summary": "各 provider 的鉴权状态",
+        "operationId": "getApiAuth",
+        "tags": [
+          "catalog"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/billing/rules": {
+      "get": {
+        "summary": "计费规则列表",
+        "operationId": "getApiBillingRules",
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/billing/rules/{ruleId}": {
+      "delete": {
+        "summary": "删除一条计费规则",
+        "operationId": "deleteApiBillingRulesRuleId",
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "summary": "写入一条计费规则（峰谷价目与时段）",
+        "operationId": "putApiBillingRulesRuleId",
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "summary": "某 provider 的模型目录与默认模型",
+        "operationId": "getApiModels",
+        "tags": [
+          "catalog"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ops/agent-runtime": {
+      "get": {
+        "summary": "Agent 运行时曲线（并发占用与队列采样）",
+        "operationId": "getApiOpsAgentRuntime",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ops/restart-notify": {
+      "post": {
+        "summary": "优雅重启通知（平台请求排空：暂停新 run，等在跑的跑完）",
+        "operationId": "postApiOpsRestartNotify",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ops/restart-status": {
+      "get": {
+        "summary": "优雅重启轮询契约（平台轮询 canRestart / ready / canDeploy）",
+        "operationId": "getApiOpsRestartStatus",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ops/runtime": {
+      "get": {
+        "summary": "本进程运行状态（内存 / 并发 / 队列 / drain）",
+        "operationId": "getApiOpsRuntime",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/org/departments": {
+      "get": {
+        "summary": "部门目录（organization 服务；不可达时 available=false）",
+        "operationId": "getApiOrgDepartments",
+        "tags": [
+          "org"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "summary": "项目列表（含所属部门）",
+        "operationId": "getApiProjects",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "新建项目（所属部门必填）",
+        "operationId": "postApiProjects",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "201": {
+            "description": "创建成功，返回项目"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}": {
+      "get": {
+        "summary": "单个项目",
+        "operationId": "getApiProjectsProjectId",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "改项目（名字 / Git 仓库地址）",
+        "operationId": "patchApiProjectsProjectId",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/settings": {
+      "get": {
+        "summary": "项目设置（含只读的工作区规则）",
+        "operationId": "getApiProjectsProjectIdSettings",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "改项目设置（运行时默认 / 所属部门）",
+        "operationId": "patchApiProjectsProjectIdSettings",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/providers": {
+      "get": {
+        "summary": "provider 列表与默认 provider（含可用性）",
+        "operationId": "getApiProviders",
+        "tags": [
+          "catalog"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/settings/global": {
+      "get": {
+        "summary": "全局设置",
+        "operationId": "getApiSettingsGlobal",
+        "tags": [
+          "settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "改全局设置（工作区根目录 / 运行时默认 / 部门）",
+        "operationId": "patchApiSettingsGlobal",
+        "tags": [
+          "settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/stats/token-usage": {
+      "get": {
+        "summary": "跨任务 token 用量序列（按 provider / model 聚合）",
+        "operationId": "getApiStatsTokenUsage",
+        "tags": [
+          "usage"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "summary": "任务列表（带 stats，可按 projectId 过滤）",
+        "operationId": "getApiTasks",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "新建任务（描述必填；创建后自动投递需求并开跑）",
+        "operationId": "postApiTasks",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "201": {
+            "description": "创建成功，返回任务"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}": {
+      "get": {
+        "summary": "任务详情（task + project + runs + stats + context）",
+        "operationId": "getApiTasksTaskId",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "改任务意图（标题 / 类型 / 目标 / 描述）或回写 PR 链接",
+        "operationId": "patchApiTasksTaskId",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/agent-successions": {
+      "get": {
+        "summary": "这个任务的 agent 替换记录",
+        "operationId": "getApiTasksTaskIdAgentSuccessions",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/attachments/{attachmentId}": {
+      "get": {
+        "summary": "取任务附件（原图）",
+        "operationId": "getApiTasksTaskIdAttachmentsAttachmentId",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/events": {
+      "get": {
+        "summary": "任务事件时间线（after= 增量拉取）",
+        "operationId": "getApiTasksTaskIdEvents",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/fork": {
+      "post": {
+        "summary": "fork 新任务（上下文将满时分流，沿用同一个工作区）",
+        "operationId": "postApiTasksTaskIdFork",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/messages": {
+      "post": {
+        "summary": "给 agent 发消息（起一个 run，mode=agent|plan）",
+        "operationId": "postApiTasksTaskIdMessages",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/pull-request": {
+      "post": {
+        "summary": "用任务工作区开 PR 并回写 prUrl",
+        "operationId": "postApiTasksTaskIdPullRequest",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/runs/{runId}/cancel": {
+      "post": {
+        "summary": "取消排队中的 run",
+        "operationId": "postApiTasksTaskIdRunsRunIdCancel",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/tasks/{taskId}/stop": {
+      "post": {
+        "summary": "停止当前 run",
+        "operationId": "postApiTasksTaskIdStop",
+        "tags": [
+          "tasks"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "健康检查（版本 / 运行时长 / 上次退出原因）",
+        "operationId": "getHealth",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  }
+}

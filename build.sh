@@ -59,8 +59,10 @@ rsync -a backend/dist/ outputs/backend/dist/
 rsync -a web/dist/ outputs/web/dist/
 
 # Runtime ops scripts (start/stop/restart/watchdog/…).
+# register-contract.sh 是 CI / 发版用的（服务中心契约登记），不进运行时快照。
 rsync -a \
   --exclude 'release.sh' \
+  --exclude 'register-contract.sh' \
   scripts/ outputs/scripts/
 
 # MCP helper (already production-installed).
@@ -79,3 +81,22 @@ rsync -a node_modules/ outputs/node_modules/
 
 log "完成 → ${ROOT}/outputs/"
 du -sh outputs outputs/node_modules outputs/backend outputs/web outputs/mcp-servers 2>/dev/null || true
+
+# ---- 服务中心契约登记（CI / 发版脚本末尾那一行）----
+# 与 Go 服务的 `client/ci/register-go-service.sh` 对等：读**提交进仓库**的契约
+# （api/openapi.json，由 backend/scripts/gen-openapi.mjs 从路由 + route-meta.ts 生成）
+# 幂等上报（服务 + 实例集合）。默认开；REGISTER_CONTRACT=0 关闭。
+# 失败默认**不**影响构建产物（契约元信息不该拦住发版）：加
+# REGISTER_CONTRACT_STRICT=1 让失败直接失败；手动重跑：bash scripts/register-contract.sh
+if [ "${REGISTER_CONTRACT:-1}" = "0" ]; then
+  log "服务中心契约登记已关闭（REGISTER_CONTRACT=0）"
+else
+  log "服务中心契约登记（scripts/register-contract.sh；REGISTER_CONTRACT=0 可关闭）"
+  if bash "${ROOT}/scripts/register-contract.sh"; then
+    :
+  elif [ "${REGISTER_CONTRACT_STRICT:-0}" = "1" ]; then
+    die "服务中心契约登记失败（REGISTER_CONTRACT_STRICT=1）"
+  else
+    log "警告：服务中心契约登记失败，但构建产物已生成（重跑：bash scripts/register-contract.sh）"
+  fi
+fi

@@ -7,7 +7,10 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "openapi:gen": "tsx scripts/gen-openapi.mjs",
+    "openapi:check": "tsx scripts/gen-openapi.mjs --check",
+    "openapi:list": "tsx scripts/gen-openapi.mjs --list"
   },
   "dependencies": {
     "@cline/sdk": "^0.0.82",

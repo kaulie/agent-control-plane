@@ -25,6 +25,7 @@ import type {
 } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
+import { DEFAULT_MAX_CONCURRENT_RUNS } from "../config.js";
 import {
   isProviderName,
   normalizeProviderName,
@@ -476,7 +477,10 @@ export class AgentGateway {
     private config: GatewayConfig,
     private publish: Publish,
   ) {
-    this.maxConcurrentRuns = Math.max(1, config.maxConcurrentRuns ?? 2);
+    this.maxConcurrentRuns = Math.max(
+      1,
+      config.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS,
+    );
     this.agentRssLimitMb = Math.max(0, config.agentRssLimitMb ?? 2048);
     this.deployGracefulWaitMs = Math.max(
       0,

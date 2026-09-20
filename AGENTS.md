@@ -7,7 +7,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 | Path | Action |
 |---|---|
 | `/Users/gaolei/agent-workspace/agent-<agentid>/` | **Your sandbox** — cwd for this task (`agentid` = your agent id, 见 bootstrap 的 `- workspace:`); clone/work here（**开发 only**） |
-| Project `gitRepoUrl` (GitHub) | **origin** for clone / push / PR；also the sole release source |
+| Project `gitRepoUrl` (GitHub) | **Metadata only** (list / settings display); the repo address injected into your bootstrap comes from the **service registry** (project → org → `GET /v1/orgs/{orgId}/services`), not from here |
 | [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
 | `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
 | `~/runtime/web-cursor` | App runtime — **never** hand-edit; only the deployment platform ships into it |
@@ -18,12 +18,12 @@ You are the agent behind **Web Cursor**. These rules always apply.
 **How to start work**
 
 1. Your agent workspace is already created (empty) at `/Users/gaolei/agent-workspace/agent-<agentid>/`（以 bootstrap 里的 `- workspace:` 为准）。
-2. Clone the project's **GitHub** `gitRepoUrl` into that directory, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
+2. Clone the **repo URL injected in your bootstrap** (`Injected git repositories` — sourced from the service registry by your project's org) into that directory, then create a task branch from latest `main` (e.g. `feature/<taskId>`). Develop only there — never on `main`.
 3. Do **not** edit other tasks' directories. Do **not** edit runtime or `deployment-<hash>/` snapshots.
 
 ```bash
-# from your task workspace cwd (use the project gitRepoUrl from bootstrap)
-git clone <gitRepoUrl> .
+# from your task workspace cwd (use the injected git repo URL from the bootstrap)
+git clone <injected-git-repo-url> .
 git fetch origin && git checkout main && git pull --ff-only origin main
 git checkout -b feature/<taskId>
 # ... edit, commit ...

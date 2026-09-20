@@ -31,11 +31,17 @@ import {
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-goal-"));
 const store = new Store(dir);
-// 项目带 git 仓库：简报里「交付目标」那段只有在项目配了 origin 时才渲染
-// （见 task-context 的 Workspace isolation）。
-const project = store.createProject("goal-test", {
-  gitRepoUrl: "https://github.com/example/goal-test",
-});
+// 简报里「仓库 + 交付目标 + 部署平台」那一段只有在**服务中心注入了仓库**时才渲染
+// （见 task-context 的 Workspace isolation：仓库地址不再来自 project.gitRepoUrl）。
+const project = store.createProject("goal-test");
+const ORG_SERVICES = {
+  available: true,
+  orgId: "D0005",
+  orgName: "AI研发部",
+  items: [{ name: "goal-test", gitRepoUrl: "https://github.com/example/goal-test" }],
+  source: "http://127.0.0.1:4240",
+  fetchedAt: "2026-09-20T01:00:00.000Z",
+};
 
 const provider = {
   name: "cursor",
@@ -90,6 +96,7 @@ const bootstrapOf = (task) =>
     project: store.getProject(task.projectId),
     events: [],
     runs: [],
+    orgServices: ORG_SERVICES,
   }).text;
 
 // ---- 1) 目录口径 ----

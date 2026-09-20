@@ -404,6 +404,26 @@ export async function registerRoutes(
       }
   });
 
+  /**
+   * 这个项目**会被注入哪些仓库地址**：project → 所属组织（`department.departmentId`）
+   * → 服务中心 `GET /v1/orgs/{orgId}/services`（含每个服务的 git 仓库地址）。
+   *
+   * 只读，供排查「agent 的简报里到底拿到了什么仓库」。项目没有所属组织 /
+   * 服务中心不可达 → `repos: null`（简报此时退回「按需自己 clone」的兜底文案，
+   * **不会**回落到项目上登记的 `gitRepoUrl`）。`?refresh=1` 绕开 30s 缓存。
+   */
+  app.get<{
+    Params: { projectId: string };
+    Querystring: { refresh?: string };
+  }>("/api/projects/:projectId/service-repos", async (req, reply) => {
+    const project = gateway.getProject(req.params.projectId);
+    if (!project) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+    return gateway.getProjectServiceRepos(project.projectId, { refresh });
+  });
+
   // ---- tasks ----
 
   /**

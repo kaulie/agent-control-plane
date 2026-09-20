@@ -15,6 +15,7 @@ const tests = [
   { file: "scripts/test-port.mjs", via: "tsx" },
   { file: "scripts/test-shutdown.mjs", via: "tsx" },
   { file: "scripts/test-organization.mjs", via: "tsx" },
+  { file: "scripts/test-injected-repos.mjs", via: "tsx" },
   { file: "scripts/test-decisions.mjs", via: "tsx" },
   { file: "scripts/test-settings.mjs", via: "node" },
   { file: "scripts/test-project-department.mjs", via: "node" },

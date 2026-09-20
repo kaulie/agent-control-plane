@@ -149,10 +149,15 @@ export default function ProjectDialog({
             />
           </label>
         )}
+        {showGit && (
+          <p className="modal-hint">
+            这里只是项目元数据（列表 / 设置页展示）；<b>agent 的仓库地址不再取这个值</b>：
+            由项目「所属部门」（组织）去<b>服务中心</b>查该组织下登记的服务与仓库地址后注入。
+          </p>
+        )}
         {mode === "gitRepoUrl" ? (
           <p className="modal-hint">
-            支持 https / ssh / 本地路径。留空保存 = 清除配置，agent
-            将自行选择要 clone 的仓库。
+            支持 https / ssh / 本地路径。留空保存 = 清除登记值。
           </p>
         ) : null}
         {mode === "create" && (

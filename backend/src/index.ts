@@ -17,6 +17,7 @@ import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
 import { OrganizationClient } from "./organization.js";
+import { ServiceRegistryClient } from "./service-registry.js";
 import {
   buildShutdownReport,
   formatPreviousExit,
@@ -203,6 +204,11 @@ const gateway = new AgentGateway(
       providerId: config.clineProviderId,
       ...(config.contextDigestModel ? { model: config.contextDigestModel } : {}),
     },
+    // 注入 agent 的仓库地址来源：project → 组织 id → 服务中心的服务清单（含 git 仓库地址）。
+    serviceRegistry: new ServiceRegistryClient({
+      baseUrl: config.serviceRegistryApiUrl,
+      timeoutMs: config.serviceRegistryTimeoutMs,
+    }),
   },
   publish,
 );
@@ -243,6 +249,9 @@ app.log.info(
 );
 app.log.info(
   `organization service: ${config.organizationApiUrl} (project 所属部门, timeout=${config.organizationTimeoutMs}ms)`,
+);
+app.log.info(
+  `service registry: ${config.serviceRegistryApiUrl} (project 组织 → 服务/仓库注入, timeout=${config.serviceRegistryTimeoutMs}ms)`,
 );
 
 try {

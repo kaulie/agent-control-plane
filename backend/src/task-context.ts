@@ -1,8 +1,16 @@
-import type { AgentEvent, Project, RunRecord, Task } from "./types.js";
+import type {
+  AgentEvent,
+  OrgServiceList,
+  Project,
+  RunRecord,
+  Task,
+} from "./types.js";
 import { normalizeTaskType, taskTypeLabel } from "./task-types.js";
 import { taskGoalInfo } from "./task-goals.js";
 
 const MAX_BOOTSTRAP_CHARS = 7500;
+/** 简报里最多逐个列几个仓库（骨架预算有限；超出的折成一句「还有 N 个」）。 */
+const MAX_INJECTED_REPOS = 12;
 const MAX_USER_MESSAGES = 20;
 const MAX_RUN_RESULTS = 10;
 const MAX_LINE_CHARS = 400;
@@ -21,6 +29,14 @@ export interface TaskBootstrapInput {
   project?: Project;
   events: AgentEvent[];
   runs: RunRecord[];
+  /**
+   * 服务中心按组织（`project.department.departmentId`）给出的服务清单。
+   *
+   * **简报里注入的仓库地址只来自这里** —— 不再读 `project.gitRepoUrl`
+   * （单一真源是服务中心；见 `./service-registry.ts`）。缺省 / 服务中心不可达
+   * → 简报退回「按需自己 clone」的兜底文案。
+   */
+  orgServices?: OrgServiceList;
   /**
    * 从别的 task fork 过来的历史（上下文将满时的分流）：只进 prompt，**不落本 task 的事件流**
    * —— 用户要求"历史不一定要显示在新 task 里"，但模型要能接着干。
@@ -109,8 +125,40 @@ function collectRunResults(runs: RunRecord[], tag = ""): string[] {
   });
 }
 
+/**
+ * 注入 agent 的仓库清单（中心思想：**仓库地址来自服务中心，不是项目配置**）。
+ *
+ * 只列**带仓库地址**的服务 —— 简报要的是 origin 候选。行数封顶（`MAX_INJECTED_REPOS`），
+ * 超出折成一句「还有 N 个」，免得把简报的历史段预算吃光。
+ */
+function injectedRepoLines(orgServices?: OrgServiceList): string[] {
+  const repos = (orgServices?.items ?? []).filter((s) => s.gitRepoUrl?.trim());
+  if (!repos.length) return [];
+  const orgId = orgServices?.orgId ?? "";
+  const orgLabel = orgServices?.orgName
+    ? `${orgId} ${orgServices.orgName}`
+    : orgId || "unknown";
+  const shown = repos.slice(0, MAX_INJECTED_REPOS);
+  const hidden = repos.length - shown.length;
+  return [
+    `- **Injected git repositories (origin candidates, from the service registry · org ${orgLabel}):**`,
+    ...shown.map((s) => {
+      const note = s.description ? ` — ${clip(s.description, 120)}` : "";
+      return `  - \`${s.name}\` → \`${s.gitRepoUrl}\`${note}`;
+    }),
+    ...(hidden > 0 ? [`  - …另有 ${hidden} 个服务（完整清单见服务中心）`] : []),
+    `- 来源：服务中心 \`GET /v1/orgs/${orgId}/services\`（组织 ${orgLabel}；由 project 的所属组织解析）。项目上的 \`gitRepoUrl\` 只是元数据，**不要**拿它当 origin。`,
+    "- Clone **the repo this task actually changes** into the task workspace, then follow [`BRANCHING.md`](BRANCHING.md): branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
+    "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides it.",
+  ];
+}
+
 /** 固定骨架（任务身份 / 隔离规则 / 代理 / 角色）—— 不参与裁剪。 */
-function skeletonSections(task: Task, project: Project | undefined): string[] {
+function skeletonSections(
+  task: Task,
+  project: Project | undefined,
+  orgServices?: OrgServiceList,
+): string[] {
   const taskType = normalizeTaskType(task.taskType);
   const description = task.description?.trim() ?? "";
   // 类型是纯标签：只在**非 general** 时写一行（历史任务全是 general，
@@ -142,6 +190,7 @@ function skeletonSections(task: Task, project: Project | undefined): string[] {
           : description,
       ]
     : [];
+  const injected = injectedRepoLines(orgServices);
   return [
     "[Web Cursor task bootstrap — injected once on agent create; not a user message]",
     "",
@@ -157,11 +206,9 @@ function skeletonSections(task: Task, project: Project | undefined): string[] {
     "",
     "## Workspace isolation",
     `- workspace: ${task.workspace}`,
-    project?.gitRepoUrl
+    injected.length
       ? [
-          `- **Configured git repository (origin):** \`${project.gitRepoUrl}\``,
-          "- Follow [`BRANCHING.md`](BRANCHING.md): clone **this** GitHub URL into the task workspace, branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
-          "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides the project git URL.",
+          ...injected,
           `- ${mergePolicy} The app itself has **no** deploy entry point: after the PR is merged into \`main\`, every deploy goes through the **deployment platform** (\`~/runtime/agent-control-plane-deployment\`, \`:4220\` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.`,
         ].join("\n")
       : [
@@ -232,7 +279,9 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
     ...collectRunResults(runs),
   ];
 
-  const skeleton = skeletonSections(task, project).filter((s) => s !== "").join("\n");
+  const skeleton = skeletonSections(task, project, input.orgServices)
+    .filter((s) => s !== "")
+    .join("\n");
   const attachmentText = attachments.length
     ? ["### Attachments (ids only)", ...attachments].join("\n")
     : "";

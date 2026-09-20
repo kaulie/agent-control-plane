@@ -66,6 +66,48 @@ export interface DepartmentList {
   error?: string;
 }
 
+/**
+ * 服务中心（service registry）里登记的一条服务。只挑**注入 agent 简报**需要的字段
+ * （仓库地址 + 组织归属 + 一句描述），契约见 `./service-registry.ts`。
+ */
+export interface RegisteredService {
+  name: string;
+  namespace?: string;
+  /** 服务中心里登记的一句话说明。 */
+  description?: string;
+  /** **要注入给 agent 的仓库地址**（简报里的 origin 候选就是它）。 */
+  gitRepoUrl?: string;
+  /** 归属组织：组织服务的部门 id（`D0005`）与名字快照。 */
+  departmentId?: string;
+  departmentName?: string;
+  version?: string;
+  owner?: string;
+  /** `service`（默认）/ `tool` … 来自服务中心登记。 */
+  type?: string;
+}
+
+/**
+ * 「某个组织下有哪些服务」的查询结果（`GET /v1/orgs/{orgId}/services`）。
+ *
+ * 组织 id 来自 **project → `department.departmentId`**；服务清单（含 git 仓库地址）
+ * 来自服务中心 —— 这就是注入 agent 的仓库地址的唯一真源，不再读项目上的 `gitRepoUrl`。
+ *
+ * `available: false` = 服务中心不可达 / 项目没有所属组织：简报退回
+ * 「按需自己 clone」的兜底文案（**不会**回落到项目的 `gitRepoUrl`）。
+ */
+export interface OrgServiceList {
+  available: boolean;
+  /** 查询用的组织 id（= `project.department.departmentId`）。 */
+  orgId: string;
+  /** 组织名快照（服务中心从组织服务对齐来的；拿不到就没有）。 */
+  orgName?: string;
+  items: RegisteredService[];
+  /** 服务中心 base URL，便于在简报 / UI 里写明来源。 */
+  source: string;
+  fetchedAt: string;
+  error?: string;
+}
+
 export interface AppSettings {
   runtime?: RuntimeConfig;
   workspace?: WorkspaceConfig;
@@ -82,7 +124,13 @@ export interface ProjectSettingsView {
 export interface Project {
   projectId: string;
   name: string;
-  /** Git remote/clone URL for this project (https, ssh, or local path). */
+  /**
+   * 项目上**登记**的 Git 仓库地址（https / ssh / 本地路径）。
+   *
+   * ⚠️ 它**不再**注入给 agent：agent 的仓库地址改由「项目所属组织 → 服务中心
+   * （`GET /v1/orgs/{orgId}/services`）」解析（见 `./service-registry.ts` 与
+   * `task-context.ts` 的 Workspace isolation）。这里只作项目元数据（列表 / 设置页展示）。
+   */
   gitRepoUrl?: string;
   /**
    * 项目自己的所属部门（存在 `projects.settings_json` 里）。新建项目时必填；

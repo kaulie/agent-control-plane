@@ -324,6 +324,10 @@ project → project.department.departmentId（组织 id）
 - 服务中心不可达 / 项目没有所属部门 → 简报退回兜底文案「按需自己 clone」，
   **不会**回落到项目的 `gitRepoUrl`（避免两个真源打架）。
 - 想先看「这个项目会被注入什么」：`GET /api/projects/:id/service-repos`（`?refresh=1` 绕过 30s 缓存）。
+- **调试时不用查库**：任务详情页顶部常驻一条「基础信息」（`Task` / `Project` / `Org`，绑定后还有
+  `Agent`），项目设置页头部标了 `Project` / `Org` —— 都是**完整 id**，点一下即复制。
+  这里的 `Org` 就是本节的 `project.department.departmentId`（项目没设部门 → 显示「未设置组织」，
+  不会编一个假 id）：`web/src/components/TaskIdsBar.tsx`。
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |

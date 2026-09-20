@@ -544,6 +544,70 @@ body {
   color: var(--text-dim);
 }
 
+/* ---- 任务详情页顶部「基础信息」（Task / Project / Org / Agent id，方便测试） ---- */
+
+.task-ids {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.task-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.task-id-chip:hover {
+  border-color: var(--accent);
+}
+
+.task-id-chip.copied {
+  border-color: var(--accent);
+}
+
+.task-id-chip.is-missing {
+  cursor: default;
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.task-id-label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.task-id-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.task-id-copied {
+  color: var(--text-dim);
+  opacity: 0;
+}
+
+.task-id-chip:hover .task-id-copied,
+.task-id-chip.copied .task-id-copied {
+  opacity: 1;
+}
+
+.task-id-chip.copied .task-id-copied {
+  color: var(--accent);
+}
+
 .usage-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1577,6 +1641,25 @@ body {
   margin: 6px 0 0;
   color: var(--text-dim);
   font-size: 13px;
+}
+
+/* 项目设置页头部的「基础信息」（Project / Org id，方便测试）。 */
+.settings-ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-id code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
 }
 
 .settings-body {

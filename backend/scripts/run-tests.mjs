@@ -63,6 +63,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 「任务基础信息」条（Task / Project / Org / Agent id，方便测试）
+  {
+    file: "../web/scripts/test-task-ids-bar.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

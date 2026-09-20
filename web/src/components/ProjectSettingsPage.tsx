@@ -4,6 +4,7 @@ import type { ProjectSettingsView } from "../types";
 import AgentRulesSection from "./settings/AgentRulesSection";
 import RuntimeDefaultsSection from "./settings/RuntimeDefaultsSection";
 import DepartmentSection from "./settings/DepartmentSection";
+import { NO_ORG_PLACEHOLDER } from "./TaskIdsBar";
 
 interface Props {
   projectId: string;
@@ -105,6 +106,15 @@ export default function ProjectSettingsPage({
         </button>
         <h1 className="settings-title">项目设置</h1>
         <p className="settings-subtitle">{projectName}</p>
+        {/* 基础信息（方便测试）：项目 id + 组织 id（= 部门 id，注入 agent 的仓库按它查服务中心）。 */}
+        <p className="settings-ids">
+          <span className="settings-id">
+            Project <code>{projectId}</code>
+          </span>
+          <span className="settings-id" title="组织 id 来自这个项目的部门（project.department.departmentId）">
+            Org <code>{departmentId || NO_ORG_PLACEHOLDER}</code>
+          </span>
+        </p>
       </header>
       {loading ? (
         <div className="settings-loading">加载中…</div>

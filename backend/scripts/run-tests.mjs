@@ -69,6 +69,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 主界面「当前 agent 已执行轮次」（per-agent 口径 + 渲染）
+  {
+    file: "../web/scripts/test-agent-rounds.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

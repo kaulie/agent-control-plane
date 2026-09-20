@@ -608,6 +608,55 @@ body {
   color: var(--accent);
 }
 
+/* 当前 agent 已执行轮次：主界面顶部一条（纯展示）。 */
+.agent-rounds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.agent-rounds-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: var(--text);
+}
+
+.agent-rounds-label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-rounds-count {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.agent-rounds-unit {
+  color: var(--text-dim);
+}
+
+.agent-rounds-agent {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-dim);
+}
+
+.agent-rounds-hint {
+  color: var(--text-dim);
+}
+
 .usage-bar {
   display: flex;
   flex-wrap: wrap;

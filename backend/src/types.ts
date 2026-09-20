@@ -440,9 +440,11 @@ export interface AgentBoardRow {
   /** SDK agent id (`agent-…` for Cursor, `cls-…` for Cline). `""` on a scope=task row. */
   agentId: string;
   /**
-   * Agent 自己的名称，独立于 task：由 agent id 归一化而来
-   * （`agent-7362ceb1-4b5b-…` → `agent-7362ceb1`，`cls-5f7393dd40a44b06` →
-   * `cls-5f7393dd`）。task 标题只在 `taskTitle` 里出现，两者不共用。
+   * Agent 自己的名称，独立于 task：由 agent id 归一化而来的**定宽短号**
+   * （见 `backend/src/agent-id.ts` 的 `agentDisplayName`）：
+   * `agent-7362ceb1-4b5b-…` → `agent-7362ceb1`、`cls-5f7393dd40a44b06` →
+   * `cline-5f7393dd`、网关预分配的占位 id `agent-5f7393dd40a44b06` →
+   * `unset-5f7393dd`。task 标题只在 `taskTitle` 里出现，两者不共用。
    */
   agentName: string;
   provider: string;

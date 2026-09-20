@@ -30,7 +30,7 @@ const T = (mm) => new Date(BASE_MS + mm * 60_000).toISOString();
 /** 一小时的窗口：idle → thinking → working(停滞) → thinking → idle。 */
 const data = {
   agentId: "cls-1234567890abcdef",
-  agentName: "cls-12345678",
+  agentName: "cline-12345678",
   provider: "cline",
   model: "deepseek-v4-flash",
   taskId: "task-1",

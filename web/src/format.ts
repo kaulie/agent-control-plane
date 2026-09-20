@@ -80,12 +80,32 @@ export function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
+/** Agent 短号定宽：14 字符（6 字符标签 + 8 位 hex），认不出的形状也截成等宽。 */
+export const AGENT_SHORT_WIDTH = 14;
+
 /**
- * `agent-1234abcd-5678-…` → `agent-1234abcd`（时间线 / Agent 看板共用同一个短号）。
- * Cline 的 `cls-…` id 不符合该 pattern，超长时退化为截断。
+ * Agent 短号（时间线右下角小字 / Agent 看板 / 轮次条共用），**定宽 14 字符**：
+ *
+ * - `agent-1234abcd-5678-…`（Cursor 会话，带连线的 uuid）→ `agent-1234abcd`
+ * - `cls-5f7393dd40a44b06`（Cline 会话）→ `cline-5f7393dd`
+ * - `agent-5f7393dd40a44b06`（无连线的 16 位 hex = 网关**预分配**、provider 还没建出
+ *   会话的占位 id，就是工作区目录名）→ `unset-5f7393dd`
+ * - 其它形状 → 前 13 字符 + `…`（同样 14 字符）
+ *
+ * 以前只认 `agent-`：Cline 的 id 会原样打出 20 字符、预分配的占位 id 又假装成
+ * Cursor 会话，一行里长短不一还有歧义。
+ *
+ * 与后端 `backend/src/agent-id.ts` 的 `agentDisplayName` 是同一套规则，
+ * `backend/scripts/test-agent-id-format.mjs` 用同一张用例表守住两边一致。
  */
 export function shortAgentId(id: string): string {
-  const m = id.match(/^(?:agent-)?([0-9a-f]{8})/i);
-  if (m) return `agent-${m[1].toLowerCase()}`;
-  return id.length > 20 ? `${id.slice(0, 20)}…` : id;
+  const raw = (id ?? "").trim();
+  // 预分配占位：agent- + 紧接 16 位 hex（无连线）→ 还不是活会话。
+  const pre = /^agent-([0-9a-f]{16})$/i.exec(raw);
+  if (pre) return `unset-${pre[1].slice(0, 8).toLowerCase()}`;
+  const m = /^(agent|cls)-([0-9a-f]{8})/i.exec(raw);
+  if (m) return `${m[1].toLowerCase() === "cls" ? "cline" : "agent"}-${m[2].toLowerCase()}`;
+  return raw.length > AGENT_SHORT_WIDTH
+    ? `${raw.slice(0, AGENT_SHORT_WIDTH - 1)}…`
+    : raw;
 }

@@ -33,6 +33,27 @@ opaque Cline session id):
 - After a process restart, in-memory residency is cleared, so the next message
   recreates a session (bootstrap re-injected when there is no seed).
 
+### Seed contract (why history gets sanitized)
+
+Feed history to a provider and it will hard-reject it if the tool pairing is
+broken (`Messages with role 'tool' must be a response to a preceding message
+with 'tool_calls'`). Cline records tool results as `role: "user"` messages
+(`content: [{ type: "tool_result", tool_use_id }]`), so a naive tail-trim can
+start the seed **on a tool result**, and a mid-turn cut can leave a dangling
+`tool_use`. Both were seen in production (2026-09-20, two tasks stuck: every
+subsequent message failed in <1s because the broken history stayed resident).
+
+So every seeded history (restart resume **and** succession) goes through
+`sanitizeSeedHistory()` (`restart-resume.ts`):
+
+- drop `tool_use` / `tool_result` blocks whose counterpart is not in the seed,
+- drop messages emptied by that, and drop everything before the first **real
+  user turn** (a `tool_result`-only `user` message is not a user turn),
+
+and if the upstream still rejects the seed (`isToolPairingError`), we throw the
+seed away and rebuild with a brand-new session id (bootstrap only) instead of
+leaving a permanently-400ing session behind.
+
 ### Agent succession (transparent lineage)
 
 When the session id changes with inherited history, the provider emits

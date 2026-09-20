@@ -51,6 +51,21 @@ assert.match(resumed.detail, /≈ 9\.4K tokens/);
 assert.match(resumed.detail, /丢最旧 12 条/);
 assert.match(resumed.detail, /from=agent-abcdefabcdef/);
 
+// 1c) seed 被剔过（工具调用/结果失配的块）也要在时间线上说出来
+const resumedTrimmed = buildRows([
+  ev("status", {
+    status: "session_resumed",
+    message: "网关重启后已按磁盘历史续接会话 agent-abc…：seed 41 条（剔除 3 个工具调用/结果失配块）…",
+    previousAgentId: "agent-abcdefabcdef",
+    seededMessages: 41,
+    droppedMessages: 0,
+    droppedToolBlocks: 3,
+    seededTokens: 9400,
+  }),
+])[0];
+assert.match(resumedTrimmed.detail, /剔除 3 个失配工具块/);
+assert.doesNotMatch(buildRows([ev("status", { status: "session_resumed", seededMessages: 5 })])[0].detail, /失配工具块/);
+
 // 2) 其它 status 不受影响
 assert.equal(buildRows([ev("status", { status: "working", message: "x" })])[0].body, "仍在执行");
 assert.equal(buildRows([ev("status", { status: "retrying" })])[0].body, "自动重试");

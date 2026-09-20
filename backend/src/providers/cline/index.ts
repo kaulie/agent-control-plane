@@ -414,10 +414,13 @@ export class ClineProvider implements AgentProvider {
             });
           }
         } catch (err) {
-          if (!this.isUnusable(err)) throw err;
+          const raw = err instanceof Error ? err.message : String(err);
+          // 会话失效（session_not_found）和「历史里工具配对坏了」都换会话重开；别的错误照常抛。
+          if (!this.isUnusable(err) && !isToolPairingError(raw)) throw err;
           console.warn(
             `[cline] session ${handle.sessionId} unusable; succeeding for task ${input.taskId}`,
           );
+          handle.lastError = undefined;
           result = await this.succeedSession(cline, input, modelId, mode, handle, {
             fromAgentId: handle.sessionId,
             fromMode: mode,

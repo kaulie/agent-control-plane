@@ -5,6 +5,7 @@ import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskGo
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import TaskIdsBar from "./components/TaskIdsBar";
+import AgentRoundsBar from "./components/AgentRoundsBar";
 import ContextMeter from "./components/ContextMeter";
 import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
 import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
@@ -1031,6 +1032,7 @@ export default function App() {
                 orgId={detailProject?.department?.departmentId}
                 orgName={detailProject?.department?.departmentName}
               />
+              <AgentRoundsBar runs={detail.runs} agentId={detail.task.agentId} />
               <UsageBar task={detail.task} stats={detail.stats} />
               <ContextMeter
                 context={detail.context}

@@ -631,6 +631,26 @@ body {
   color: var(--text);
 }
 
+/* 可点击态：点整枚 chip 打开该 agent 的时间线（复用 /api/agents/{id}/timeline）。 */
+button.agent-rounds-chip-link {
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+button.agent-rounds-chip-link:hover {
+  border-color: var(--accent);
+}
+
+button.agent-rounds-chip-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.agent-rounds-open {
+  color: var(--accent);
+}
+
 .agent-rounds-label {
   color: var(--text-dim);
   text-transform: uppercase;

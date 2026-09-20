@@ -107,6 +107,30 @@ const legacyHtml = renderToStaticMarkup(
 );
 assert.ok(legacyHtml.includes('data-agent-id="agent-cur"'));
 
+// ---- 5b) 传入 onOpenAgent：chip 变成可点按钮（点开该 agent 时间线）----
+let opened = null;
+const linkHtml = renderToStaticMarkup(
+  React.createElement(AgentRoundsBar, {
+    runs,
+    agentId: "agent-cur",
+    onOpenAgent: (id) => {
+      opened = id;
+    },
+  }),
+);
+assert.ok(linkHtml.includes("<button"), "有 onOpenAgent 时渲染成 <button>");
+assert.ok(linkHtml.includes("agent-rounds-chip-link"), "按钮带可点链接样式类");
+assert.ok(
+  linkHtml.includes('data-agent-id="agent-cur"'),
+  "按钮仍带 data-agent-id（点它开的就是这个 agent）",
+);
+assert.ok(linkHtml.includes("时间线"), "按钮上给出「查时间线」的提示");
+assert.ok(!linkHtml.includes("onclick"), "服务端渲染不内联 onclick");
+assert.equal(opened, null, "渲染本身不触发回调");
+// 不传 onOpenAgent → 退回纯展示 span（老用法不变）。
+assert.ok(!html.includes("agent-rounds-chip-link"), "无回调时不带链接类");
+assert.ok(!html.includes("<button"), "无回调时不是按钮");
+
 // ---- 6) 没有 agent 实例 → 整条不渲染（null）----
 const emptyHtml = renderToStaticMarkup(
   React.createElement(AgentRoundsBar, { runs: [], agentId: undefined }),

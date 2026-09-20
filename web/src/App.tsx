@@ -1032,7 +1032,14 @@ export default function App() {
                 orgId={detailProject?.department?.departmentId}
                 orgName={detailProject?.department?.departmentName}
               />
-              <AgentRoundsBar runs={detail.runs} agentId={detail.task.agentId} />
+              <AgentRoundsBar
+                runs={detail.runs}
+                agentId={detail.task.agentId}
+                onOpenAgent={(agentId) => {
+                  setTimelineAgentId(agentId);
+                  setView("agent-timeline");
+                }}
+              />
               <UsageBar task={detail.task} stats={detail.stats} />
               <ContextMeter
                 context={detail.context}

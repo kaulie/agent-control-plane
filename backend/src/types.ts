@@ -90,10 +90,10 @@ export interface RegisteredService {
  * 「某个组织下有哪些服务」的查询结果（`GET /v1/orgs/{orgId}/services`）。
  *
  * 组织 id 来自 **project → `department.departmentId`**；服务清单（含 git 仓库地址）
- * 来自服务中心 —— 这就是注入 agent 的仓库地址的唯一真源，不再读项目上的 `gitRepoUrl`。
+ * 来自服务中心 —— 这就是注入 agent 的仓库地址的唯一真源（项目上已无仓库地址字段）。
  *
  * `available: false` = 服务中心不可达 / 项目没有所属组织：简报退回
- * 「按需自己 clone」的兜底文案（**不会**回落到项目的 `gitRepoUrl`）。
+ * 「按需自己 clone」的兜底文案（没有项目级仓库地址可以回落）。
  */
 export interface OrgServiceList {
   available: boolean;
@@ -125,16 +125,13 @@ export interface Project {
   projectId: string;
   name: string;
   /**
-   * 项目上**登记**的 Git 仓库地址（https / ssh / 本地路径）。
-   *
-   * ⚠️ 它**不再**注入给 agent：agent 的仓库地址改由「项目所属组织 → 服务中心
-   * （`GET /v1/orgs/{orgId}/services`）」解析（见 `./service-registry.ts` 与
-   * `task-context.ts` 的 Workspace isolation）。这里只作项目元数据（列表 / 设置页展示）。
-   */
-  gitRepoUrl?: string;
-  /**
    * 项目自己的所属部门（存在 `projects.settings_json` 里）。新建项目时必填；
    * 在这条规则之前建的老项目可能为空，此时不返回该字段。
+   *
+   * ⚠️ 项目上**不再有** Git 仓库地址字段（老的 `gitRepoUrl` 已删除：接口不返回、
+   * UI 不展示）：agent 的仓库地址只有一个真源 —— 「项目所属组织 → 服务中心
+   * （`GET /v1/orgs/{orgId}/services`）」，见 `./service-registry.ts` 与
+   * `task-context.ts` 的 Workspace isolation。
    */
   department?: DepartmentConfig;
   createdAt: string;

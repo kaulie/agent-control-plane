@@ -325,8 +325,12 @@ export async function registerRoutes(
 
   /**
    * 单个项目（按 projectId 查）。列表里的每个元素和这里返回的是同一个形状：
-   * 名字 / `gitRepoUrl` / `department`（organization 的部门 id + 名字快照）。
+   * 名字 / `department`（organization 的部门 id + 名字快照）。
    * 不知道 / 已删掉的项目 → 404（调用方不用自己去列表里翻）。
+   *
+   * ⚠️ 项目上**没有** Git 仓库地址字段：老的 `gitRepoUrl` 已删除（不再返回、
+   * UI 也不展示）。agent 的仓库地址只有一个真源 —— 项目所属组织 → 服务中心
+   * `GET /v1/orgs/{orgId}/services`（见 `GET /api/projects/:projectId/service-repos`）。
    */
   app.get<{ Params: { projectId: string } }>(
     "/api/projects/:projectId",
@@ -342,7 +346,6 @@ export async function registerRoutes(
   app.post<{
     Body: {
       name?: string;
-      gitRepoUrl?: string;
       /** 新建项目时同时指定所属部门（catalogue 来自 organization 服务）。 */
       department?: DepartmentConfig;
     };
@@ -358,12 +361,8 @@ export async function registerRoutes(
       return reply.code(400).send({ error: "department is required" });
     }
     try {
-      const project = gateway.createProject(name, {
-        ...(req.body?.gitRepoUrl?.trim()
-          ? { gitRepoUrl: req.body.gitRepoUrl.trim() }
-          : {}),
-        department,
-      });
+      // 注意：项目上没有 Git 仓库地址（老的 gitRepoUrl 已删除，body 里传了也会被忽略）。
+      const project = gateway.createProject(name, { department });
       reply.code(201);
       return project;
     } catch (err) {
@@ -377,22 +376,15 @@ export async function registerRoutes(
     Params: { projectId: string };
     Body: {
       name?: string;
-      gitRepoUrl?: string | null;
     };
   }>("/api/projects/:projectId", async (req, reply) => {
       const name = req.body?.name?.trim();
       const hasName = name !== undefined && name.length > 0;
-      const hasGitRepoUrl = req.body?.gitRepoUrl !== undefined;
-      if (!hasName && !hasGitRepoUrl) {
-        return reply
-          .code(400)
-          .send({ error: "name or gitRepoUrl is required" });
+      if (!hasName) {
+        return reply.code(400).send({ error: "name is required" });
       }
       try {
-        const project = gateway.updateProject(req.params.projectId, {
-          ...(hasName ? { name } : {}),
-          ...(hasGitRepoUrl ? { gitRepoUrl: req.body?.gitRepoUrl } : {}),
-        });
+        const project = gateway.updateProject(req.params.projectId, { name });
         if (!project) {
           return reply.code(404).send({ error: "project not found" });
         }
@@ -409,8 +401,11 @@ export async function registerRoutes(
    * → 服务中心 `GET /v1/orgs/{orgId}/services`（含每个服务的 git 仓库地址）。
    *
    * 只读，供排查「agent 的简报里到底拿到了什么仓库」。项目没有所属组织 /
-   * 服务中心不可达 → `repos: null`（简报此时退回「按需自己 clone」的兜底文案，
-   * **不会**回落到项目上登记的 `gitRepoUrl`）。`?refresh=1` 绕开 30s 缓存。
+   * 服务中心不可达 → `repos: null`（简报此时退回「按需自己 clone」的兜底文案）。
+   * `?refresh=1` 绕开 30s 缓存。
+   *
+   * 注意：项目配置里**没有**仓库地址字段（老的 `gitRepoUrl` 已删除），所以这里
+   * 是「registry 视角」的清单 —— 与项目元数据无关。
    */
   app.get<{
     Params: { projectId: string };

@@ -156,19 +156,14 @@ export const api = {
 
   createProject: (
     name: string,
-    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
+    options?: { department?: DepartmentConfig },
   ) => write<Project>("/projects", { method: "POST", body: { name, ...options } }),
 
   renameProject: (projectId: string, name: string) =>
     write<Project>(`/projects/${projectId}`, { method: "PATCH", body: { name } }),
 
-  updateProject: (
-    projectId: string,
-    body: {
-      name?: string;
-      gitRepoUrl?: string | null;
-    },
-  ) => write<Project>(`/projects/${projectId}`, { method: "PATCH", body }),
+  updateProject: (projectId: string, body: { name?: string }) =>
+    write<Project>(`/projects/${projectId}`, { method: "PATCH", body }),
 
   listTasks: (projectId?: string) => {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";

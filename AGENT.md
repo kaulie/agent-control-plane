@@ -7,7 +7,7 @@
 | 目录 | 含义 | 谁改 |
 |---|---|---|
 | `/Users/gaolei/agent-workspace/agent-<agentid>/` | 本 agent 独立 workspace（clone GitHub + task 分支）；`agentid` = 这个 agent 的 id，目录名就是它 | agent 在此改**应用**代码 |
-| 项目 `gitRepoUrl`（GitHub） | **仅项目元数据**（列表 / 设置页展示）；注入 agent 的仓库地址来自**服务中心**（project → 组织 → `GET /v1/orgs/{orgId}/services`），不是这里 | 在项目设置中配置；agent 不改配置本身 |
+| 项目仓库地址 | 应用里**没有**这个字段（老的 `gitRepoUrl` 已删：接口不返回、UI 不展示）；注入 agent 的仓库地址来自**服务中心**（project → 组织 → `GET /v1/orgs/{orgId}/services`） | 不需要配置；agent 不改配置本身 |
 | `/Users/gaolei/deployment/web-cursor/bin/` | 旧版独立发版工具（**已废弃**，构建/部署现由部署平台 pipeline 完成） | 不要使用 |
 | `~/runtime/agent-control-plane-deployment/packages/` | 部署平台构建出的 `deployment-<hash>/` 快照（禁止手改） | 平台自己生成 |
 | `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录 | 仅由部署平台 rsync 代码；保留 `.env`/`data` |

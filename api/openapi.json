@@ -250,7 +250,7 @@
         }
       },
       "patch": {
-        "summary": "改项目（名字 / Git 仓库地址）",
+        "summary": "改项目（名字）",
         "operationId": "patchApiProjectsProjectId",
         "tags": [
           "projects"

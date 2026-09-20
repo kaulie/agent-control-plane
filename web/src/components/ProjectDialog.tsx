@@ -3,13 +3,11 @@ import { errorText } from "../api";
 import type { DepartmentConfig } from "../types";
 import DepartmentPicker from "./settings/DepartmentPicker";
 
-export type ProjectDialogMode = "create" | "rename" | "gitRepoUrl";
+export type ProjectDialogMode = "create" | "rename";
 
 export interface ProjectDialogResult {
   /** Only meaningful for `create` / `rename`. */
   name: string;
-  /** `null` = 清除已配置的 Git 地址. */
-  gitRepoUrl: string | null;
   /** Empty id + empty name = 未设置（创建时会被忽略）. */
   department: DepartmentConfig;
 }
@@ -17,9 +15,8 @@ export interface ProjectDialogResult {
 interface Props {
   open: boolean;
   mode: ProjectDialogMode;
-  /** Prefill (rename / git url). */
+  /** Prefill (rename / create). */
   initialName?: string;
-  initialGitRepoUrl?: string;
   onClose: () => void;
   onSubmit: (input: ProjectDialogResult) => Promise<void>;
 }
@@ -27,7 +24,6 @@ interface Props {
 const TITLES: Record<ProjectDialogMode, string> = {
   create: "新建项目",
   rename: "重命名项目",
-  gitRepoUrl: "项目 Git 仓库地址",
 };
 
 /**
@@ -38,12 +34,10 @@ export default function ProjectDialog({
   open,
   mode,
   initialName,
-  initialGitRepoUrl,
   onClose,
   onSubmit,
 }: Props) {
   const [name, setName] = useState("");
-  const [gitRepoUrl, setGitRepoUrl] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [departmentName, setDepartmentName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -52,12 +46,11 @@ export default function ProjectDialog({
   useEffect(() => {
     if (!open) return;
     setName(initialName ?? "");
-    setGitRepoUrl(initialGitRepoUrl ?? "");
     // 部门只在「新建」时选择，之后在项目设置里维护。
     setDepartmentId("");
     setDepartmentName("");
     setError(null);
-  }, [open, mode, initialName, initialGitRepoUrl]);
+  }, [open, mode, initialName]);
 
   useEffect(() => {
     if (!open) return;
@@ -71,7 +64,6 @@ export default function ProjectDialog({
   if (!open) return null;
 
   const showName = mode === "create" || mode === "rename";
-  const showGit = mode === "create" || mode === "gitRepoUrl";
   /** 新建项目时部门必填：没选就不给点「创建」。 */
   const missingDepartment = mode === "create" && !departmentId.trim();
 
@@ -90,7 +82,6 @@ export default function ProjectDialog({
     try {
       await onSubmit({
         name: trimmedName,
-        gitRepoUrl: gitRepoUrl.trim() || null,
         department: {
           ...(departmentId.trim() ? { departmentId: departmentId.trim() } : {}),
           ...(departmentName.trim()
@@ -134,32 +125,6 @@ export default function ProjectDialog({
             />
           </label>
         )}
-        {showGit && (
-          <label className="runtime-field">
-            <span className="runtime-field-label">
-              {mode === "create" ? "Git 仓库地址（可选）" : "Git 仓库地址"}
-            </span>
-            <input
-              className="settings-path-input"
-              value={gitRepoUrl}
-              placeholder="https://github.com/owner/repo.git"
-              autoFocus={mode === "gitRepoUrl"}
-              onFocus={(e) => e.target.select()}
-              onChange={(e) => setGitRepoUrl(e.target.value)}
-            />
-          </label>
-        )}
-        {showGit && (
-          <p className="modal-hint">
-            这里只是项目元数据（列表 / 设置页展示）；<b>agent 的仓库地址不再取这个值</b>：
-            由项目「所属部门」（组织）去<b>服务中心</b>查该组织下登记的服务与仓库地址后注入。
-          </p>
-        )}
-        {mode === "gitRepoUrl" ? (
-          <p className="modal-hint">
-            支持 https / ssh / 本地路径。留空保存 = 清除登记值。
-          </p>
-        ) : null}
         {mode === "create" && (
           <div className="modal-field-stack">
             <DepartmentPicker

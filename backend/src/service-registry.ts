@@ -3,7 +3,7 @@
  * `~/runtime/service-registry`, default http://127.0.0.1:4240）.
  *
  * 用途：给 agent 简报注入「本组织下有哪些服务、各自的 git 仓库地址」。
- * 单一真源是服务中心 —— 项目上的 `gitRepoUrl` 只是项目元数据，**不再**注入。
+ * 单一真源是服务中心 —— 应用里已经没有项目级 `gitRepoUrl`（接口不返回、UI 不展示）。
  *
  * Contract (verified against the running service):
  *

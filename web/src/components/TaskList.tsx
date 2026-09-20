@@ -9,7 +9,6 @@ interface Props {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onRenameProject: () => void;
-  onSetGitRepoUrl: () => void;
   onOpenProjectSettings: () => void;
   tasks: Task[];
   selectedId: string | null;
@@ -23,7 +22,6 @@ export default function TaskList({
   onSelectProject,
   onCreateProject,
   onRenameProject,
-  onSetGitRepoUrl,
   onOpenProjectSettings,
   tasks,
   selectedId,
@@ -66,28 +64,6 @@ export default function TaskList({
           >
             ✎
           </button>
-        </div>
-        <div className="project-workspace">
-          <div className="project-workspace-label">Git 仓库地址（仅登记）</div>
-          <div className="project-workspace-row">
-            <div
-              className="project-workspace-path"
-              title={
-                selectedProject?.gitRepoUrl ??
-                "未登记。agent 的仓库地址来自服务中心（按项目所属部门查），与这里无关。"
-              }
-            >
-              {selectedProject?.gitRepoUrl ?? "（未配置）"}
-            </div>
-            <button
-              className="icon-btn"
-              title="Set git repository URL"
-              onClick={onSetGitRepoUrl}
-              disabled={!selectedProjectId}
-            >
-              🔗
-            </button>
-          </div>
         </div>
         <div className="project-workspace">
           <div className="project-workspace-label">所属部门</div>

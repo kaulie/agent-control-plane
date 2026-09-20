@@ -32,9 +32,9 @@ export interface TaskBootstrapInput {
   /**
    * 服务中心按组织（`project.department.departmentId`）给出的服务清单。
    *
-   * **简报里注入的仓库地址只来自这里** —— 不再读 `project.gitRepoUrl`
-   * （单一真源是服务中心；见 `./service-registry.ts`）。缺省 / 服务中心不可达
-   * → 简报退回「按需自己 clone」的兜底文案。
+   * **简报里注入的仓库地址只来自这里** —— 项目上已经没有仓库地址字段了
+   * （老的 `project.gitRepoUrl` 已删除；单一真源是服务中心，见 `./service-registry.ts`）。
+   * 缺省 / 服务中心不可达 → 简报退回「按需自己 clone」的兜底文案。
    */
   orgServices?: OrgServiceList;
   /**
@@ -147,7 +147,7 @@ function injectedRepoLines(orgServices?: OrgServiceList): string[] {
       return `  - \`${s.name}\` → \`${s.gitRepoUrl}\`${note}`;
     }),
     ...(hidden > 0 ? [`  - …另有 ${hidden} 个服务（完整清单见服务中心）`] : []),
-    `- 来源：服务中心 \`GET /v1/orgs/${orgId}/services\`（组织 ${orgLabel}；由 project 的所属组织解析）。项目上的 \`gitRepoUrl\` 只是元数据，**不要**拿它当 origin。`,
+    `- 来源：服务中心 \`GET /v1/orgs/${orgId}/services\`（组织 ${orgLabel}；由 project 的所属组织解析）。项目配置里**没有**仓库地址字段，origin 只认上面这些。`,
     "- Clone **the repo this task actually changes** into the task workspace, then follow [`BRANCHING.md`](BRANCHING.md): branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
     "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides it.",
   ];

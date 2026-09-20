@@ -15,16 +15,117 @@
 import assert from "node:assert/strict";
 import {
   DEFAULT_RESUME_SEED_CHARS,
+  isRealUserTurn,
   recoverSessionAfterRestart,
   samePath,
+  sanitizeSeedHistory,
   trimSeedHistory,
 } from "../src/providers/cline/restart-resume.ts";
 import { agentSuccessionFromEvent } from "../src/gateway/gateway.ts";
 import { resolveResumeSeedChars } from "../src/config.ts";
+import { isToolPairingError } from "../src/run-errors.ts";
 
 const WORKSPACE = "/Users/gaolei/agent-workspace/agent-abc123";
 const msg = (role, text) => ({ role, content: [{ type: "text", text }] });
 const chars = (message) => JSON.stringify(message).length;
+
+// ---- 0) 线上事故的形状（2026-09-20）：cline 把工具结果也记成 role: "user" ----
+// 只按 role 判断的话，尾部裁剪的起点会落在 tool_result 上，seed 首条就是「工具结果」，
+// 上游按 OpenAI 风格翻成 role=tool 却没有前置工具调用 → 400（两个任务被卡死）。
+const toolUse = (id, name = "run_commands") => ({
+  role: "assistant",
+  content: [{ type: "tool_use", id, name, input: {} }],
+});
+const toolResult = (id, name = "run_commands") => ({
+  role: "user",
+  content: [{ type: "tool_result", tool_use_id: id, name, content: "ok" }],
+});
+const prompt = (text) => ({ role: "user", content: [{ type: "text", text }] });
+
+assert.equal(isRealUserTurn(prompt("hi")), true);
+assert.equal(isRealUserTurn(toolResult("call_1")), false, "工具结果不是用户发言");
+assert.equal(isRealUserTurn({ role: "user", content: "hi" }), true, "字符串内容算用户发言");
+assert.equal(isRealUserTurn({ role: "user", content: "   " }), false, "空字符串不算");
+assert.equal(isRealUserTurn({ role: "user", content: [] }), false, "空内容不算");
+assert.equal(isRealUserTurn(toolUse("call_1")), false);
+assert.equal(
+  isRealUserTurn({ role: "user", content: [{ type: "text", text: "看下" }, { type: "tool_result", tool_use_id: "call_1" }] }),
+  true,
+  "夹了文字的工具结果仍算用户发言",
+);
+
+// 真实形状：一次用户提问 + 两轮工具调用；预算只够最后两条（原本正好落在工具结果上）
+const turn = [
+  prompt("把并发数调到 4"),
+  toolUse("call_a"),
+  toolResult("call_a"),
+  toolUse("call_b"),
+  toolResult("call_b"),
+];
+// 修好之后：起点被拉回到真正的 user prompt（宁可略超预算），seed 首条绝不再是工具结果
+const alignedTurn = trimSeedHistory(turn, chars(turn[4]) + chars(turn[3]));
+assert.equal(alignedTurn.messages[0], turn[0], "起点必须拉回到真实用户发言（以前会停在 tool_result）");
+assert.equal(alignedTurn.messages.length, 5);
+assert.equal(alignedTurn.droppedMessages, 0);
+
+// ---- 0b) sanitizeSeedHistory：把 seed 修成 provider 一定收的样子 ----
+// 孤儿工具结果（配对的 tool_use 被预算裁掉了）→ 块被剔掉；剔完只剩 assistant 开头 → 整段不可用
+const orphanSeed = [toolResult("call_a"), toolUse("call_b"), toolResult("call_b")];
+const sanitizedOrphan = sanitizeSeedHistory(orphanSeed);
+assert.equal(sanitizedOrphan.droppedToolBlocks, 1);
+assert.equal(sanitizedOrphan.messages.length, 0, "首条不是真实用户发言 → 宁可退化成只注简报");
+
+// 真实用户发言在前面时：只丢孤儿，其余原样保留
+const mixedSeed = [prompt("u1"), toolResult("call_a"), toolUse("call_b"), toolResult("call_b")];
+const sanitizedMixed = sanitizeSeedHistory(mixedSeed);
+assert.deepEqual(
+  sanitizedMixed.messages.map((m) => m.content[0].type),
+  ["text", "tool_use", "tool_result"],
+  "孤儿工具结果被丢掉，配对的工具调用/结果留着",
+);
+assert.equal(sanitizedMixed.droppedToolBlocks, 1);
+assert.equal(sanitizedMixed.droppedMessages, 1);
+
+// 尾巴停在没跑完的工具调用上（turn 中途重启）→ 剔掉那个 tool_use 块，消息本身留着
+const danglingTail = [
+  prompt("u1"),
+  {
+    role: "assistant",
+    content: [{ type: "thinking", thinking: "想" }, { type: "tool_use", id: "call_z", name: "run_commands" }],
+  },
+];
+const sanitizedTail = sanitizeSeedHistory(danglingTail);
+assert.equal(sanitizedTail.droppedToolBlocks, 1);
+assert.equal(sanitizedTail.messages.length, 2);
+assert.deepEqual(sanitizedTail.messages[1].content.map((b) => b.type), ["thinking"]);
+
+// 干净的历史必须原样返回（不许「顺手修一修」）
+const cleanSeed = sanitizeSeedHistory([prompt("u1"), toolUse("call_a"), toolResult("call_a"), prompt("u2")]);
+assert.equal(cleanSeed.droppedToolBlocks, 0);
+assert.equal(cleanSeed.droppedMessages, 0);
+assert.equal(cleanSeed.messages.length, 4);
+assert.deepEqual(sanitizeSeedHistory([]), { messages: [], droppedMessages: 0, droppedToolBlocks: 0 });
+
+// ---- 0c) 上游 400 的识别（用来判定「这段历史不能用」）----
+assert.equal(
+  isToolPairingError("Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"),
+  true,
+  "DeepSeek 原文要认出来",
+);
+assert.equal(
+  isToolPairingError("Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'."),
+  true,
+  "OpenAI 的拼写（preceeding）也要认",
+);
+assert.equal(
+  isToolPairingError("tool_result blocks must have a corresponding tool_use block"),
+  true,
+  "Anthropic 风格的等价错误",
+);
+assert.equal(isToolPairingError("Service is too busy."), false);
+assert.equal(isToolPairingError(""), false);
+assert.equal(isToolPairingError(undefined), false);
+assert.equal(isToolPairingError("tool_calls 参数拼错了"), false, "不能见 tool_calls 就当配对错误");
 
 // ---- 1) 路径守卫：只认同一条路径（去尾部斜杠），空值一律不算 ----
 assert.equal(samePath(WORKSPACE, `${WORKSPACE}/`), true);
@@ -51,10 +152,12 @@ const aligned = trimSeedHistory(four, chars(four[3]));
 assert.deepEqual(aligned.messages, [four[2], four[3]], "只够最后一条时，把前一条 user 一起带上");
 assert.equal(aligned.droppedMessages, 2);
 
-// 整段里根本没有 user（脏数据）→ 保持现状，别把自己清空
+// 整段里根本没有**真实用户发言**（脏数据）→ 裁剪层先保持现状，由 sanitizeSeedHistory
+// 判定「不可用」（它会把这种 seed 清空，调用方退化成只注简报 —— 见下面的编排测试）
 const noUser = trimSeedHistory([msg("assistant", "a1"), msg("assistant", "a2")], chars(msg("assistant", "a2")));
-assert.equal(noUser.messages.length, 1, "没有 user 可对齐就不要退化成空");
+assert.equal(noUser.messages.length, 1, "裁剪层没有 user 可对齐就不要自己清空");
 assert.equal(noUser.droppedMessages, 1);
+assert.equal(sanitizeSeedHistory(noUser.messages).messages.length, 0, "首条不是真实用户发言 → 契约层判不可用");
 
 // 最新一条自己就超预算：也要留（否则等于没续接）
 const huge = msg("user", "x".repeat(50_000));
@@ -128,6 +231,54 @@ const boom = deps({
 const errored = await recoverSessionAfterRestart(boom.deps, opts);
 assert.equal(errored.skipped, "error");
 assert.match(errored.error, /disk on fire/, "错误要带出来，便于事后归因");
+
+// 事故复现（task-48cc978355744c55）：磁盘历史很长，预算只够尾部 → 起点落在工具结果上。
+// 修好之后：seed 首条必须是真实用户发言、工具块必须配对，且剔了什么要能报出来。
+const longHistory = [
+  prompt("第一轮提问"),
+  toolUse("call_a"),
+  toolResult("call_a"),
+  prompt("第二轮提问"),
+  toolUse("call_b"),
+  toolResult("call_b"),
+];
+const poisonBudget = chars(longHistory[5]) + chars(longHistory[4]);
+// 修好之后：起点从「停在 call_b 的工具结果上」拉回到最近的真实用户发言（第二轮提问），
+// 因此 seed 里的工具调用/结果始终成对。（修复前 seed 首条就是 tool_result → 上游 400。）
+const poisonRaw = trimSeedHistory(longHistory, poisonBudget);
+assert.equal(isRealUserTurn(poisonRaw.messages[0]), true, "起点必须是真实用户发言");
+const recovered = await recoverSessionAfterRestart(deps({ history: longHistory }).deps, {
+  ...opts,
+  maxChars: poisonBudget,
+});
+assert.equal(recovered.skipped, undefined);
+assert.equal(isRealUserTurn(recovered.messages[0]), true, "seed 首条必须是真实用户发言");
+assert.deepEqual(
+  recovered.messages.map((m) => m.content[0].type),
+  ["text", "tool_use", "tool_result"],
+  "起点被拉回到「第二轮提问」，整段工具调用/结果都在里面（配对完整）",
+);
+assert.equal(recovered.droppedToolBlocks, undefined, "这条路径不需要剔任何工具块");
+
+// 就算磁盘历史本身就是坏的（孤儿工具结果开头），也要修好、并且报出剔了什么
+const brokenHistory = [toolResult("call_gone"), toolUse("call_live"), toolResult("call_live"), prompt("后来的一次提问")];
+const recoveredBroken = await recoverSessionAfterRestart(deps({ history: brokenHistory }).deps, opts);
+assert.equal(recoveredBroken.droppedToolBlocks, 1, "孤儿工具结果要被剔掉并上报");
+assert.equal(recoveredBroken.droppedSeedMessages, 3, "剔完之后首条仍是 assistant → 前面的坏段整段丢掉");
+assert.deepEqual(
+  recoveredBroken.messages.map((m) => m.content[0].type),
+  ["text"],
+  "只剩下真实用户发言",
+);
+
+// 对齐到 turn 边界后可能远超字符预算 —— 用模型窗口做硬兜底（`maxSeedTokens`）：
+// 连窗口都装不下的 seed 宁可不要（否则又是一次必然的 400）。
+const tooWide = await recoverSessionAfterRestart(deps({ history: longHistory }).deps, {
+  ...opts,
+  maxSeedTokens: 10,
+});
+assert.equal(tooWide.skipped, "over_window");
+assert.equal(tooWide.messages.length, 0);
 
 const ok = await recoverSessionAfterRestart(deps().deps, opts);
 assert.equal(ok.skipped, undefined);

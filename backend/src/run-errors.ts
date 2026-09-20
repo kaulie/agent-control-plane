@@ -34,6 +34,23 @@ export function isRetryableSilentAbort(
   return (stats.toolCalls || 0) === 0 && (stats.modelCalls || 0) === 0;
 }
 
+/**
+ * 上游对**工具调用配对**的 400 —— 「role 'tool' 的消息前面没有带 tool_calls 的消息」
+ * （OpenAI 风格 provider，DeepSeek 的原文：
+ * `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`；
+ * Anthropic 风格的等价错误是 `tool_result ... must have a corresponding tool_use`）。
+ *
+ * 它只可能来自**喂进去的历史**（seed / 续接 / 切模式搬会话）里工具调用被打断，所以
+ * 专门识别：命中就意味着「这段历史不能用」，该丢掉重开 —— 把这个会话留在内存里的话，
+ * 之后每条消息都会立刻 400（2026-09-20 实测卡死过两个任务）。
+ */
+export function isToolPairingError(raw: string | undefined | null): boolean {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (/tool_calls/.test(s) && /role[^\w]{0,3}tool\b/.test(s)) return true;
+  return /tool_?result\b/.test(s) && /corresponding tool_use/.test(s);
+}
+
 export function classifyRunError(
   raw: string | undefined | null,
 ): ClassifiedRunError {

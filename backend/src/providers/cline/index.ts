@@ -11,13 +11,14 @@ import type { AgentEvent, AgentSuccessionReason, CostInfo, EventType, TokenUsage
 import { newId } from "../../store/db.js";
 import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
 import { estimateMessagesTokenRange, modelContextLimit, shouldRotateContext } from "../../context/index.js";
-import { formatRunErrorMessage } from "../../run-errors.js";
+import { formatRunErrorMessage, isToolPairingError } from "../../run-errors.js";
 import type { BillingService } from "../../billing/service.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 import { mapAgentEvent, toTokenUsage, type MappedEvent, type UsageLike } from "./mapper.js";
 import {
   DEFAULT_RESUME_SEED_CHARS,
   recoverSessionAfterRestart,
+  sanitizeSeedHistory,
 } from "./restart-resume.js";
 import {
   buildCostWithBilling,
@@ -396,11 +397,30 @@ export class ClineProvider implements AgentProvider {
             mode,
             ...(userImages ? { userImages } : {}),
           });
+          // 已经「中毒」的驻留会话（历史里工具配对是坏的）会**立刻** 400，而且不会自愈：
+          // 之后每条消息都一样失败。这里按「会话不可用」处理，重建成新会话继续这一轮
+          // （见 run-errors.ts 的 isToolPairingError）。
+          if (this.isToolPairingFailure(result, handle)) {
+            console.warn(
+              `[cline] session ${handle.sessionId} history breaks tool pairing for task ` +
+                `${input.taskId}; succeeding with sanitized history`,
+            );
+            handle.lastError = undefined;
+            result = await this.succeedSession(cline, input, modelId, mode, handle, {
+              fromAgentId: handle.sessionId,
+              fromMode: mode,
+              reason: "session_unusable",
+              emit,
+            });
+          }
         } catch (err) {
-          if (!this.isUnusable(err)) throw err;
+          const raw = err instanceof Error ? err.message : String(err);
+          // 会话失效（session_not_found）和「历史里工具配对坏了」都换会话重开；别的错误照常抛。
+          if (!this.isUnusable(err) && !isToolPairingError(raw)) throw err;
           console.warn(
             `[cline] session ${handle.sessionId} unusable; succeeding for task ${input.taskId}`,
           );
+          handle.lastError = undefined;
           result = await this.succeedSession(cline, input, modelId, mode, handle, {
             fromAgentId: handle.sessionId,
             fromMode: mode,
@@ -434,6 +454,8 @@ export class ClineProvider implements AgentProvider {
             cwd: input.cwd,
             enabled: this.resumeSeed,
             maxChars: this.resumeSeedChars,
+            // 硬约束：seed 不能超过模型窗口（PR-6 的字符预算只是软目标，见 restart-resume.ts）。
+            maxSeedTokens: modelContextLimit("cline", modelId) ?? 0,
           },
         );
 
@@ -443,17 +465,54 @@ export class ClineProvider implements AgentProvider {
             status: "session_resumed",
             message:
               `网关重启后已按磁盘历史续接会话 ${input.agentId}：seed ${resume.messages.length} 条` +
-              `${resume.droppedMessages > 0 ? `（按预算丢最旧 ${resume.droppedMessages} 条）` : ""}；` +
+              `${resume.droppedMessages > 0 ? `（按预算丢最旧 ${resume.droppedMessages} 条）` : ""}` +
+              `${resume.droppedToolBlocks ? `（剔除 ${resume.droppedToolBlocks} 个工具调用/结果失配块）` : ""}；` +
               `完整对话历史仍在本任务时间线里。`,
             previousAgentId: input.agentId,
             seededMessages: resume.messages.length,
             droppedMessages: resume.droppedMessages,
+            ...(resume.droppedToolBlocks ? { droppedToolBlocks: resume.droppedToolBlocks } : {}),
+            ...(resume.droppedSeedMessages ? { droppedSeedMessages: resume.droppedSeedMessages } : {}),
             ...seed,
             mode: input.mode ?? "agent",
           });
           result = await this.startFresh(cline, input, modelId, mode, handle, {
             initialMessages: resume.messages,
           });
+          // 万一 seed 仍被上游以「工具配对」为由拒掉（provider 侧的措辞千奇百怪），
+          // 必须把这段历史丢掉重开：带着它的话这个会话之后每条消息都会 400。
+          // 宁可这一轮只带启动简报，也不要一个永久卡死的会话。
+          const seedRejected = this.isToolPairingFailure(result, handle);
+          if (seedRejected) {
+            const poisoned = handle.sessionId;
+            console.warn(
+              `[cline] resume seed rejected for task ${input.taskId}: ${handle.lastError}; ` +
+                `rebuilding without the seed`,
+            );
+            await emit("status", {
+              status: "session_reset",
+              message:
+                `续接的磁盘历史被上游拒绝（${handle.lastError}），` +
+                `本次改为以启动简报开新会话；完整对话历史仍在本任务时间线里。`,
+              previousAgentId: input.agentId,
+              resumeSkipped: "seed_rejected",
+              ...(resume.droppedToolBlocks ? { droppedToolBlocks: resume.droppedToolBlocks } : {}),
+              mode: input.mode ?? "agent",
+            });
+            handle.lastError = undefined;
+            try {
+              await cline.stop(poisoned);
+            } catch (err) {
+              console.warn(
+                `[cline] stop rejected seed session ${poisoned} failed:`,
+                err instanceof Error ? err.message : err,
+              );
+            }
+            // 新会话 id 必须是全新的：绝不能复用刚被拒的那个 id。
+            result = await this.startFresh(cline, input, modelId, mode, handle, {
+              newSessionId: true,
+            });
+          }
           // lineage：续接也是一次 succession（from = 旧会话，to = 新会话，带 seed 体量）。
           await emit("agent_succession", {
             provider: "cline",
@@ -462,8 +521,7 @@ export class ClineProvider implements AgentProvider {
             reason: "gateway_restart",
             fromMode: input.mode ?? "agent",
             toMode: input.mode ?? "agent",
-            seededMessages: resume.messages.length,
-            ...seed,
+            ...(seedRejected ? { seededMessages: 0 } : { seededMessages: resume.messages.length, ...seed }),
           });
         } else {
           // 兜底（老行为）：磁盘上没得捞 —— 新任务、会话不在索引里、工作区对不上，
@@ -615,6 +673,9 @@ export class ClineProvider implements AgentProvider {
   /**
    * Rebuild into a new session id, seeding conversation history from the prior
    * session. Always mints a new id (never reuses) so succession is visible.
+   *
+   * 搬过去的历史必须先过一遍 `sanitizeSeedHistory()`：切模式/会话失效时旧会话的尾巴
+   * 可能停在一次没跑完的工具调用上（配对坏了），原样喂给新会话就是上游 400。
    */
   private async succeedSession(
     cline: ClineCore,
@@ -628,7 +689,16 @@ export class ClineProvider implements AgentProvider {
 
     let initialMessages: MessageWithMetadata[] = [];
     try {
-      initialMessages = (await cline.readLiveMessages(opts.fromAgentId)) ?? [];
+      const live = (await cline.readLiveMessages(opts.fromAgentId)) ?? [];
+      const clean = sanitizeSeedHistory(live);
+      if (clean.droppedToolBlocks > 0 || clean.droppedMessages > 0) {
+        console.warn(
+          `[cline] sanitized succession seed from ${opts.fromAgentId} for task ${input.taskId}: ` +
+            `${live.length} → ${clean.messages.length} 条` +
+            `（剔除 ${clean.droppedToolBlocks} 个失配工具块，丢掉 ${clean.droppedMessages} 条）`,
+        );
+      }
+      initialMessages = clean.messages;
     } catch (err) {
       console.warn(
         `[cline] readLiveMessages failed for ${opts.fromAgentId}:`,
@@ -674,12 +744,15 @@ export class ClineProvider implements AgentProvider {
     opts?: {
       initialMessages?: MessageWithMetadata[];
       prependBootstrap?: boolean;
+      /** 强制一个全新会话 id（忽略预分配 id）：用来丢弃刚被上游拒掉的会话。 */
+      newSessionId?: boolean;
     },
   ): Promise<AgentResult | undefined> {
     // 预分配的 agent id：新建任务时网关已经把这个 id 给了这个 agent（= 它的工作区
     // 目录名 `agent-<agentid>`），这里就用它开会话 —— task.agentId / 工作区目录 /
     // 看板上的 agent 名因此完全一致。网关没给（老任务 / 轮转 / 换个新会话）才自己生成。
-    const sessionId = input.preallocatedAgentId?.trim() || newId("cls");
+    const sessionId =
+      opts?.newSessionId === true ? newId("cls") : input.preallocatedAgentId?.trim() || newId("cls");
     handle.sessionId = sessionId;
     const config = this.buildConfig(input, modelId, mode, sessionId);
     const prependBootstrap = opts?.prependBootstrap !== false;
@@ -702,6 +775,21 @@ export class ClineProvider implements AgentProvider {
   private isUnusable(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
     return /session_not_found|session .*not found|unusable/i.test(msg);
+  }
+
+  /**
+   * 这一轮的结果是不是「上游拒了历史里的工具配对」。
+   *
+   * 注意：这种 400 不一定 throw —— SDK 常常把它包成一次 error 事件 + `finishReason: "error"`
+   * （线上就是这么发生的：run 0.6s 结束、`model_calls = 0`、`runs.error` 是那句英文原文），
+   * 所以两种形态都要判。
+   */
+  private isToolPairingFailure(
+    result: AgentResult | undefined,
+    handle: ActiveHandle,
+  ): boolean {
+    if (result?.finishReason !== "error") return false;
+    return isToolPairingError(handle.lastError);
   }
 
   private async buildResult(

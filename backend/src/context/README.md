@@ -43,7 +43,8 @@
 
 | 动作 | 事件 | 页面表现 |
 | --- | --- | --- |
-| 网关重启 / 会话失效 → **按磁盘 transcript 续接**（新会话 + seed；见 `providers/cline/restart-resume.ts`） | `status`：`{ status: "session_resumed", previousAgentId, seededMessages, droppedMessages, seededChars/Tokens, resumeSkipped? }` + `agent_succession`（`reason: "gateway_restart"`，带 seed 体量） | 时间线「已续接上次会话」+ seed 条数/体量/丢了最旧几条 |
+| 网关重启 / 会话失效 → **按磁盘 transcript 续接**（新会话 + seed；见 `providers/cline/restart-resume.ts`） | `status`：`{ status: "session_resumed", previousAgentId, seededMessages, droppedMessages, droppedToolBlocks?, droppedSeedMessages?, seededChars/Tokens, resumeSkipped? }` + `agent_succession`（`reason: "gateway_restart"`，带 seed 体量） | 时间线「已续接上次会话」+ seed 条数/体量/丢了最旧几条/剔了几个失配工具块 |
+| 网关重启 / 会话失效 → seed 被上游拒（工具契约）或连窗口都装不下，以简报开新会话 | `status`：`{ status: "session_reset", previousAgentId, message, resumeSkipped: "seed_rejected" \| "over_window", droppedToolBlocks? }` | 时间线「会话已重置」+ 原因（含为什么没续上） |
 | 网关重启 / 会话失效 → 磁盘上捞不到，以简报开新会话 | `status`：`{ status: "session_reset", previousAgentId, message, resumeSkipped }` | 时间线「会话已重置」+ 原因（含为什么没续上） |
 | 切模式/会话失效 → seed 整段会话 | `agent_succession`：`seededMessages` + **`seededTokens` / `seededTokensUpperBound` / `seededChars` / `seededOverLimit`** | 时间线「seeded 1630 msgs ≈ 1.02M tokens」 |
 | 新会话注入启动简报 | `run_started`：`bootstrapChars` / `bootstrapTruncated` / `bootstrapKept*` / `bootstrapDropped*` / **`bootstrapText`（原文）** | 时间线「简报 7.5K 字符（按预算裁剪：丢 8 条用户消息 / 4 条 run 结论）」 |
@@ -53,12 +54,15 @@
 事实：cline 的会话 runtime **只在本进程内存**（`backendMode: "local"` → `runTurn` 走 `getSessionOrThrow`），
 但 SDK **落盘**每个会话：`~/.cline/data/sessions/<sessionId>/<id>.json`（清单）+ `<id>.messages.json`
 （完整消息），索引在 `~/.cline/data/db/sessions.db`；`readLiveMessages()` 在会话不驻留时会自动回落磁盘。
-所以「恢复」= 读回磁盘历史 → `trimSeedHistory()` 裁到预算 → `start({ initialMessages })` seed 新会话。
+所以「恢复」= 读回磁盘历史 → `trimSeedHistory()` 裁到预算 → `sanitizeSeedHistory()` 修工具契约 → `start({ initialMessages })` seed 新会话。
 
 | 项 | 值 / 行为 |
 | --- | --- |
 | 开关 | `CLINE_RESUME_SEED=0` 关；预算 `CLINE_RESUME_SEED_CHARS`（默认 60000 字符 ≈ 9.4k tokens，尾部优先，`0` = 关） |
+| seed 契约（**硬**） | ① 首条必须是**真实用户发言**（cline 把工具结果也记成 `role: "user"`，所以不能只看 role）；② 每个 `tool_use` 必须有配对的 `tool_result`，反之亦然。违反 → 上游 400（`Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`），而且那个会话会带着非法历史**一直** 400 |
+| 起点对齐 | 预算边界落在 turn 中间时，起点**往前拉回**最近的真实用户发言（宁可超预算）。一个 turn 可能很长（实测 147 条里只有 2 条真实用户发言 / 287K 字符），所以还有 `maxSeedTokens`（= 模型窗口）硬兜底：连窗口都装不下就放弃续接 |
 | 安全守卫 | 只认 `cline.get(id).cwd === run.cwd` 的会话（**绝不跨任务借历史**）；没有旧 id / 索引里没有 / 磁盘上没消息 / 抛错 → 全部退化回 `session_reset` + 简报 |
+| 自愈 | seed 真被上游以工具契约拒掉（`isToolPairingError`）→ 丢掉 seed、换个**全新**会话 id 重开（`resumeSkipped: "seed_rejected"`）；驻留会话出现同样的 400 → 当「会话不可用」重建（否则每一条后续消息都秒失败） |
 | 不支持的 | local 模式**不能**原地复活同一个 sessionId（非驻留 → `session_not_found`），所以续接语义是「新会话 + 旧 transcript」；想跨客户端重启保活会话得用 hub 模式（多一个常驻进程） |
 | 已知缺口感 | 磁盘 transcript 只在 assistant / turn 边界落盘，重启发生在 turn 中途时最后一段可能不在文件里（优雅 drain 会等 run 结束，所以正常部署不受影响） |
 | 体量参照 | task-8c6b（2026-09-20）单次 run 的 transcript：110 条 / 270KB ≈ 58.6k tokens —— 所以默认只 seed 最近 60000 字符，而不是全量 |

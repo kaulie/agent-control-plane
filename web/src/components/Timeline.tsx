@@ -188,6 +188,10 @@ export function buildRows(events: AgentEvent[]): Row[] {
                   p.seededTokens != null ? ` ≈ ${formatTokens(Number(p.seededTokens))} tokens` : ""
                 }${Number(p.droppedMessages ?? 0) > 0 ? `（丢最旧 ${Number(p.droppedMessages)} 条）` : ""}`
               : "",
+            // 透明化：seed 被剔过（工具调用/结果失配的块）也要说出来，否则「模型记得什么」是笔糊涂账。
+            Number(p.droppedToolBlocks ?? 0) > 0
+              ? `剔除 ${Number(p.droppedToolBlocks)} 个失配工具块`
+              : "",
             p.previousAgentId ? `from=${String(p.previousAgentId)}` : "",
           ]
             .filter(Boolean)

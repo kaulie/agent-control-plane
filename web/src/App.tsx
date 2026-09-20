@@ -4,6 +4,7 @@ import { connectWs, type ServerMessage } from "./ws";
 import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskGoal, TaskType } from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
+import TaskIdsBar from "./components/TaskIdsBar";
 import ContextMeter from "./components/ContextMeter";
 import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
 import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
@@ -896,6 +897,16 @@ export default function App() {
     [refreshAfterSend, refreshDetail, refreshTasks, selectedId],
   );
 
+  // 详情页顶部「基础信息」用的项目：**按 task 的 projectId** 找（不是当前侧边栏选中项），
+  // 这样 fork / 从看板跳进来时 org id 也不会串。组织 id = project.department.departmentId。
+  const detailProject = useMemo(
+    () =>
+      detail
+        ? projects.find((p) => p.projectId === detail.task.projectId)
+        : undefined,
+    [detail, projects],
+  );
+
   // An unanswered plan question batch (only ever produced by a plan-mode run) is
   // rendered inline above the composer, so no tab switching is needed.
 
@@ -1029,6 +1040,11 @@ export default function App() {
         <main className="main">
           {selectedId && detail ? (
             <>
+              <TaskIdsBar
+                task={detail.task}
+                orgId={detailProject?.department?.departmentId}
+                orgName={detailProject?.department?.departmentName}
+              />
               <UsageBar task={detail.task} stats={detail.stats} />
               <ContextMeter
                 context={detail.context}

@@ -251,8 +251,9 @@ assert.equal(rowOf(current, t3.taskId, ""), undefined);
 
 const t1Row = rowOf(current, t1.taskId, AGENT_TWO);
 assert.ok(t1Row, "t1 的当前 agent 是 succession 之后的 AGENT_TWO");
-// agent 名称独立于 task：由 agent id 归一化，和 task 标题不是同一个东西。
-assert.equal(t1Row.agentName, "cls-22222222");
+// agent 名称独立于 task：由 agent id 归一化成定宽短号（`cls-…` → `cline-…`），
+// 和 task 标题不是同一个东西。
+assert.equal(t1Row.agentName, "cline-22222222");
 assert.equal(t1Row.taskTitle, "Fix the flaky test");
 assert.notEqual(t1Row.agentName, t1Row.taskTitle);
 assert.equal(t1Row.current, true);

@@ -26,6 +26,7 @@ import type {
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
 import type { AgentProvider } from "../providers/types.js";
 import { DEFAULT_MAX_CONCURRENT_RUNS } from "../config.js";
+import { agentDisplayName } from "../agent-id.js";
 import {
   isProviderName,
   normalizeProviderName,
@@ -315,15 +316,6 @@ function emptyAgentAgg(): Omit<AgentAgg, "taskId" | "agentId"> {
     toolCalls: 0,
     running: false,
   };
-}
-
-/**
- * Agent 自己的显示名，独立于 task：`agent-7362ceb1-4b5b-…` → `agent-7362ceb1`，
- * `cls-5f7393dd40a44b06` → `cls-5f7393dd`。取不到 pattern 时原样返回。
- */
-function agentDisplayName(agentId: string): string {
-  const m = /^(agent-|cls-)([0-9a-f]{8})/i.exec(agentId);
-  return m ? `${m[1].toLowerCase()}${m[2].toLowerCase()}` : agentId;
 }
 
 /** Board rows are keyed by task + agent (an agent id is only meaningful per task). */

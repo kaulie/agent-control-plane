@@ -15,7 +15,7 @@ import { roundsTitle, taskRollupText } from "../src/board-format.ts";
 /** 一个 agent 行的最小形状（只填这两处文案用到的字段）。 */
 const agentRow = (over = {}) => ({
   agentId: "cls-1234567890abcdef",
-  agentName: "cls-12345678",
+  agentName: "cline-12345678",
   provider: "cline",
   projectId: "project-1",
   projectName: "autonomy",

@@ -257,6 +257,7 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
 | GET | `/api/projects` | list Projects（含各自的 `department`，供左栏「所属部门」显示） |
+| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `gitRepoUrl` / `department`）；不存在 → 404 |
 | POST | `/api/projects` | create Project `{ name, department, gitRepoUrl? }`；`department` **必填**（缺失 → 400），与项目同一次写入 |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |
@@ -299,11 +300,56 @@ Each Task belongs to a Project (`projectId`). On first boot a default project
 ## CI
 
 Pull requests and pushes to `main` run [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
-`npm ci` → typecheck → build → `npm test`. Compiled `backend/dist` and `web/dist`
-are uploaded as GitHub Actions artifacts and expire after **7 days** (Actions run
-→ Artifacts). This does not deploy: every deploy is triggered from the
-independent deployment platform (`:4220`), which packages the merged `main`
-commit and restarts the service. This repo has no deploy entry point.
+`npm ci` → typecheck → build → **contract（`npm run openapi:check`）** → `npm test`.
+Compiled `backend/dist` and `web/dist` are uploaded as GitHub Actions artifacts and
+expire after **7 days** (Actions run → Artifacts). This does not deploy: every deploy is
+triggered from the independent deployment platform (`:4220`), which packages the merged
+`main` commit and restarts the service. This repo has no deploy entry point.
+
+## 服务中心契约登记（Node 对等方案）
+
+本服务把自己登记进 [服务中心](https://github.com/kaulie/service-registry)（`127.0.0.1:4240`）：
+注册的是**对外 API 契约 + 实例集合**，一次性调用、幂等、运行时零依赖（服务跑起来之后跟
+注册中心没有任何连接）。
+
+Go 服务的做法是 swag 注解 + `client/ci/register-go-service.sh`（内含 `swag init`）。
+本服务没有代码生成器，用的是对等物 —— **契约提交进仓库，CI 保证它跟路由一致**：
+
+```
+backend/src/http/route-meta.ts   ← 「注解」的唯一真源（每个路由的 summary/tags）
+        +  backend/src/http/routes.ts（真实路由表）
+        ├── npm run openapi:gen ──▶ api/openapi.json ──┐（提交进仓库 = swag 产物的对等物）
+        │                                              │
+        └── npm run openapi:check（CI：忘更新就红）      └── bash scripts/register-contract.sh
+                                                              （一行：读契约 + 幂等上报）
+```
+
+| 命令 / 开关 | 作用 |
+| --- | --- |
+| `npm run openapi:gen` | 从路由 + `route-meta.ts` 重新生成 `api/openapi.json` |
+| `npm run openapi:check` | 双向校验 + 检查有没有忘提交（CI 里跑，红了就说明接口改了契约没跟上） |
+| `npm run openapi:list` | 只列真实路由（排查用） |
+| `npm run contract:register` / `bash scripts/register-contract.sh` | 幂等上报（服务 + 实例）；`--dry-run` 只探活 + 打印命令 |
+| `build.sh` 末尾 | 发版时自动跑一次（`REGISTER_CONTRACT=0` 关；`REGISTER_CONTRACT_STRICT=1` 让失败致命） |
+
+一致性是**双向**的（等价于服务中心自己那条「路由 ↔ 自述契约」检查）：路由表里有、契约里
+没有（且没进 `OPENAPI_EXCLUDE` 说明原因）→ 生成/检查直接失败；契约里写了不存在的接口 →
+同样失败。所以「新加接口忘了写契约」和「删了接口忘了清契约」都拦得住。
+
+登记默认值（都在 `scripts/register-contract.sh` 顶部，可用环境变量覆盖）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `SERVICE_NAME` | `agent-control-plane` | = 仓库名（服务中心里已登记的那一条，不再另开一条） |
+| `REGISTRY_URL` / `REGISTRY_NS` | `http://127.0.0.1:4240` / `default` | 注册中心地址与命名空间 |
+| `INSTANCES` | `127.0.0.1:${SERVICE_PORT:-4211}` | 实例集合（声明式整组对齐，逗号分隔可多个） |
+| `DEPARTMENT_ID` | `D0005`（AI研发部） | 与项目设置里选的部门一致；服务端会拿组织接口的目录对齐 |
+| `VERSION` / `OWNER` / `HEALTH_PATH` | `${APP_VERSION}` / `kaulie` / `/health` | 发版版本 / 归属人 / 健康检查路径 |
+
+> ⚠️ 注册中心**只绑 127.0.0.1**（写接口现在默认开放，所以刻意不暴露到网络）：
+> 这条命令要么跑在本机（`build.sh` / 手动），要么跑在 self-hosted runner 上；
+> GitHub-hosted runner 够不到，CI 里只跑 `openapi:check`（不写库）。
+
 
 ## Project layout
 
@@ -319,6 +365,9 @@ backend/src/
   billing/        计费模块：billing_rules 表驱动的价目/时段规则（见该目录 README）
   context/        上下文体量口径 + 模型窗口 + token 估算（见该目录 README）
   http/ ws/       REST + WebSocket
+  http/route-meta.ts  对外契约的「注解」真源（summary/tags，见「服务中心契约登记」）
+api/openapi.json  生成的对外契约（提交进仓库；swag 产物的对等物）
+scripts/register-contract.sh   服务中心登记的一行入口（CI / 发版用）
 web/src/          React UI (Chat / Timeline / UsageBar / TaskList + Projects)
   usage-cost.ts    成本两个口径的文案（计费表本币 vs SDK 上报美元，分开显示）
   timeline-line.ts  状态点线的几何（idle / thinking / working → 三条互不相连的水平线）

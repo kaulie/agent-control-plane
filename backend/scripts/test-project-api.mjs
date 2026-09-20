@@ -2,7 +2,8 @@
  * HTTP-level checks for project creation: `POST /api/projects` requires a
  * department and stores it with the project (settings_json), name/gitRepoUrl
  * still behave as before. Also covers「按 task_id 查详情」：`GET /api/tasks/:taskId`
- * 必须带 project（名字 / gitRepoUrl / 部门），项目被删掉时也不能 500。
+ * 必须带 project（名字 / gitRepoUrl / 部门），项目被删掉时也不能 500；
+ * 以及单项项目接口 `GET /api/projects/:projectId`（形状 = 列表里那一项，未知 → 404）。
  *
  * Usage: npm run build --workspace backend && node backend/scripts/test-project-api.mjs
  */
@@ -200,8 +201,62 @@ const orphanDetail = JSON.parse(
 assert.equal(orphanDetail.task.taskId, legacyTask.taskId);
 assert.equal(orphanDetail.project, undefined);
 
+// 13) 单项项目接口：形状和列表里的那一项完全一致。
+const single = JSON.parse(
+  (await app.inject({ method: "GET", url: `/api/projects/${project.projectId}` })).body,
+);
+assert.equal(single.projectId, project.projectId);
+assert.equal(single.name, "Smoke Project");
+assert.equal(single.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+assert.deepEqual(single.department, {
+  departmentId: "D0002",
+  departmentName: "工程效能部门",
+});
+assert.deepEqual(
+  single,
+  await listedProject(project.projectId),
+  "单项接口不能和列表是两套口径",
+);
+
+// 没有部门的老项目 → 单独查也还是「没有 department 字段」（两个接口一套口径）。
+const plainId = "project-no-dept";
+store.db
+  .prepare(
+    `INSERT INTO projects (project_id, name, workspace_root, git_repo_url, settings_json, created_at, updated_at)
+     VALUES (?, ?, NULL, NULL, NULL, ?, ?)`,
+  )
+  .run(plainId, "No Dept", new Date().toISOString(), new Date().toISOString());
+const plainSingle = JSON.parse(
+  (await app.inject({ method: "GET", url: `/api/projects/${plainId}` })).body,
+);
+assert.equal(plainSingle.projectId, plainId);
+assert.equal(plainSingle.department, undefined);
+
+// 已被删掉的项目（section 12 删的）→ 404，不是空对象。
+const deletedProject = await app.inject({
+  method: "GET",
+  url: `/api/projects/${legacyId}`,
+});
+assert.equal(deletedProject.statusCode, 404);
+
+// 不知道的项目 → 404（不是空对象 / 500）。
+const unknown = await app.inject({
+  method: "GET",
+  url: "/api/projects/project-does-not-exist",
+});
+assert.equal(unknown.statusCode, 404);
+assert.equal(JSON.parse(unknown.body).error, "project not found");
+
+// 参数路由不能把 /settings 子路由吃掉。
+const settingsStillWorks = await app.inject({
+  method: "GET",
+  url: `/api/projects/${project.projectId}/settings`,
+});
+assert.equal(settingsStillWorks.statusCode, 200);
+
 await app.close();
 fs.rmSync(dataDir, { recursive: true, force: true });
+
 console.log(
-  "PASS: POST /api/projects requires + stores department, list carries it, task detail carries project+department",
+  "PASS: POST /api/projects requires + stores department, list carries it, task detail carries project+department, single project GET (404 for unknown)",
 );

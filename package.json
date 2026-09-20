@@ -14,7 +14,11 @@
     "build": "npm run build --workspace backend && npm run build --workspace web",
     "start": "npm run build && npm run start --workspace backend",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "node backend/scripts/run-tests.mjs"
+    "test": "node backend/scripts/run-tests.mjs",
+    "openapi:gen": "npm run openapi:gen --workspace backend",
+    "openapi:check": "npm run openapi:check --workspace backend",
+    "openapi:list": "npm run openapi:list --workspace backend",
+    "contract:register": "bash scripts/register-contract.sh"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

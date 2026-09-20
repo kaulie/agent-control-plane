@@ -16,6 +16,10 @@ import type { BillingService } from "../../billing/service.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 import { mapAgentEvent, toTokenUsage, type MappedEvent, type UsageLike } from "./mapper.js";
 import {
+  DEFAULT_RESUME_SEED_CHARS,
+  recoverSessionAfterRestart,
+} from "./restart-resume.js";
+import {
   buildCostWithBilling,
   DEFAULT_PROVIDER_ID,
   DEFAULT_SYSTEM_PROMPT,
@@ -99,6 +103,10 @@ interface SuccessionOpts {
  * desktop host: seed `initialMessages` from `readLiveMessages`, mint a new
  * session id, stop the old session, and emit `agent_succession` so lineage is
  * explicit (`agent_successions` table + timeline).
+ *
+ * 网关重启（本进程没有绑定会话）走同一套重塑机制：先按旧 id 从**磁盘**读回
+ * transcript（`restart-resume.ts`），能读到就 seed 新会话并写 `session_resumed`；
+ * 读不到才退回「只注启动简报」的 `session_reset`。
  */
 export class ClineProvider implements AgentProvider {
   readonly name = "cline";
@@ -116,6 +124,10 @@ export class ClineProvider implements AgentProvider {
   private readonly compactionStrategy: "basic" | "agentic";
   /** agentic 摘要模型（缺省 = 本次会话模型）。 */
   private readonly compactionModel?: string;
+  /** 网关重启后是否用磁盘历史续接（见 restart-resume.ts）。 */
+  private readonly resumeSeed: boolean;
+  /** 续接 seed 的字符预算。 */
+  private readonly resumeSeedChars: number;
 
   private modelsCache: ModelInfo[] | undefined;
   private client: ClineCore | undefined;
@@ -133,6 +145,8 @@ export class ClineProvider implements AgentProvider {
     this.compactionEnabled = config.compaction !== false;
     this.compactionStrategy = config.compactionStrategy === "agentic" ? "agentic" : "basic";
     this.compactionModel = config.compactionModel?.trim() || undefined;
+    this.resumeSeed = config.resumeSeed !== false;
+    this.resumeSeedChars = config.resumeSeedChars ?? DEFAULT_RESUME_SEED_CHARS;
   }
 
   // ---- infrastructure ----
@@ -406,19 +420,68 @@ export class ClineProvider implements AgentProvider {
           emit,
         });
       } else {
-        // 透明化（PR-5）：task 本来绑了会话，但本进程里没有它（网关重启 / 会话失效）→
-        // 这次会以启动简报开新会话。以前这件事**完全无感**：用户只觉得 agent 突然失忆。
-        if (input.agentId) {
-          await emit("status", {
-            status: "session_reset",
-            message:
-              `之前绑定的会话 ${input.agentId} 不在本进程中（网关重启或会话失效），` +
-              `本次以启动简报开新会话；完整对话历史仍在本任务时间线里。`,
+        // 透明化（PR-6）：task 本来绑了会话，但本进程里没有它 —— 最常见的成因是
+        // **网关刚被部署重启**（`reconcileAfterRestart` 清了内存映射）。以前这里只会
+        // 注一份启动简报、整段对话丢掉（用户视角 = agent 突然失忆），现在先试着按
+        // **磁盘 transcript** 续接（SDK 官方姿势：读回历史 → seed 新会话）。
+        const resume = await recoverSessionAfterRestart(
+          {
+            getSession: (sessionId) => cline.get(sessionId),
+            readMessages: (sessionId) => cline.readLiveMessages(sessionId),
+          },
+          {
             previousAgentId: input.agentId,
+            cwd: input.cwd,
+            enabled: this.resumeSeed,
+            maxChars: this.resumeSeedChars,
+          },
+        );
+
+        if (resume.messages.length) {
+          const seed = seedPayload(resume.messages, modelId);
+          await emit("status", {
+            status: "session_resumed",
+            message:
+              `网关重启后已按磁盘历史续接会话 ${input.agentId}：seed ${resume.messages.length} 条` +
+              `${resume.droppedMessages > 0 ? `（按预算丢最旧 ${resume.droppedMessages} 条）` : ""}；` +
+              `完整对话历史仍在本任务时间线里。`,
+            previousAgentId: input.agentId,
+            seededMessages: resume.messages.length,
+            droppedMessages: resume.droppedMessages,
+            ...seed,
             mode: input.mode ?? "agent",
           });
+          result = await this.startFresh(cline, input, modelId, mode, handle, {
+            initialMessages: resume.messages,
+          });
+          // lineage：续接也是一次 succession（from = 旧会话，to = 新会话，带 seed 体量）。
+          await emit("agent_succession", {
+            provider: "cline",
+            fromAgentId: input.agentId,
+            toAgentId: handle.sessionId,
+            reason: "gateway_restart",
+            fromMode: input.mode ?? "agent",
+            toMode: input.mode ?? "agent",
+            seededMessages: resume.messages.length,
+            ...seed,
+          });
+        } else {
+          // 兜底（老行为）：磁盘上没得捞 —— 新任务、会话不在索引里、工作区对不上，
+          // 或者续接被配置关掉了。原因写清楚，便于事后归因。
+          if (input.agentId) {
+            await emit("status", {
+              status: "session_reset",
+              message:
+                `之前绑定的会话 ${input.agentId} 不在本进程中（网关重启或会话失效），` +
+                `本次以启动简报开新会话；完整对话历史仍在本任务时间线里。`,
+              previousAgentId: input.agentId,
+              ...(resume.skipped ? { resumeSkipped: resume.skipped } : {}),
+              ...(resume.error ? { resumeError: resume.error } : {}),
+              mode: input.mode ?? "agent",
+            });
+          }
+          result = await this.startFresh(cline, input, modelId, mode, handle);
         }
-        result = await this.startFresh(cline, input, modelId, mode, handle);
       }
       this.sessionsByTask.set(input.taskId, { sessionId: handle.sessionId, mode });
 
@@ -478,6 +541,8 @@ export class ClineProvider implements AgentProvider {
   async reconcileAfterRestart(): Promise<void> {
     // Local Cline sessions live in-process; after a restart there is nothing
     // still running to cancel. Clear in-memory state so tasks recreate sessions.
+    // 重建时会先按旧会话 id 从磁盘读回 transcript 续接（`restart-resume.ts`），
+    // 所以这里的「清空」不是「失忆」，只是丢掉不可信的驻留映射。
     this.active.clear();
     this.sessionsByTask.clear();
   }

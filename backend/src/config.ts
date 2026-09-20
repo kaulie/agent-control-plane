@@ -6,6 +6,7 @@ import {
   resolveGitViaProxyServerPath,
   resolveProxyUrl,
 } from "./git-via-proxy.js";
+import { DEFAULT_RESUME_SEED_CHARS } from "./providers/cline/restart-resume.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -195,6 +196,10 @@ export interface Config {
   clineCompactionStrategy: "basic" | "agentic";
   /** agentic 压缩用的模型（缺省 = 会话模型）。 */
   clineCompactionModel: string | undefined;
+  /** **网关重启后按磁盘历史续接会话**（默认开；`CLINE_RESUME_SEED=0` 关）。 */
+  clineResumeSeed: boolean;
+  /** 续接 seed 的字符预算（`CLINE_RESUME_SEED_CHARS`，默认 60000；<=0 = 关）。 */
+  clineResumeSeedChars: number;
   /** **模型生成 digest**：默认关（CONTEXT_DIGEST=1 开）。 */
   contextDigest: boolean;
   /** digest 用的模型（缺省 = 会话模型）。 */
@@ -246,6 +251,17 @@ export interface Config {
 }
 
 /** Deployed VERSION file next to web/backend (authoritative after rsync). */
+/**
+ * 续接 seed 的字符预算（`CLINE_RESUME_SEED_CHARS`）。缺省/打错 = 回默认值；
+ * 显式给 `0`（或负数）才表示「不 seed」（关掉磁盘续接）。导出给测试用。
+ */
+export function resolveResumeSeedChars(raw: string | undefined): number {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_RESUME_SEED_CHARS;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_RESUME_SEED_CHARS;
+}
+
 export function readRuntimeVersion(productRoot: string): string | null {
   try {
     const p = path.join(productRoot, "VERSION");
@@ -331,6 +347,8 @@ export function loadConfig(): Config {
     contextAutoRotate: process.env.CONTEXT_AUTO_ROTATE?.trim() !== "0",
     clineCompactionStrategy: process.env.CLINE_COMPACTION?.trim() === "agentic" ? "agentic" : "basic",
     clineCompactionModel: process.env.CLINE_COMPACTION_MODEL?.trim() || undefined,
+    clineResumeSeed: process.env.CLINE_RESUME_SEED?.trim() !== "0",
+    clineResumeSeedChars: resolveResumeSeedChars(process.env.CLINE_RESUME_SEED_CHARS),
     contextDigest:
       process.env.CONTEXT_DIGEST?.trim() === "1" || process.env.CONTEXT_DIGEST?.trim() === "true",
     contextDigestModel: process.env.CONTEXT_DIGEST_MODEL?.trim() || undefined,

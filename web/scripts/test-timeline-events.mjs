@@ -33,6 +33,24 @@ const reset = buildRows([
 assert.equal(reset.body, "会话已重置");
 assert.match(reset.detail, /网关重启/);
 
+// 1b) 网关重启后**续接上了** → 说"已续接上次会话" + seed 体量（不再是"失忆"）
+const resumed = buildRows([
+  ev("status", {
+    status: "session_resumed",
+    message: "网关重启后已按磁盘历史续接会话 agent-abc…：seed 42 条（按预算丢最旧 12 条）…",
+    previousAgentId: "agent-abcdefabcdef",
+    seededMessages: 42,
+    droppedMessages: 12,
+    seededTokens: 9400,
+    seededChars: 60000,
+  }),
+])[0];
+assert.equal(resumed.body, "已续接上次会话");
+assert.match(resumed.detail, /seed 42 msgs/);
+assert.match(resumed.detail, /≈ 9\.4K tokens/);
+assert.match(resumed.detail, /丢最旧 12 条/);
+assert.match(resumed.detail, /from=agent-abcdefabcdef/);
+
 // 2) 其它 status 不受影响
 assert.equal(buildRows([ev("status", { status: "working", message: "x" })])[0].body, "仍在执行");
 assert.equal(buildRows([ev("status", { status: "retrying" })])[0].body, "自动重试");
@@ -110,6 +128,11 @@ assert.match(
   buildRows([ev("agent_succession", { fromAgentId: "a", toAgentId: "b", reason: "mode_change" })])[0].detail,
   /切模式/,
 );
+assert.match(
+  buildRows([ev("agent_succession", { fromAgentId: "a", toAgentId: "b", reason: "gateway_restart" })])[0]
+    .detail,
+  /网关重启后续接/,
+);
 
 // 7b) 模型摘要（默认关闭的能力）——生成这件事要可见，简报里也要说明含摘要
 const digest = buildRows([
@@ -144,4 +167,4 @@ assert.match(overflow.message, /Fork 新 task/);
 assert.match(overflow.message, /完整历史仍在时间线里/);
 assert.equal(classifyRunError("already has active run").kind, "busy", "其它分类不受影响");
 
-console.log("PASS: 时间线透明化文案（会话重置 / seed 体量 / 简报裁剪 / 自动轮转 / 模型摘要 / 超限报错）");
+console.log("PASS: 时间线透明化文案（会话重置 / 重启续接 / seed 体量 / 简报裁剪 / 自动轮转 / 模型摘要 / 超限报错）");

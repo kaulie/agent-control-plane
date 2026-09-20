@@ -417,7 +417,9 @@ export type AgentSuccessionReason =
   | "mode_change"
   | "session_unusable"
   /** 上下文接近模型窗口，系统自动换会话（兜底；见 context/README.md）。 */
-  | "context_rotation";
+  | "context_rotation"
+  /** 网关重启后按磁盘 transcript 续接（新会话 + seed 旧历史）。 */
+  | "gateway_restart";
 
 export interface AgentSuccession {
   successionId: string;

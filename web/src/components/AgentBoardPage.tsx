@@ -550,7 +550,13 @@ export default function AgentBoardPage({
                           {r.provider} · {shortAgentId(r.agentId)}
                           {r.supersededAt
                             ? ` · 接替于 ${formatDateTime(r.supersededAt)}${
-                                r.supersededReason === "mode_change" ? "（模式切换）" : ""
+                                r.supersededReason === "mode_change"
+                                  ? "（模式切换）"
+                                  : r.supersededReason === "gateway_restart"
+                                    ? "（网关重启续接）"
+                                    : r.supersededReason === "context_rotation"
+                                      ? "（上下文轮转）"
+                                      : ""
                               }`
                             : ""}
                           <button

@@ -613,7 +613,6 @@ export default function App() {
   const createProject = useCallback(
     async (input: ProjectDialogResult) => {
       const project = await api.createProject(input.name, {
-        ...(input.gitRepoUrl ? { gitRepoUrl: input.gitRepoUrl } : {}),
         ...(input.department.departmentId || input.department.departmentName
           ? { department: input.department }
           : {}),
@@ -633,24 +632,12 @@ export default function App() {
     [refreshProjects, selectedProjectId],
   );
 
-  const setProjectGitRepoUrl = useCallback(
-    async (input: ProjectDialogResult) => {
-      if (!selectedProjectId) return;
-      await api.updateProject(selectedProjectId, {
-        gitRepoUrl: input.gitRepoUrl,
-      });
-      await refreshProjects();
-    },
-    [refreshProjects, selectedProjectId],
-  );
-
   const submitProjectDialog = useCallback(
     async (input: ProjectDialogResult): Promise<void> => {
       if (projectDialog === "create") return createProject(input);
       if (projectDialog === "rename") return renameProject(input);
-      return setProjectGitRepoUrl(input);
     },
-    [createProject, projectDialog, renameProject, setProjectGitRepoUrl],
+    [createProject, projectDialog, renameProject],
   );
 
   /** Pull events/detail after send so the user message is visible even if WS is quiet. */
@@ -1030,7 +1017,6 @@ export default function App() {
           onSelectProject={(id) => void selectProject(id)}
           onCreateProject={() => setProjectDialog("create")}
           onRenameProject={() => setProjectDialog("rename")}
-          onSetGitRepoUrl={() => setProjectDialog("gitRepoUrl")}
           onOpenProjectSettings={() => setView("project-settings")}
           tasks={tasks}
           selectedId={selectedId}
@@ -1263,12 +1249,6 @@ export default function App() {
           projectDialog === "rename"
             ? (projects.find((p) => p.projectId === selectedProjectId)?.name ??
               "")
-            : ""
-        }
-        initialGitRepoUrl={
-          projectDialog === "gitRepoUrl"
-            ? (projects.find((p) => p.projectId === selectedProjectId)
-                ?.gitRepoUrl ?? "")
             : ""
         }
         onClose={() => setProjectDialog(null)}

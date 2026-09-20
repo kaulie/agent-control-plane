@@ -18,10 +18,10 @@ const store = new Store(dataDir);
 
 // 1) 新建项目时同时设置部门：id/name 都做 trim 后落库。
 const withDepartment = store.createProject("Dept Project", {
-  gitRepoUrl: "  https://github.com/kaulie/agent-control-plane  ",
   department: { departmentId: " D0001 ", departmentName: " SRE部门 " },
 });
-assert.equal(withDepartment.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+// 项目上没有仓库地址字段（老的 gitRepoUrl 已删除，接口不返回、UI 不展示）。
+assert.equal("gitRepoUrl" in withDepartment, false);
 assert.deepEqual(store.getProjectSettings(withDepartment.projectId)?.department, {
   departmentId: "D0001",
   departmentName: "SRE部门",

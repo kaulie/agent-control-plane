@@ -23,7 +23,7 @@ import { buildTaskBootstrap } from "../src/task-context.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-fork-"));
 const store = new Store(dir);
-const project = store.createProject("fork-test", { gitRepoUrl: "https://github.com/kaulie/agent-control-plane" });
+const project = store.createProject("fork-test");
 const providers = {
   has: () => false,
   get default() {

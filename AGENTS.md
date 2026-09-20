@@ -7,7 +7,7 @@ You are the agent behind **Web Cursor**. These rules always apply.
 | Path | Action |
 |---|---|
 | `/Users/gaolei/agent-workspace/agent-<agentid>/` | **Your sandbox** — cwd for this task (`agentid` = your agent id, 见 bootstrap 的 `- workspace:`); clone/work here（**开发 only**） |
-| Project `gitRepoUrl` (GitHub) | **Metadata only** (list / settings display); the repo address injected into your bootstrap comes from the **service registry** (project → org → `GET /v1/orgs/{orgId}/services`), not from here |
+| Project repo URL | The app has **no** such field any more (legacy `gitRepoUrl` removed: not returned by the API, not shown in the UI); the repo address injected into your bootstrap comes from the **service registry** (project → org → `GET /v1/orgs/{orgId}/services`) |
 | [agent-control-plane-deployment](https://github.com/kaulie/agent-control-plane-deployment) | Independent deploy service (HTTP + SQLite contracts) |
 | `~/runtime/agent-control-plane-deployment` | Deploy service install dir (`:4220`, packages, sqlite) — not the app |
 | `~/runtime/web-cursor` | App runtime — **never** hand-edit; only the deployment platform ships into it |

@@ -257,8 +257,8 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
 | GET | `/api/projects` | list Projects（含各自的 `department`，供左栏「所属部门」显示） |
-| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `gitRepoUrl`（**仅登记**，不再注入 agent）/ `department`）；不存在 → 404 |
-| POST | `/api/projects` | create Project `{ name, department, gitRepoUrl? }`；`department` **必填**（缺失 → 400），与项目同一次写入 |
+| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `department`）；不存在 → 404。**没有 `gitRepoUrl`**（老字段已删：接口不返回、UI 不展示） |
+| POST | `/api/projects` | create Project `{ name, department }`；`department` **必填**（缺失 → 400），与项目同一次写入（body 里传老的 `gitRepoUrl` 会被忽略） |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |
 | GET | `/api/projects/:id/service-repos` | **注入 agent 的仓库地址**：project → 所属部门（组织 id）→ 服务中心 `GET /v1/orgs/{orgId}/services`（含各服务的 `gitRepoUrl`）；`repos: null` = 没部门/没配客户端；不可达时 `repos.available=false`；`?refresh=1` 绕过 30s 缓存 |
@@ -266,7 +266,7 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | PATCH | `/api/projects/:id/settings` | 更新 Project settings `{ runtime?, department? }`（`department` 传空即清除） |
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
 | POST | `/api/tasks` | create Task `{ title?, description, taskType?, goal?, workspace?, model?, projectId? }` —— **`description` 必填**（缺失/纯空白 → 400，超 4000 字 → 400），`taskType` ∈ `general\|feature\|bugfix\|diagnose`（非法 → 400），`goal` ∈ `merge\|deploy`（非法 → 400；缺省 `merge`），`workspace` 缺省 = `<AGENT_WORKSPACE_ROOT>/agent-<agentid>`（agent id 建任务时预分配，见「Agent 工作区」）。创建成功后会**自动投递需求**并开跑（见「任务意图」） |
-| GET | `/api/tasks/:id` | Task detail（task + runs + stats + context + forkedTo + **`project`**）；`project` = 任务所属项目（名字 / `gitRepoUrl` / 所属部门快照 `department.departmentId`+`departmentName`），项目的实时部门目录见 `GET /api/org/departments`；项目已被删掉时缺省 |
+| GET | `/api/tasks/:id` | Task detail（task + runs + stats + context + forkedTo + **`project`**）；`project` = 任务所属项目（名字 / 所属部门快照 `department.departmentId`+`departmentName`，**不含仓库地址**），项目的实时部门目录见 `GET /api/org/departments`；项目已被删掉时缺省 |
 | PATCH | `/api/tasks/:id` | 改任务意图 `{ title?, description?, taskType?, goal? }`（**描述不允许改成空** → 400；非法类型 → 400；`goal` 非法 → 400，传 `null` = 清掉目标）或回写 PR 链接 `{ prUrl }`；成功 publish `task_updated`，改意图时时间线留 `status: task_intent_updated` |
 | GET | `/api/agents` | **Agent 看板**：`?scope=current\|all\|task`（默认 `current` = 每个 task 当前那个 agent；`all` = 连同被 succession 替换掉的 agent；`task` = 每个 task 一行、数字跨它历史上**所有** agent 相加）、`?projectId=` 过滤。每行带 `agentName`（由 agent id 归一化，独立于 task 标题）/ 所在部门（task 所属 project 的部门）/ project / task 标题 / `completedRounds`（累计完成对话轮次 = finished 的 run 数）/ 最后活跃时间 / 模型 / token 消耗 / 累计工作时长；另带 `taskTotals`（`completedRounds` / `runCount` / `totalTokens` / `durationMs` / `modelCalls` / `toolCalls` / `agentCount`）—— per-agent 的数字在 succession 之后会明显小于 task 的真实工作量，所以两个口径都给。`scope=task` 的行另有 `taskScope: true` / `currentAgentId`（`agentId` 为空，因为整行代表 task） |
 | GET | `/api/agents/:agentId/timeline` | **Agent 时间线**：某段时间内这个 agent 的工作状态与用户输入。`?from=&to=`（ISO，缺省最近 1 小时，跨度上限 30 天）、`?projectId=`。返回 `segments`（idle / thinking / working，首尾相接铺满窗口）或 `buckets`（跨度大时按时间桶聚合）+ `markers`（用户输入 / run 起止 / agent 替换 / 疑似停滞）+ `runs`（每轮 run 的 thinking·working 时长、工具·模型调用、触发输入）+ `totals`（活跃占比等）+ `note`（判定口径）+ `lastActiveAt`（这个 agent 自己的最近活跃时间，**不受查询窗口限制**：窗口里没有事件时前端靠它区分「窗口选错了」和「这个 agent 没动过」）+ `agentRunCount` / `agentCompletedRounds`（这个 agent 自己的累计，同样不限窗口：页面上的「run 轮次」只算窗口内） |
@@ -307,9 +307,9 @@ expire after **7 days** (Actions run → Artifacts). This does not deploy: every
 triggered from the independent deployment platform (`:4220`), which packages the merged
 `main` commit and restarts the service. This repo has no deploy entry point.
 
-## 注入 agent 的仓库地址（服务中心，不再读项目的 `gitRepoUrl`）
+## 注入 agent 的仓库地址（服务中心；应用里不再有项目级 `gitRepoUrl`）
 
-agent 启动简报里那段「仓库地址」**不是**项目配置里手填的 `gitRepoUrl`，而是按下面这条链路查出来的：
+agent 启动简报里那段「仓库地址」按下面这条链路查出来：
 
 ```
 project → project.department.departmentId（组织 id）
@@ -318,11 +318,11 @@ project → project.department.departmentId（组织 id）
 ```
 
 - 单一真源 = 服务中心：服务登记时填的 `gitRepoUrl` 改了，下一个新建会话的 agent 就看到新的
-  （项目上的 `gitRepoUrl` 降级为**项目元数据**，只在列表 / 设置页展示，不参与注入）。
+  （**应用里已经没有项目级 `gitRepoUrl`**：接口不返回、UI 不展示，避免两个真源打架）。
 - 简报里最多逐个列 12 个仓库（超出的折成一句「另有 N 个」），并写明来源
   （`GET /v1/orgs/<orgId>/services` + 组织名），便于 agent 自查。
-- 服务中心不可达 / 项目没有所属部门 → 简报退回兜底文案「按需自己 clone」，
-  **不会**回落到项目的 `gitRepoUrl`（避免两个真源打架）。
+- 服务中心不可达 / 项目没有所属部门 → 简报退回兜底文案「按需自己 clone」
+  （没有项目级仓库地址可以回落）。
 - 想先看「这个项目会被注入什么」：`GET /api/projects/:id/service-repos`（`?refresh=1` 绕过 30s 缓存）。
 - **调试时不用查库**：任务详情页顶部常驻一条「基础信息」（`Task` / `Project` / `Org`，绑定后还有
   `Agent`），项目设置页头部标了 `Project` / `Org` —— 都是**完整 id**，点一下即复制。

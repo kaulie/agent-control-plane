@@ -163,7 +163,7 @@ export interface SendMessageInput {
 export interface TaskDetail {
   task: Task;
   /**
-   * 任务所属项目（名字 / `gitRepoUrl` / 所属部门快照 `department`）。
+   * 任务所属项目（名字 / 所属部门快照 `department`；项目上没有仓库地址字段）。
    *
    * 「部门」就是组织（organization）口径：`department.departmentId` 是
    * organization 服务里的部门 id，`departmentName` 是选中时的名字快照
@@ -504,7 +504,7 @@ export class AgentGateway {
 
   createProject(
     name: string,
-    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
+    options?: { department?: DepartmentConfig },
   ): Project {
     const project = this.store.createProject(name, options);
     this.publish({ type: "project_created", project });
@@ -519,7 +519,6 @@ export class AgentGateway {
     projectId: string,
     input: {
       name?: string;
-      gitRepoUrl?: string | null;
     },
   ): Project | undefined {
     const project = this.store.updateProject(projectId, input);
@@ -1541,7 +1540,7 @@ export class AgentGateway {
    * 服务中心 `GET /v1/orgs/{orgId}/services`（含各服务的 git 仓库地址）。
    *
    * 项目没有所属组织 / 没配服务中心客户端 / 服务中心不可达 → `undefined`：
-   * 简报退回兜底文案，**不**回落到 `project.gitRepoUrl`（单一真源是服务中心）。
+   * 简报退回兜底文案（单一真源是服务中心；项目上**没有** gitRepoUrl 可以回落）。
    */
   private async orgServicesFor(project?: Project): Promise<OrgServiceList | undefined> {
     const client = this.config.serviceRegistry;

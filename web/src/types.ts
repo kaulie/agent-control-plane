@@ -1,8 +1,6 @@
 export interface Project {
   projectId: string;
   name: string;
-  /** Git remote/clone URL for this project. */
-  gitRepoUrl?: string;
   /** 项目自己的所属部门（新建时必填；老项目可能没有）。 */
   department?: DepartmentConfig;
   createdAt: string;
@@ -510,7 +508,7 @@ export interface TaskContextSize {
 
 export interface TaskDetail {
   task: Task;
-  /** 任务所属项目（名字 / `gitRepoUrl` / 所属部门 `department`，见 Project）。 */
+  /** 任务所属项目（名字 / 所属部门 `department`，见 Project）。 */
   project?: Project;
   runs: RunRecord[];
   stats: TaskStats;

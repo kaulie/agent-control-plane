@@ -103,7 +103,7 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     responses: { 201: { description: "创建成功，返回项目" } },
   },
   "PATCH /api/projects/{projectId}": {
-    summary: "改项目（名字 / Git 仓库地址）",
+    summary: "改项目（名字）",
     tags: ["projects"],
   },
   "GET /api/projects/{projectId}/settings": {

@@ -42,7 +42,6 @@ const task = {
 const project = {
   projectId: DEFAULT_PROJECT_ID,
   name: "web-cursor",
-  gitRepoUrl: "https://github.com/kaulie/agent-control-plane",
   createdAt: "",
   updatedAt: "",
 };

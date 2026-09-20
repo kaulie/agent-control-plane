@@ -32,7 +32,7 @@ import {
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-goal-"));
 const store = new Store(dir);
 // 简报里「仓库 + 交付目标 + 部署平台」那一段只有在**服务中心注入了仓库**时才渲染
-// （见 task-context 的 Workspace isolation：仓库地址不再来自 project.gitRepoUrl）。
+// （见 task-context 的 Workspace isolation：仓库地址只来自服务中心，项目上没有该字段）。
 const project = store.createProject("goal-test");
 const ORG_SERVICES = {
   available: true,

@@ -53,6 +53,7 @@ interface ProjectRow {
   project_id: string;
   name: string;
   workspace_root: string | null;
+  /** 历史列（已废弃）：项目级 Git 仓库地址不再读写，真源 = 服务中心。 */
   git_repo_url: string | null;
   settings_json: string | null;
   created_at: string;
@@ -260,6 +261,7 @@ export class Store {
         project_id     TEXT PRIMARY KEY,
         name           TEXT NOT NULL,
         workspace_root TEXT,
+        -- 历史列：项目级 Git 仓库地址已废弃（真源 = 服务中心），保留列以便老库不动结构。
         git_repo_url   TEXT,
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
@@ -426,6 +428,8 @@ export class Store {
       this.db.exec(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
     }
     if (!projectCols.some((c) => c.name === "git_repo_url")) {
+      // 历史列：项目级仓库地址已废弃，但 INSERT 仍显式带这一列（写 NULL），
+      // 老库缺列就得补上，否则插入会报 no such column。
       this.db.exec(`ALTER TABLE projects ADD COLUMN git_repo_url TEXT`);
     }
     if (!projectCols.some((c) => c.name === "settings_json")) {
@@ -703,19 +707,17 @@ export class Store {
 
   createProject(
     name: string,
-    options?: { gitRepoUrl?: string; department?: DepartmentConfig },
+    options?: { department?: DepartmentConfig },
   ): Project {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("project name is required");
     const now = new Date().toISOString();
-    const gitRepoUrl = options?.gitRepoUrl?.trim() || null;
     // 新建项目时可同时带上「所属部门」；它与项目设置共用 settings_json，
     // 这里一次性写入，避免“项目已建但部门丢了”的中间态。
     const department = normalizeDepartment(options?.department);
     const project: Project = {
       projectId: newId("project"),
       name: trimmed,
-      ...(gitRepoUrl ? { gitRepoUrl } : {}),
       ...(department ? { department } : {}),
       createdAt: now,
       updatedAt: now,
@@ -729,7 +731,8 @@ export class Store {
         project.projectId,
         project.name,
         null,
-        gitRepoUrl,
+        // git_repo_url 是历史列：项目级仓库地址已废弃（真源 = 服务中心），只写 NULL。
+        null,
         serializeSettings(department ? { department } : {}),
         project.createdAt,
         project.updatedAt,
@@ -745,7 +748,6 @@ export class Store {
     projectId: string,
     input: {
       name?: string;
-      gitRepoUrl?: string | null;
     },
   ): Project | undefined {
     const existing = this.getProject(projectId);
@@ -761,18 +763,6 @@ export class Store {
       updates.push("name = ?");
       values.push(trimmed);
       next = { ...next, name: trimmed };
-    }
-
-    if (input.gitRepoUrl !== undefined) {
-      const url = input.gitRepoUrl?.trim() || null;
-      updates.push("git_repo_url = ?");
-      values.push(url);
-      if (url) {
-        next = { ...next, gitRepoUrl: url };
-      } else {
-        const { gitRepoUrl: _removed, ...rest } = next;
-        next = rest;
-      }
     }
 
     if (!updates.length) return existing;
@@ -915,13 +905,12 @@ export class Store {
   }
 
   private toProject(r: ProjectRow): Project {
-    const gitRepoUrl = r.git_repo_url?.trim();
     // 部门住在 settings_json 里：列表/详情一起带上，左栏才能显示“项目所在的部门”。
+    // （项目级 git 仓库地址已废弃：接口不再返回 gitRepoUrl，真源 = 服务中心。）
     const department = normalizeDepartment(parseSettings(r.settings_json).department);
     return {
       projectId: r.project_id,
       name: r.name,
-      ...(gitRepoUrl ? { gitRepoUrl } : {}),
       ...(department ? { department } : {}),
       createdAt: r.created_at,
       updatedAt: r.updated_at,

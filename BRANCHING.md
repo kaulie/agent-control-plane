@@ -11,7 +11,7 @@
 |---|---|---|
 | `/Users/gaolei/agent-workspace/agent-<agentid>/` | 本 agent 的独立工作区（clone 后在此开发）；`agentid` 就是目录名里的那段 id | 是（唯一**开发**目录） |
 | bootstrap 注入的**仓库地址**（`Injected git repositories`） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源。来源 = `project → 组织 id → 服务中心 GET /v1/orgs/{orgId}/services` | 否（只读；用它作 remote） |
-| 项目 `gitRepoUrl`（GitHub） | **仅项目元数据**（列表 / 设置页展示）；**不再**注入 agent，别拿它当 origin | 否（只读配置） |
+| 项目仓库地址 | 应用里**没有**这个字段（老的 `gitRepoUrl` 已删除：接口不返回、UI 不展示），别拿它当 origin | 不存在 |
 | [`kaulie/agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment) | **独立部署服务**源码（HTTP + SQLite 契约） | 仅在用户要求改部署系统时（在该仓库改） |
 | `~/runtime/agent-control-plane-deployment` | 部署服务安装目录（API `:4220`、packages、sqlite） | 否（install 产物） |
 | `~/runtime/web-cursor` | 被部署的应用 runtime（由服务契约描述） | 禁止手改；由部署平台上线 |
@@ -20,7 +20,7 @@
 
 上表里 bootstrap 注入的 `Injected git repositories` 就是「项目所属组织在服务中心登记的服务 + 仓库地址」，
 **必须**用其中一个地址作为 `origin`（选这个 task 真正要改的那个服务），不要擅自改用本地 path remote，
-也不要拿项目设置里的 `gitRepoUrl` 当 origin（它只是元数据）。服务中心不可达时简报会退回
+也不要指望项目配置里有仓库地址（**已经删掉了**）。服务中心不可达时简报会退回
 「按需自己 clone」的兜底文案，此时按需求判断该 clone 哪个仓库。
 
 **开发 vs 上线：** task workspace 只做开发；构建 / 上线**只由部署平台**完成（`~/runtime/agent-control-plane-deployment`），app 仓库内**没有**任何发版 / 部署入口。

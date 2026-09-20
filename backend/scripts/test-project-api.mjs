@@ -1,9 +1,10 @@
 /**
  * HTTP-level checks for project creation: `POST /api/projects` requires a
- * department and stores it with the project (settings_json), name/gitRepoUrl
- * still behave as before. Also covers「按 task_id 查详情」：`GET /api/tasks/:taskId`
- * 必须带 project（名字 / gitRepoUrl / 部门），项目被删掉时也不能 500；
- * 以及单项项目接口 `GET /api/projects/:projectId`（形状 = 列表里那一项，未知 → 404）。
+ * department and stores it with the project (settings_json).
+ * 项目上**没有** gitRepoUrl 字段（body 里传了也会被忽略，响应里不返回）；
+ * 以及「按 task_id 查详情」：`GET /api/tasks/:taskId` 必须带 project
+ * （名字 / 部门），项目被删掉时也不能 500；单项项目接口
+ * `GET /api/projects/:projectId`（形状 = 列表里那一项，未知 → 404）。
  *
  * Usage: npm run build --workspace backend && node backend/scripts/test-project-api.mjs
  */
@@ -85,7 +86,8 @@ for (const department of [
   assert.equal(JSON.parse(res.body).error, "department is required");
 }
 
-// 3) 带部门 => 201，且项目设置里能读到（trim 过）。
+// 3) 带部门 => 201，且项目设置里能读到（trim 过）；
+//    顺带：body 里塞 gitRepoUrl（老客户端）既不该报错，也不该出现在响应里。
 const created = await create({
   name: "  Smoke Project  ",
   gitRepoUrl: " https://github.com/kaulie/agent-control-plane ",
@@ -94,7 +96,8 @@ const created = await create({
 assert.equal(created.statusCode, 201);
 const project = JSON.parse(created.body);
 assert.equal(project.name, "Smoke Project");
-assert.equal(project.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+assert.equal(project.gitRepoUrl, undefined, "项目接口不再返回 gitRepoUrl");
+assert.equal("gitRepoUrl" in project, false);
 const view = await settingsOf(project.projectId);
 assert.deepEqual(view.project.department, {
   departmentId: "D0001",
@@ -118,7 +121,7 @@ const noName = await create({ department: { departmentId: "D0001" } });
 assert.equal(noName.statusCode, 400);
 assert.equal(JSON.parse(noName.body).error, "name is required");
 
-// 6) 未配置 Git 地址时不写 gitRepoUrl 字段。
+// 6) 没有 Git 地址这回事了：接口也不返回该字段（老字段彻底删掉）。
 const noGit = await create({ name: "No Git", department: { departmentId: "D0001" } });
 assert.equal(noGit.statusCode, 201);
 assert.equal(JSON.parse(noGit.body).gitRepoUrl, undefined);
@@ -157,7 +160,7 @@ const legacy = await listedProject(legacyId);
 assert.equal(legacy.department, undefined);
 assert.equal(legacy.name, "Legacy");
 
-// 10) 按 task_id 查详情：project（名字 / gitRepoUrl / 部门）一并返回。
+// 10) 按 task_id 查详情：project（名字 / 部门）一并返回，且不带 gitRepoUrl。
 const task = store.createTask({
   taskId: "task-detail-1",
   title: "详情任务",
@@ -172,7 +175,7 @@ assert.equal(detail.task.taskId, task.taskId);
 assert.equal(detail.task.projectId, project.projectId);
 assert.equal(detail.project.projectId, project.projectId, "详情要带 project");
 assert.equal(detail.project.name, "Smoke Project");
-assert.equal(detail.project.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+assert.equal(detail.project.gitRepoUrl, undefined, "详情里的 project 也不返回 gitRepoUrl");
 assert.deepEqual(
   detail.project.department,
   { departmentId: "D0002", departmentName: "工程效能部门" },
@@ -207,7 +210,7 @@ const single = JSON.parse(
 );
 assert.equal(single.projectId, project.projectId);
 assert.equal(single.name, "Smoke Project");
-assert.equal(single.gitRepoUrl, "https://github.com/kaulie/agent-control-plane");
+assert.equal(single.gitRepoUrl, undefined, "单项接口也不返回 gitRepoUrl");
 assert.deepEqual(single.department, {
   departmentId: "D0002",
   departmentName: "工程效能部门",

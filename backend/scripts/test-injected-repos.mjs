@@ -4,9 +4,9 @@
  * 守住这几条：
  * 1. 仓库地址**只**来自服务中心：`project → department.departmentId`（组织 id）
  *    → `GET /v1/orgs/{orgId}/services`（含每个服务的 git 仓库地址）；
- * 2. 简报里出现的是服务中心给出的仓库，**项目上登记的 `gitRepoUrl` 一个字都不许出现**；
+ * 2. 简报里出现的是服务中心给出的仓库，**老库里残留的项目级 `gitRepoUrl` 一个字都不许出现**；
  * 3. 服务中心不可达 / 项目没有所属组织 → 退回「按需自己 clone」的兜底文案（老行为），
- *    **不**回落到项目的 `gitRepoUrl`；
+ *    也没有项目级仓库地址可以回落；
  * 4. 交付目标那段（merge / deploy + 「不要在 agent 进程里同步跑发版脚本」）在注入仓库时照旧在；
  * 5. 接口 `GET /api/projects/:id/service-repos` 原样给出「会被注入什么」（可排查）。
  *
@@ -177,10 +177,14 @@ assert.equal(
 );
 
 
-// ---- 4) 简报：注入服务中心的仓库，项目上的 gitRepoUrl 不许出现 ----
+// ---- 4) 简报：注入服务中心的仓库；老数据里残留的项目级 gitRepoUrl 一个字都不许出现 ----
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-repos-"));
 const store = new Store(dir);
-const project = store.createProject("repos-test", { gitRepoUrl: PROJECT_LEVEL_URL });
+const project = store.createProject("repos-test");
+// 老的 git_repo_url 列还在（历史列，代码不再读写）：手工塞一个值，验证它绝不进简报。
+store.db
+  .prepare(`UPDATE projects SET git_repo_url = ? WHERE project_id = ?`)
+  .run(PROJECT_LEVEL_URL, project.projectId);
 // 项目「所属组织」= 组织服务的部门 id：注入就是靠它去查服务中心。
 store.updateProjectSettings(project.projectId, {
   department: { departmentId: "D0005", departmentName: "AI研发部" },
@@ -258,13 +262,13 @@ assert.ok(withRepos.includes("https://github.com/kaulie/agent-benchmark-tool"));
 assert.ok(withRepos.includes("GET /v1/orgs/D0005/services"), "要写明来源（可自查）");
 assert.ok(
   !withRepos.includes(PROJECT_LEVEL_URL),
-  "项目上登记的 gitRepoUrl 绝不能进简报（单一真源 = 服务中心）",
+  "老库里残留的项目级 gitRepoUrl 绝不能进简报（单一真源 = 服务中心）",
 );
 assert.ok(withRepos.includes("- goal: 合入主分支并部署上线 (deploy)"));
 assert.ok(withRepos.includes("and then deploy it"));
 assert.ok(withRepos.includes("Never** run a deploy/restart script"), "部署平台那条事实说明照旧");
 
-// 服务中心不可达 / 项目没有组织 → 兜底文案（老行为），且仍然不读 project.gitRepoUrl
+// 服务中心不可达 / 项目没有组织 → 兜底文案（老行为），也没有项目级仓库地址可读
 const fallback = bootstrapOf({});
 assert.ok(!fallback.includes(PROJECT_LEVEL_URL));
 assert.ok(fallback.includes("- Clone the repo you need into that directory (or a subfolder)"));

@@ -10,14 +10,18 @@
 | 路径 / 配置 | 角色 | Agent 可否改 |
 |---|---|---|
 | `/Users/gaolei/agent-workspace/agent-<agentid>/` | 本 agent 的独立工作区（clone 后在此开发）；`agentid` 就是目录名里的那段 id | 是（唯一**开发**目录） |
-| 项目 `gitRepoUrl`（GitHub） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源 | 否（只读配置；用它作 remote） |
+| bootstrap 注入的**仓库地址**（`Injected git repositories`） | **origin**：clone / push / 开 PR 的远程；也是发版的唯一源。来源 = `project → 组织 id → 服务中心 GET /v1/orgs/{orgId}/services` | 否（只读；用它作 remote） |
+| 项目 `gitRepoUrl`（GitHub） | **仅项目元数据**（列表 / 设置页展示）；**不再**注入 agent，别拿它当 origin | 否（只读配置） |
 | [`kaulie/agent-control-plane-deployment`](https://github.com/kaulie/agent-control-plane-deployment) | **独立部署服务**源码（HTTP + SQLite 契约） | 仅在用户要求改部署系统时（在该仓库改） |
 | `~/runtime/agent-control-plane-deployment` | 部署服务安装目录（API `:4220`、packages、sqlite） | 否（install 产物） |
 | `~/runtime/web-cursor` | 被部署的应用 runtime（由服务契约描述） | 禁止手改；由部署平台上线 |
 | `/Users/gaolei/runtime/web-cursor` | 固定线上运行目录（只收 deploy rsync + 启停） | 禁止改 |
 | `/Users/gaolei/Projects/deepseek_web_cursor` | 可选本机 clone（**不是**部署源） | 否 |
 
-若 bootstrap / 项目设置里给出了 `gitRepoUrl`，**必须**用该地址作为 `origin`，不要擅自改用本地 path remote。
+上表里 bootstrap 注入的 `Injected git repositories` 就是「项目所属组织在服务中心登记的服务 + 仓库地址」，
+**必须**用其中一个地址作为 `origin`（选这个 task 真正要改的那个服务），不要擅自改用本地 path remote，
+也不要拿项目设置里的 `gitRepoUrl` 当 origin（它只是元数据）。服务中心不可达时简报会退回
+「按需自己 clone」的兜底文案，此时按需求判断该 clone 哪个仓库。
 
 **开发 vs 上线：** task workspace 只做开发；构建 / 上线**只由部署平台**完成（`~/runtime/agent-control-plane-deployment`），app 仓库内**没有**任何发版 / 部署入口。
 
@@ -31,13 +35,14 @@ cd /Users/gaolei/agent-workspace/agent-<agentid>
 
 ### 2. Clone 形成独立 workspace
 
-若目录为空（尚无 `.git`），用项目配置的 GitHub 地址：
+若目录为空（尚无 `.git`），用 **bootstrap 注入的仓库地址**（`Injected git repositories` 里挑这个 task
+真正要改的那个服务）：
 
 ```bash
-git clone <gitRepoUrl> .
+git clone <injected-git-repo-url> .
 ```
 
-已有 clone 则跳过，执行 `git fetch origin`，并确认 `origin` 指向该 `gitRepoUrl`。
+已有 clone 则跳过，执行 `git fetch origin`，并确认 `origin` 指向注入的仓库地址。
 
 ### 3. 基于最新主干建开发分支
 
@@ -143,7 +148,7 @@ curl -sS -X POST http://127.0.0.1:4220/api/deploys \
 - `git push origin main` 或 force push 到 `main`
 - 直接改 `/Users/gaolei/runtime/**`，或对 runtime 手工 cp/rsync
 - 覆盖 runtime 的 `backend/.env` / `backend/data/`
-- 未配置 / 无视项目 `gitRepoUrl`，擅自换远程
+- 未按 bootstrap 注入的仓库地址（服务中心）设置远程，擅自换远程；把项目 `gitRepoUrl` 当 origin
 - 在 task workspace 里触发部署，或依赖 workspace 的 git 状态换版
 - 在 app 仓库里新增任何「发起部署」的接口 / 脚本（统一走部署平台）
 - 手改 `deployment-<hash>/` 快照
@@ -151,7 +156,7 @@ curl -sS -X POST http://127.0.0.1:4220/api/deploys \
 ## 交付检查清单（止于开 PR）
 
 - [ ] 工作区在 `/Users/gaolei/agent-workspace/agent-<agentid>/`（以 bootstrap 的 `- workspace:` 为准）
-- [ ] `origin` 为项目 GitHub `gitRepoUrl`
+- [ ] `origin` 为 bootstrap 注入的仓库地址（服务中心 `Injected git repositories`）
 - [ ] 当前分支为 `feature|fix|issue/<taskId>`
 - [ ] 变更已 commit
 - [ ] 已 `git push -u origin HEAD`

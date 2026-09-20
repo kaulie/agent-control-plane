@@ -257,10 +257,11 @@ npx tsx backend/scripts/recompute-costs.mjs --data-dir=/tmp/wc-copy --apply   # 
 | GET | `/api/auth` | SDK auth check (`Cursor.me()`) |
 | GET | `/api/models` | available models |
 | GET | `/api/projects` | list Projects（含各自的 `department`，供左栏「所属部门」显示） |
-| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `gitRepoUrl` / `department`）；不存在 → 404 |
+| GET | `/api/projects/:id` | 单个 Project（形状 = 列表里那一项：`name` / `gitRepoUrl`（**仅登记**，不再注入 agent）/ `department`）；不存在 → 404 |
 | POST | `/api/projects` | create Project `{ name, department, gitRepoUrl? }`；`department` **必填**（缺失 → 400），与项目同一次写入 |
 | PATCH | `/api/projects/:id` | rename Project `{ name }` |
 | GET | `/api/org/departments` | 项目「所属部门」候选列表（取自 organization 服务；不可达时 `available: false`，`?refresh=1` 绕过缓存） |
+| GET | `/api/projects/:id/service-repos` | **注入 agent 的仓库地址**：project → 所属部门（组织 id）→ 服务中心 `GET /v1/orgs/{orgId}/services`（含各服务的 `gitRepoUrl`）；`repos: null` = 没部门/没配客户端；不可达时 `repos.available=false`；`?refresh=1` 绕过 30s 缓存 |
 | GET | `/api/projects/:id/settings` | Project settings (`runtime` / `department` + 只读 `cwdRules`) |
 | PATCH | `/api/projects/:id/settings` | 更新 Project settings `{ runtime?, department? }`（`department` 传空即清除） |
 | GET | `/api/tasks` | list Tasks (+ stats); optional `?projectId=` |
@@ -305,6 +306,32 @@ Compiled `backend/dist` and `web/dist` are uploaded as GitHub Actions artifacts 
 expire after **7 days** (Actions run → Artifacts). This does not deploy: every deploy is
 triggered from the independent deployment platform (`:4220`), which packages the merged
 `main` commit and restarts the service. This repo has no deploy entry point.
+
+## 注入 agent 的仓库地址（服务中心，不再读项目的 `gitRepoUrl`）
+
+agent 启动简报里那段「仓库地址」**不是**项目配置里手填的 `gitRepoUrl`，而是按下面这条链路查出来的：
+
+```
+project → project.department.departmentId（组织 id）
+        → 服务中心 GET /v1/orgs/{orgId}/services（该组织下登记的所有服务，含 gitRepoUrl）
+        → 写进 Task bootstrap 的「## Workspace isolation → Injected git repositories」
+```
+
+- 单一真源 = 服务中心：服务登记时填的 `gitRepoUrl` 改了，下一个新建会话的 agent 就看到新的
+  （项目上的 `gitRepoUrl` 降级为**项目元数据**，只在列表 / 设置页展示，不参与注入）。
+- 简报里最多逐个列 12 个仓库（超出的折成一句「另有 N 个」），并写明来源
+  （`GET /v1/orgs/<orgId>/services` + 组织名），便于 agent 自查。
+- 服务中心不可达 / 项目没有所属部门 → 简报退回兜底文案「按需自己 clone」，
+  **不会**回落到项目的 `gitRepoUrl`（避免两个真源打架）。
+- 想先看「这个项目会被注入什么」：`GET /api/projects/:id/service-repos`（`?refresh=1` 绕过 30s 缓存）。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `SERVICE_REGISTRY_API_URL` | `http://127.0.0.1:4240` | 服务中心地址（注入查询用） |
+| `SERVICE_REGISTRY_TIMEOUT_MS` | `3000` | 查询超时；超时 = 本次退回兜底文案（不阻塞开会话，结果按 30s 缓存） |
+
+实现：`backend/src/service-registry.ts`（只读客户端，从不抛异常）+ `backend/src/task-context.ts`
+（`injectedRepoLines`）+ `backend/src/gateway/gateway.ts`（`orgServicesFor`）。
 
 ## 服务中心契约登记（Node 对等方案）
 

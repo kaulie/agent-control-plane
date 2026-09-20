@@ -68,13 +68,13 @@ export default function TaskList({
           </button>
         </div>
         <div className="project-workspace">
-          <div className="project-workspace-label">Git 仓库地址</div>
+          <div className="project-workspace-label">Git 仓库地址（仅登记）</div>
           <div className="project-workspace-row">
             <div
               className="project-workspace-path"
               title={
                 selectedProject?.gitRepoUrl ??
-                "未配置；agent 将自行选择要 clone 的仓库"
+                "未登记。agent 的仓库地址来自服务中心（按项目所属部门查），与这里无关。"
               }
             >
               {selectedProject?.gitRepoUrl ?? "（未配置）"}

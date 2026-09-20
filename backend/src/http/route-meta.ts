@@ -110,6 +110,10 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     summary: "项目设置（含只读的工作区规则）",
     tags: ["projects"],
   },
+  "GET /api/projects/{projectId}/service-repos": {
+    summary: "注入 agent 的仓库地址（project → 组织 → 服务中心 /v1/orgs/{orgId}/services）",
+    tags: ["projects"],
+  },
   "PATCH /api/projects/{projectId}/settings": {
     summary: "改项目设置（运行时默认 / 所属部门）",
     tags: ["projects"],

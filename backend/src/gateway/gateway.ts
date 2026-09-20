@@ -13,6 +13,7 @@ import type {
   AgentTimeline,
   AppSettings,
   DepartmentConfig,
+  OrgServiceList,
   Project,
   ProjectSettingsView,
   RunRecord,
@@ -75,6 +76,7 @@ import {
   type PlanAnswerBatch,
 } from "../plan-question-parser.js";
 import { buildTokenUsageSeries } from "../usage/series.js";
+import type { ServiceRegistryClient } from "../service-registry.js";
 import {
   createBillingService,
   normalizeBillingRuleInput,
@@ -136,6 +138,11 @@ export interface GatewayConfig {
   contextDigest?: boolean;
   /** digest 用的模型/凭据（缺省沿用 cline provider 的 DeepSeek 配置与任务模型）。 */
   digest?: { apiKey?: string; baseUrl?: string; providerId?: string; model?: string; fetchImpl?: typeof fetch };
+  /**
+   * 服务中心客户端：注入 agent 的**仓库地址**来源（project → 组织 id → 该组织的服务）。
+   * 缺省 = 不去查（简报退回「按需自己 clone」的兜底文案）。
+   */
+  serviceRegistry?: ServiceRegistryClient;
 }
 
 export interface SendMessageInput {
@@ -1529,6 +1536,37 @@ export class AgentGateway {
     };
   }
 
+  /**
+   * 注入 agent 的仓库地址来源：`project → department.departmentId`（组织 id）→
+   * 服务中心 `GET /v1/orgs/{orgId}/services`（含各服务的 git 仓库地址）。
+   *
+   * 项目没有所属组织 / 没配服务中心客户端 / 服务中心不可达 → `undefined`：
+   * 简报退回兜底文案，**不**回落到 `project.gitRepoUrl`（单一真源是服务中心）。
+   */
+  private async orgServicesFor(project?: Project): Promise<OrgServiceList | undefined> {
+    const client = this.config.serviceRegistry;
+    const orgId = project?.department?.departmentId?.trim();
+    if (!client || !orgId) return undefined;
+    return client.listByOrg(orgId);
+  }
+
+  /**
+   * `GET /api/projects/:projectId/service-repos` 用：把「这个项目会被注入哪些仓库」
+   * 原样给出来（项目 → 组织 → 服务中心），便于排查「agent 到底拿到了什么」。
+   */
+  async getProjectServiceRepos(
+    projectId: string,
+    opts?: { refresh?: boolean },
+  ): Promise<{ projectId: string; repos: OrgServiceList | null }> {
+    const project = this.store.getProject(projectId);
+    const orgId = project?.department?.departmentId?.trim();
+    const repos =
+      project && orgId && this.config.serviceRegistry
+        ? await this.config.serviceRegistry.listByOrg(orgId, opts)
+        : null;
+    return { projectId, repos };
+  }
+
   updateTaskPrUrl(taskId: string, prUrl: string | null): Task | undefined {
     const updated = this.store.updateTaskPrUrl(taskId, prUrl);
     if (updated) {
@@ -1543,21 +1581,17 @@ export class AgentGateway {
   ): Promise<{ task: Task; url: string; created: boolean }> {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
-    const project = this.store.getProject(task.projectId);
-    const gitRepoUrl = project?.gitRepoUrl?.trim();
-    if (!gitRepoUrl) {
-      throw new Error("project gitRepoUrl is required before opening a pull request");
-    }
     if (task.prUrl?.trim()) {
       return { task, url: task.prUrl.trim(), created: false };
     }
     if (!fs.existsSync(path.join(task.workspace, ".git"))) {
       throw new Error(
-        `task workspace is not a git repo: ${task.workspace} (clone ${gitRepoUrl} first)`,
+        `task workspace is not a git repo: ${task.workspace} (clone the service repo injected in the task bootstrap first)`,
       );
     }
 
     const { ensurePullRequest } = await import("../github-pr.js");
+    const project = this.store.getProject(task.projectId);
     const title =
       opts?.title?.trim() ||
       task.title?.trim() ||
@@ -2405,6 +2439,8 @@ export class AgentGateway {
       const historyEvents = priorEvents.filter((e) => e.runId !== runId);
       const project = this.store.getProject(task.projectId);
       const carried = this.carriedForTask(task);
+      // 仓库地址注入（服务中心）：project → 组织 id → 该组织登记的所有服务（含 git 仓库地址）。
+      const orgServices = await this.orgServicesFor(project);
       const sessionContext = this.sessionContextFor(task, { text, images: images.length });
       // 模型摘要**默认关闭**；只有真会用上时才生成（fork 来的历史要压缩 / 轮转在即）。
       const digestWanted =
@@ -2416,6 +2452,7 @@ export class AgentGateway {
         project,
         events: historyEvents,
         runs: this.store.listRuns(taskId).filter((r) => r.runId !== runId),
+        ...(orgServices ? { orgServices } : {}),
         ...(carried ? { carried } : {}),
         ...(digest ? { digest } : {}),
       });

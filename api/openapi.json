@@ -262,6 +262,20 @@
         }
       }
     },
+    "/api/projects/{projectId}/service-repos": {
+      "get": {
+        "summary": "注入 agent 的仓库地址（project → 组织 → 服务中心 /v1/orgs/{orgId}/services）",
+        "operationId": "getApiProjectsProjectIdServiceRepos",
+        "tags": [
+          "projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/settings": {
       "get": {
         "summary": "项目设置（含只读的工作区规则）",

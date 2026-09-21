@@ -3,6 +3,7 @@ import { agentPathLabel } from "../agent-path";
 import { formatDateTime } from "../format";
 import { taskTypeLabel, taskTypeOption } from "../task-types";
 import { taskGoalLabel, taskGoalOption } from "../task-goals";
+import { taskPhaseLabel, taskPhaseClass, taskPhaseOption } from "../task-status";
 
 interface Props {
   projects: Project[];
@@ -108,7 +109,16 @@ export default function TaskList({
             >
               <div className="task-title">
                 {/* 类型/目标是**我们**的分类，agent 由 autonomy 创建的任务没有 → 不显示（不是缺字段）。 */}
-                {t.agentPath === "autonomy" ? null : (
+                {/* autonomy 任务改为**直观显示当前状态**（规划中 / 执行中 / 阻塞 / 已完成），
+                    由它真实的 status 值驱动（见 `../task-status.ts`）；原始 status 仍在下方 meta 行。 */}
+                {t.agentPath === "autonomy" ? (
+                  <span
+                    className={`task-phase-badge ${taskPhaseClass(t.status)}`}
+                    title={`autonomy 状态：${t.status || "未知"} → ${taskPhaseLabel(t.status)}（${taskPhaseOption(t.status).hint}）`}
+                  >
+                    {taskPhaseLabel(t.status)}
+                  </span>
+                ) : (
                   <span
                     className={`task-type-badge type-${t.taskType ?? "general"}`}
                     title={`任务类型：${taskTypeLabel(t.taskType)}（仅作分类，不改变 agent 行为）`}

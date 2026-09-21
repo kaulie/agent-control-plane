@@ -102,6 +102,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // autonomy 任务「一眼可见状态」（规划中 / 执行中 / 阻塞 / 已完成，由真实 status 汇总）
+  {
+    file: "../web/scripts/test-autonomy-status-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

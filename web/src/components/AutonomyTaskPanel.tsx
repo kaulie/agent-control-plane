@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
 import { statusClass, worldLine } from "../autonomy";
+import { taskPhaseClass, taskPhaseLabel } from "../task-status";
 import PlanSection from "./ExecutorPlan";
 import ExecutorChat from "./ExecutorChat";
 import TaskIdsBar from "./TaskIdsBar";
@@ -74,6 +75,15 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
   return (
     <>
       <div className="task-ids task-status-bar" role="group" aria-label="执行方状态">
+        {/* 四个大字（规划中 / 执行中 / 阻塞 / 已完成）——由 autonomy 真实 status 汇总，一眼可见。 */}
+        {status ? (
+          <span
+            className={`task-phase-badge ${taskPhaseClass(status)}`}
+            title={`autonomy 原始状态：${status}`}
+          >
+            {taskPhaseLabel(status)}
+          </span>
+        ) : null}
         {status ? (
           <span className={`auto-status ${statusClass(status)}`}>{status}</span>
         ) : null}

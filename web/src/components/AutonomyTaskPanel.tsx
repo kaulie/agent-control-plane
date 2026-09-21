@@ -4,6 +4,7 @@ import { formatDateTime } from "../format";
 import { statusClass, worldLine } from "../autonomy";
 import PlanSection from "./ExecutorPlan";
 import ExecutorChat from "./ExecutorChat";
+import ExecutorPhaseBar from "./ExecutorPhaseBar";
 import TaskIdsBar from "./TaskIdsBar";
 import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
 
@@ -73,6 +74,9 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
 
   return (
     <>
+      {/* 四态条：主界面第一眼要看到的东西（依据也写在这一行里） */}
+      <ExecutorPhaseBar detail={detail} loaded={detail !== null || error !== null} />
+
       <div className="task-ids task-status-bar" role="group" aria-label="执行方状态">
         {status ? (
           <span className={`auto-status ${statusClass(status)}`}>{status}</span>

@@ -315,6 +315,44 @@ body {
   color: #f3b64e;
 }
 
+/* ---- autonomy 任务状态徽标（规划中 / 执行中 / 阻塞 / 已完成）----
+   与类型徽标同一套形态，但颜色表达**进度**：紫=准备、蓝=在跑、橙=要处理、绿=完成。 */
+
+.task-phase-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: 1px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-3));
+  color: var(--accent);
+}
+
+.task-phase-badge.phase-planning {
+  background: color-mix(in srgb, #a78bfa 18%, var(--bg-3));
+  color: #c3b0ff;
+}
+
+.task-phase-badge.phase-executing {
+  background: color-mix(in srgb, #4c9aff 18%, var(--bg-3));
+  color: #7cb6ff;
+}
+
+.task-phase-badge.phase-blocked {
+  background: color-mix(in srgb, #f5a623 18%, var(--bg-3));
+  color: #f3b64e;
+}
+
+.task-phase-badge.phase-completed {
+  background: color-mix(in srgb, #50c878 18%, var(--bg-3));
+  color: #8fe0a8;
+}
+
 .task-title-text {
   display: inline;
 }

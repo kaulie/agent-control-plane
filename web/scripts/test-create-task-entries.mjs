@@ -34,7 +34,7 @@ const {
   autonomyTaskToRow,
   localTaskToRow,
   mergeTaskRows,
-  planSteps,
+  planViews,
   statusClass,
   titleFromDescription,
   worldLine,
@@ -535,19 +535,10 @@ const render = (props) =>
     "project=p · org=D0005 AI研发部 · repo=https://github.com/kaulie/agent-control-plane.git"
   );
   assert.equal(worldLine(null), "");
-  assert.deepEqual(planSteps(null), []);
-  assert.deepEqual(planSteps({ plans: [] }), []);
-  assert.deepEqual(
-    planSteps({
-      plans: [
-        { id: 7, steps: [{ capability: "write_code", status: "succeeded" }, { status: "running" }] },
-      ],
-    }),
-    [
-      { planId: 7, step: 1, capability: "write_code", status: "succeeded" },
-      { planId: 7, step: 2, capability: "step", status: "running" },
-    ]
-  );
+  assert.deepEqual(planViews(null), []);
+  assert.deepEqual(planViews({ plans: [] }), []);
+  // 计划/步骤的解析口径（plan_id、阶段归一化、耗时、产出、决定）细化在 test-executor-plan-ui.mjs
+  assert.equal(planViews({ plans: [{ id: 7, steps: [] }] })[0].planId, 7);
 }
 
 console.log(

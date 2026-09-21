@@ -700,14 +700,36 @@ export type AutonomyTaskDetail = Record<string, unknown> & {
     git_repo_url?: string;
     organization?: { id?: string; name?: string };
   };
+  /**
+   * 逐轮的「计划」（一个 cycle 一条）—— 字段名照 autonomy 的接口原文。
+   *
+   * - `decision_type: "plan"` = 这一轮的执行计划（有 steps）；`"done"` 等 = 这一轮的**决定**
+   *   （可能没有 steps，只有 `reason`）；
+   * - `executed` / `step_count` = 已执行的 step 数 / 规划的 step 数。
+   */
   plans?: Array<{
+    plan_id?: number;
+    /** 老写法（早期版本用的是 id）；两个都兼容。 */
     id?: number;
+    cycle?: number;
+    decision_type?: string;
+    reason?: string;
+    need?: unknown;
+    step_count?: number;
+    executed?: number;
     steps?: Array<{
-      status?: string;
+      idx?: number;
+      name?: string;
       capability?: string;
+      status?: string;
+      /** 这一步打算达到什么效果（JSON 字符串，如 `{"creates":"…"}`）。 */
+      expected_effect?: string;
+      planned_input?: unknown;
       input?: unknown;
+      /** 成功时的产出（如 `{ summary, pr_url }`）。 */
       output?: unknown;
       error?: unknown;
+      duration_ms?: number;
     }>;
   }>;
   /** 控制面读它的时刻（代理加的）。 */

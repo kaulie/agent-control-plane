@@ -88,6 +88,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 主界面计划区（正在规划 / 最新计划 + 已完成 step + 当前 step 进展 / 拿不到就不显示）
+  {
+    file: "../web/scripts/test-executor-plan-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

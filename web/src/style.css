@@ -3235,6 +3235,125 @@ button.agent-rounds-chip-link:focus-visible {
   border-color: rgba(220, 80, 80, 0.45);
   color: #ffb4b4;
 }
+/* ---- 计划区（执行方 autonomy 的 plan / steps）----
+   主界面在跑任务时最该看的东西：正在规划 → 最新计划 → 已完成 step + 当前 step 进展。 */
+.auto-plan {
+  margin: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.auto-plan.is-planning,
+.auto-plan.is-none {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-style: dashed;
+}
+.auto-plan-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.auto-plan-hint,
+.auto-plan-count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.auto-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.auto-plan-head + .auto-plan-steps,
+.auto-plan-reason + .auto-plan-steps {
+  margin-top: 8px;
+}
+.auto-plan-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.auto-plan-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-plan-step {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.auto-plan-step.is-current {
+  background: rgba(90, 160, 255, 0.1);
+}
+.auto-plan-icon {
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.auto-plan-step.done .auto-plan-icon {
+  color: #8fe0a8;
+}
+.auto-plan-step.running .auto-plan-icon {
+  color: #9cc6ff;
+}
+.auto-plan-step.failed .auto-plan-icon {
+  color: #ffb4b4;
+}
+.auto-plan-step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.auto-plan-step-idx {
+  color: var(--text-dim);
+}
+.auto-plan-step-name {
+  font-weight: 500;
+}
+.auto-plan-cap {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.auto-plan-current {
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(90, 160, 255, 0.2);
+  color: #9cc6ff;
+}
+.auto-plan-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.auto-plan-note.bad {
+  color: #ffb4b4;
+}
+.auto-plan-currentline {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.auto-plan-history {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.auto-plan-history ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .auto-raw {
   margin-top: 10px;
 }

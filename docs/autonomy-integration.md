@@ -185,6 +185,52 @@
 | 用途 | 后续「给某个 project 下的所有 agent 发一句话」 |
 | 状态 | 待确认（M3 再说） |
 
+### A9. 数据落点与粒度（自查用：`reason_turns` / `llm_messages` / `agent_messages` / `llm_events`）
+
+autonomy 的执行数据**不在控制面库里**（我们只有本机的 `runs` / `events`）。去钻它的数据前，先记住两件事：
+
+**① 线上库是 PostgreSQL**（`AUTONOMY_STORE_ENGINE=postgres`；连接串在部署侧 `pg-autonomy.env`，**含口令：不要提交、不要贴群**）。
+`~/Projects/autonomy/data/autonomy.db` 那份 SQLite 是**旧库/归档**（内容停在 v1：实测 2 tasks / 338 messages / 12 turns，
+而线上 PG 是 5 / 68 / 14），对着它查会得到「这条 task 根本没有数据」的假象。**判据**：`GET /api/meta` 的 `turns`
+等于 PG 里 `reason_turns` 的行数（实测 14 = 14）。
+
+**② 四张表的粒度不同，行数天然不相等**（下例为 `task-2c438baf5499b592` 的真实数据）：
+
+| 表 | 一行 = | 该 task 实测 |
+|---|---|---|
+| `agent_messages` | **任务级对话**：用户指令 / agent 之间的委派 | **2**（`user` 的 `instruction` + `agent-10002` → `agent-10003` 的 `delegation`） |
+| `reason_turns` | **一次 LLM 调用**（`mode` / 模型 / 耗时 / 用量 / `run_id`） | **5**（planner 4 + executor 1） |
+| `llm_messages` | 那次调用里的**每条消息**：prompt 分段 / `thinking` / `tool` 结果 / 最终 `assistant` | **41**（thinking 17 · tool 14 · assistant 5 · user 4 · agent 1） |
+| `llm_events` | 流式 token / 工具事件（就是 A6 的增量流） | **0**（本部署尚未落库 → 所以 `reason_turns.event_count` 全是 0，**不代表没干活**） |
+
+因此 **`llm_messages.turn_id` ↔ `reason_turns.id` 是 N:1**（不是 1:1）：上例 5 个 turn 的消息数分别是
+`3 / 29 / 3 / 3 / 3` —— 那 29 条属于**执行 agent**：它一轮里跑了 14 次工具调用，每次「工具结果 + 紧随的 thinking」
+各占一条，再加 1 条 `agent` 首帧提示与 1 条 `assistant` 终稿。
+
+**两个容易看岔的字段**：
+
+- `llm_messages.status` 记的是**这条消息流**的终态，不是轮次终态：只有每轮最后那条 `assistant` 是 `finished`，
+  其余 `user` / `thinking` / `tool` / `agent` 都是 `running`（按 `status='finished'` 过滤刚好剩 5 条 = 5 个 turn，别误读成「另一套数量」）；
+- `agent_messages.kind='instruction'` 的 `status='failed'` **不代表任务失败**（该任务的执行走的是那条 `delegation`），
+  任务终态要看 `tasks.status` / `verification`（例：planner 自述 `type:"done"` 但引擎 `verification` 判
+  `inconclusive` → 任务落 `unverified`）。
+
+只读自查 SQL（口令从部署侧 env 取，别写进脚本）：
+
+```sql
+-- 一次 LLM 调用一行：谁在跑、跑了多少轮
+SELECT agent_id, mode, count(*) AS turns, sum(input_tokens) AS in_tok, sum(output_tokens) AS out_tok
+  FROM reason_turns WHERE task_id = 'task-…' GROUP BY 1, 2 ORDER BY 1;
+
+-- 每个 turn 里的消息构成（这是「41 对 5」的正解）
+SELECT turn_id, agent_id, cycle, role, count(*)
+  FROM llm_messages WHERE task_id = 'task-…' GROUP BY 1, 2, 3, 4 ORDER BY 1, 4;
+
+-- 真·错配的判据（都应为 0：没有孤儿消息、没有空轮次）
+SELECT count(*) FROM llm_messages m WHERE m.task_id = 'task-…'
+   AND NOT EXISTS (SELECT 1 FROM reason_turns r WHERE r.id = m.turn_id);
+```
+
 ## 3. 控制面提供给 autonomy 的（也请一起复查）
 
 | 接口 | 实际返回 | 备注 |
@@ -289,6 +335,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.3 | 2026-09-21 | 新增 **A9 数据落点与粒度**：线上 autonomy 库是 **PostgreSQL**（那份 `data/autonomy.db` SQLite 已是旧库，对着它查会得到「这条 task 没数据」的假象）；`agent_messages`（任务级对话）/ `reason_turns`（每次 LLM 调用）/ `llm_messages`（每条消息）/ `llm_events`（流式事件，本部署未落）**粒度不同、行数天然不等**（`llm_messages.turn_id` ↔ `reason_turns.id` 是 **N:1**，实测 41 : 5），附「真·错配」判据与只读自查 SQL |
 | v1 | 2026-09-20 | 初稿：A1–A8 接口需求 + 控制面提供的接口 + 5 条阻塞级问题；对 `:4300` 实测标注 |
 | v1.1 | 2026-09-21 | **仓库来源已确认**：由 autonomy **自行推导「项目 → 仓库」**（project → department.departmentId → 服务中心 组织服务清单），控制面无需新增接口；⚠️ 阻塞项关闭，阻塞级问题 5 → 4 条 |
 | v1.2 | 2026-09-21 | **列表已确认**：`GET /api/tasks` 支持按 `project_id` 过滤，每行带 `project_id` / `agent_id` / `updated_at`（A3 ✅）；阻塞级问题 4 → 3 条 |

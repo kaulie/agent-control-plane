@@ -26,6 +26,7 @@ import AutonomyTaskPanel, {
   ExecutorTaskBody,
 } from "./components/AutonomyTaskPanel";
 import {
+  AUTONOMY_TASK_REFRESH_MS,
   autonomyTaskToRow,
   localTaskToRow,
   mergeTaskRows,
@@ -640,7 +641,6 @@ export default function App() {
     [refreshTasks, selectTask, selectedProjectId],
   );
 
-  const AUTONOMY_REFRESH_MS = 5000;
 
   /**
    * 拉一次 autonomy：自述（可用性 / 版本）+ 当前项目里 agent 由它创建的任务。
@@ -679,12 +679,13 @@ export default function App() {
   }, [showCreateTask, loadAutonomy]);
 
   /**
-   * 有 autonomy 执行的任务时轻量轮询（5s）：状态 / 轮次能跟上，省得手动刷。
+   * 有 autonomy 执行的任务时轻量轮询（`AUTONOMY_TASK_REFRESH_MS` = 10s）：状态 / 轮次跟得上，
+   * 省得手动刷；10s 的来由见 `autonomy.ts` 那个常量的注释。
    * loadAutonomy 只在 selectedProjectId 变化时重建，所以同一个项目里不会反复重置计时器。
    */
   useEffect(() => {
     if (!autonomyMeta?.available || autonomyRows.length === 0) return;
-    const timer = window.setInterval(() => void loadAutonomy(), AUTONOMY_REFRESH_MS);
+    const timer = window.setInterval(() => void loadAutonomy(), AUTONOMY_TASK_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [autonomyMeta?.available, autonomyRows.length, loadAutonomy]);
 

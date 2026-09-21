@@ -4,6 +4,13 @@ import type { AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
 import type { BillingRuleInput } from "../billing/index.js";
+import type { TaskEntry } from "../config.js";
+import type {
+  AutonomyCreateResult,
+  AutonomyStatus,
+  AutonomyTaskDetailResult,
+  AutonomyTaskListResult,
+} from "../autonomy.js";
 import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import { normalizeDepartment } from "../settings.js";
@@ -46,6 +53,19 @@ export async function registerRoutes(
     previousShutdown?: ShutdownReport | null;
     /** Organization service (department catalogue) for project settings. */
     organization?: { list(opts?: { refresh?: boolean }): Promise<DepartmentList> };
+    /**
+     * autonomy runtime（「交给 autonomy」入口）。只用来**代理**它的接口：
+     * 控制面不落库、不缓存业务状态（见 docs/autonomy-integration.md）。
+     */
+    autonomy?: {
+      url: string;
+      status(opts?: { refresh?: boolean }): Promise<AutonomyStatus>;
+      listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
+      getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
+      createTask(input: { description: string; projectId?: string }): Promise<AutonomyCreateResult>;
+    };
+    /** 新建任务入口开关（`TASK_ENTRY`）：both（默认）/ autonomy / gateway。 */
+    taskEntry?: TaskEntry;
   },
 ): Promise<void> {
   const gracefulRestart = opts.gracefulRestart !== false;
@@ -215,6 +235,103 @@ export async function registerRoutes(
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  // ---- autonomy（「交给 autonomy」入口）------------------------------------
+  //
+  // 只做**代理**：任务与对话数据的唯一真源是 autonomy，控制面不落库（不写 task/run/event），
+  // 也不把它的任务混进 `/api/tasks` 列表（见 docs/autonomy-integration.md 第 0 节）。
+  // - 读：best-effort，不可达 → 200 + `available:false`（页面显示「autonomy 不可达」，不是 500）；
+  // - 写：绝不静默降级 —— 按 autonomy 的状态码转 4xx / 503，并把它的原文带出给用户。
+  const autonomy = opts.autonomy;
+  /** 入口开关只决定前端显示哪个入口；接口本身不因开关被拒（内部任务仍走 /api/tasks）。 */
+  const taskEntry: TaskEntry = opts.taskEntry ?? "both";
+
+  app.get("/api/autonomy/meta", async () => {
+    const status: AutonomyStatus = autonomy
+      ? await autonomy.status()
+      : {
+          available: false,
+          url: "",
+          error: "autonomy 未配置（AUTONOMY_API_URL）",
+          fetchedAt: new Date().toISOString(),
+        };
+    return { ...status, entry: taskEntry };
+  });
+
+  app.get<{ Querystring: { projectId?: string } }>(
+    "/api/autonomy/tasks",
+    async (req) => {
+      const projectId = req.query.projectId?.trim() || undefined;
+      const result: AutonomyTaskListResult = autonomy
+        ? await autonomy.listTasks({ projectId })
+        : {
+            available: false,
+            tasks: [],
+            url: "",
+            error: "autonomy 未配置（AUTONOMY_API_URL）",
+            fetchedAt: new Date().toISOString(),
+          };
+      return { ...result, entry: taskEntry };
+    },
+  );
+
+  app.get<{ Params: { taskId: string } }>(
+    "/api/autonomy/tasks/:taskId",
+    async (req, reply) => {
+      if (!autonomy) {
+        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      }
+      const result = await autonomy.getTask(req.params.taskId);
+      if (result.available && result.task) {
+        return { ...result.task, fetchedAt: result.fetchedAt };
+      }
+      // 404（没有这条 task）原样透传；不可达 / 超时 → 503。
+      return reply
+        .code(result.status === 404 ? 404 : 503)
+        .send({ error: result.error ?? "autonomy 不可达" });
+    },
+  );
+
+  app.post<{ Body: { description?: string; projectId?: string } }>(
+    "/api/autonomy/tasks",
+    async (req, reply) => {
+      if (!autonomy) {
+        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      }
+      const description = req.body?.description?.trim() ?? "";
+      if (!description) {
+        return reply.code(400).send({ error: "description is required (任务描述必填)" });
+      }
+      if (description.length > MAX_TASK_DESCRIPTION_CHARS) {
+        return reply.code(400).send({
+          error: `description too long (max ${MAX_TASK_DESCRIPTION_CHARS} chars)`,
+        });
+      }
+      const projectId = req.body?.projectId?.trim();
+      const result = await autonomy.createTask({
+        description,
+        ...(projectId ? { projectId } : {}),
+      });
+      if (!result.ok) {
+        // 4xx = autonomy 明确拒绝（原样带出）；其余（连不上 / 超时）→ 503。
+        const status =
+          result.httpStatus != null && result.httpStatus >= 400 && result.httpStatus < 500
+            ? result.httpStatus
+            : 503;
+        return reply.code(status).send({ error: result.error });
+      }
+      reply.code(202);
+      return {
+        taskId: result.taskId,
+        ...(result.agentId != null ? { agentId: result.agentId } : {}),
+        ...(result.status ? { status: result.status } : {}),
+        ...(result.messageId != null ? { messageId: result.messageId } : {}),
+        ...(result.queued != null ? { queued: result.queued } : {}),
+        url: autonomy.url,
+        entry: taskEntry,
+      };
+    },
+  );
 
   // ---- settings ----
 

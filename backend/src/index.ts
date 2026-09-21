@@ -16,6 +16,7 @@ import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
 import { registerRoutes } from "./http/routes.js";
 import { registerWebSocket } from "./ws/ws.js";
+import { AutonomyClient } from "./autonomy.js";
 import { OrganizationClient } from "./organization.js";
 import { ServiceRegistryClient } from "./service-registry.js";
 import {
@@ -229,6 +230,12 @@ await registerRoutes(app, gateway, providers, {
     baseUrl: config.organizationApiUrl,
     timeoutMs: config.organizationTimeoutMs,
   }),
+  // 「交给 autonomy」入口：控制面只代理它的接口（不落库）；入口开关也一起传下去。
+  autonomy: new AutonomyClient({
+    baseUrl: config.autonomyApiUrl,
+    timeoutMs: config.autonomyTimeoutMs,
+  }),
+  taskEntry: config.taskEntry,
 });
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,

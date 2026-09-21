@@ -80,6 +80,62 @@ export function resolveServiceRegistryTimeoutMs(
   return DEFAULT_SERVICE_REGISTRY_TIMEOUT_MS;
 }
 
+/**
+ * Base URL of the **autonomy** runtime (`AUTONOMY_API_URL`, `~/runtime/autonomy`, 契约端口 4300)：
+ * 新建任务的第二个入口（「交给 autonomy」）把指令 POST 到它的 `POST /api/tasks`，由 autonomy
+ * 自己的 agent 执行（见 `./autonomy.ts` 与 `docs/autonomy-integration.md`）。
+ */
+export const DEFAULT_AUTONOMY_API_URL = "http://127.0.0.1:4300";
+
+/** How long we wait for autonomy before degrading to 「不可达」. */
+export const DEFAULT_AUTONOMY_TIMEOUT_MS = 3000;
+
+/**
+ * 「新建任务」入口开关（`TASK_ENTRY`）：`both`（默认，两个入口都在）/ `autonomy`（只有新入口）/ `gateway`（只有老入口）。
+ * 纯配置项：切换入口 / 下线老入口不需要改代码（见契约第 7 节「切换与下线」）。
+ */
+export type TaskEntry = "both" | "autonomy" | "gateway";
+export const DEFAULT_TASK_ENTRY: TaskEntry = "both";
+
+function isTaskEntry(value: string): value is TaskEntry {
+  return value === "both" || value === "autonomy" || value === "gateway";
+}
+
+/** `TASK_ENTRY` → {@link TaskEntry}；非法值告警并回落 `both`。 */
+export function resolveTaskEntry(
+  env: Record<string, string | undefined> = process.env,
+): TaskEntry {
+  const raw = env.TASK_ENTRY?.trim().toLowerCase();
+  if (!raw) return DEFAULT_TASK_ENTRY;
+  if (isTaskEntry(raw)) return raw;
+  console.warn(
+    `[config] ignoring invalid TASK_ENTRY="${raw}" (expected both|autonomy|gateway); using ${DEFAULT_TASK_ENTRY}`,
+  );
+  return DEFAULT_TASK_ENTRY;
+}
+
+/** Base URL of the autonomy runtime，尾斜杠去掉，避免 `base + "/api/tasks"` 双斜杠。 */
+export function resolveAutonomyApiUrl(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const raw = env.AUTONOMY_API_URL?.trim();
+  return (raw || DEFAULT_AUTONOMY_API_URL).replace(/\/+$/, "");
+}
+
+/** Timeout for autonomy calls; invalid values fall back to default. */
+export function resolveAutonomyTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.AUTONOMY_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_AUTONOMY_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  console.warn(
+    `[config] ignoring invalid AUTONOMY_TIMEOUT_MS="${raw}"; using ${DEFAULT_AUTONOMY_TIMEOUT_MS}`,
+  );
+  return DEFAULT_AUTONOMY_TIMEOUT_MS;
+}
+
 /** Timeout for organization-service calls; invalid values fall back to default. */
 export function resolveOrganizationTimeoutMs(
   env: Record<string, string | undefined> = process.env,
@@ -258,6 +314,12 @@ export interface Config {
   serviceRegistryApiUrl: string;
   /** Timeout for service-registry calls (ms). */
   serviceRegistryTimeoutMs: number;
+  /** autonomy runtime 的 base URL（「交给 autonomy」入口用）。 */
+  autonomyApiUrl: string;
+  /** autonomy 调用超时（毫秒）。 */
+  autonomyTimeoutMs: number;
+  /** 新建任务入口开关：both（默认）/ autonomy / gateway。 */
+  taskEntry: TaskEntry;
   /** Global cap on concurrent agent runs across all tasks/providers. */
   maxConcurrentRuns: number;
   /**
@@ -392,6 +454,9 @@ export function loadConfig(): Config {
     organizationTimeoutMs: resolveOrganizationTimeoutMs(process.env),
     serviceRegistryApiUrl: resolveServiceRegistryApiUrl(process.env),
     serviceRegistryTimeoutMs: resolveServiceRegistryTimeoutMs(process.env),
+    autonomyApiUrl: resolveAutonomyApiUrl(process.env),
+    autonomyTimeoutMs: resolveAutonomyTimeoutMs(process.env),
+    taskEntry: resolveTaskEntry(process.env),
     maxConcurrentRuns: resolveMaxConcurrentRuns(process.env),
     agentRssLimitMb: Math.max(
       0,

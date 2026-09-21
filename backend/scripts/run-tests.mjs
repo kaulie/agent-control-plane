@@ -16,6 +16,9 @@ const tests = [
   { file: "scripts/test-max-concurrent-runs.mjs", via: "tsx" },
   // agent 短号（看板 / 时间线）：后端 agentDisplayName 与前端 shortAgentId 同一张用例表
   { file: "scripts/test-agent-id-format.mjs", via: "tsx" },
+  // 「交给 autonomy」入口：客户端（best-effort 读 / 不静默降级写）+ 代理（不落库）
+  { file: "scripts/test-autonomy-client.mjs", via: "tsx" },
+  { file: "scripts/test-autonomy-proxy.mjs", via: "tsx" },
   { file: "scripts/test-shutdown.mjs", via: "tsx" },
   { file: "scripts/test-organization.mjs", via: "tsx" },
   { file: "scripts/test-injected-repos.mjs", via: "tsx" },
@@ -76,6 +79,12 @@ const tests = [
   // 主界面「当前 agent 已执行轮次」（per-agent 口径 + 渲染）
   {
     file: "../web/scripts/test-agent-rounds.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
+  // 新建任务的两个入口（老入口不变 / 新入口只说必要的话 / 不可达置灰）+ Autonomy 页口径
+  {
+    file: "../web/scripts/test-create-task-entries.mjs",
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },

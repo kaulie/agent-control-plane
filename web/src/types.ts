@@ -65,7 +65,9 @@ export type AppView =
   | "usage-stats"
   | "agent-runtime"
   | "agent-board"
-  | "agent-timeline";
+  | "agent-timeline"
+  /** 「交给 autonomy」执行的任务（数据源是 autonomy，控制面只代理）。 */
+  | "autonomy";
 
 export interface ConcurrencySample {
   t: string;
@@ -594,3 +596,89 @@ export interface TokenUsageSeries {
   cacheWriteTokens: number;
   runCount: number;
 }
+
+// ---- 「交给 autonomy」入口（控制面只代理；数据源是 autonomy 本身）---------------
+
+/** 入口开关（`TASK_ENTRY`）：both（默认）/ autonomy（只留新入口）/ gateway（只留老入口）。 */
+export type TaskEntry = "both" | "autonomy" | "gateway";
+
+/** `GET /api/autonomy/meta`。 */
+export interface AutonomyMeta {
+  available: boolean;
+  /** autonomy 的 base URL —— 页面上要写清数据源。 */
+  url: string;
+  version?: string;
+  /** 当前 LLM 后端 / 模型（由 autonomy 进程决定，控制面选不了）。 */
+  llmBackend?: string;
+  llmModel?: string;
+  turns?: number;
+  error?: string;
+  fetchedAt: string;
+  entry: TaskEntry;
+}
+
+/** `GET /api/autonomy/tasks` 的一行（字段来自 autonomy）。 */
+export interface AutonomyTaskSummary {
+  id: string;
+  description: string;
+  status: string;
+  turns: number;
+  lastAt: string;
+  projectId?: string;
+  agentId?: number;
+  updatedAt?: string;
+}
+
+/** `GET /api/autonomy/tasks`。 */
+export interface AutonomyTaskList {
+  available: boolean;
+  tasks: AutonomyTaskSummary[];
+  url: string;
+  error?: string;
+  fetchedAt: string;
+  entry: TaskEntry;
+}
+
+/** `POST /api/autonomy/tasks` 的 202（autonomy 已受理）。 */
+export interface AutonomyAccepted {
+  taskId: string;
+  agentId?: number;
+  status?: string;
+  messageId?: number;
+  /** 这条指令前面还有几条没处理完（含正在跑的那条）。 */
+  queued?: number;
+  url: string;
+  entry: TaskEntry;
+}
+
+/** `GET /api/autonomy/tasks/{id}`：autonomy 的详情**原样**透传（字段由它决定，我们只挑着渲染）。 */
+export type AutonomyTaskDetail = Record<string, unknown> & {
+  task_id?: string;
+  description?: string;
+  status?: string;
+  error?: string;
+  domain?: string;
+  goal_type?: string;
+  context_ref?: Record<string, unknown>;
+  agent_id?: number;
+  created_at?: string;
+  updated_at?: string;
+  project?: {
+    id?: string;
+    name?: string;
+    git_repo_url?: string;
+    organization?: { id?: string; name?: string };
+  };
+  plans?: Array<{
+    id?: number;
+    steps?: Array<{
+      status?: string;
+      capability?: string;
+      input?: unknown;
+      output?: unknown;
+      error?: unknown;
+    }>;
+  }>;
+  /** 控制面读它的时刻（代理加的）。 */
+  fetchedAt?: string;
+};

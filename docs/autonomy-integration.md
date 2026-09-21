@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **v1.1 — 待 autonomy 方复查**（第 4 节：4 条阻塞级待确认；仓库来源已确认「自行推导」转第 3 节） |
+| 状态 | **v1.2 — 待 autonomy 方复查**（第 4 节：3 条阻塞级待确认；仓库来源、列表过滤/行字段已确认） |
 | 双方 | 调用方：web-cursor 控制面（agent-control-plane，`:4211`）· 被调方：autonomy runtime（`:4300`） |
 | 事实来源 | autonomy `docs/http-api.md` + 对运行中的 `http://127.0.0.1:4300` 实测（下文标「实测」）；控制面实测 `http://127.0.0.1:4211` |
 | 目的 | 新建任务扩成**两个入口**：①「本机 agent」（现状，控制面自己跑）②「交给 autonomy」（autonomy 自己跑）。两边只通过 autonomy 的 task id 关联 |
@@ -58,10 +58,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 调用 | `GET /api/tasks` |
-| 实测响应 | `{ "tasks": [ { id, description, status, turns, last_at } ] }` |
-| ❓ | ① **能否按 project 过滤**（`?project_id=project-xxxx`）？实测 `GET /api/tasks?project_id=project-59c41b54` → `200 {"tasks":[]}`，但库里为空，**无法判断过滤是否真的生效**。没有过滤就只能拉全量再逐条查详情（N+1）<br>② 每行能否带 **`project_id` / `agent_id` / `updated_at`**？（列表要显示所属项目、要能直接跳到 agent 事件流）<br>③ 分页/上限？任务多了会不会一次全返回 |
-| 状态 | 已实测（基础字段）；❓待确认 |
+| 调用 | `GET /api/tasks?project_id=<id>`（省略 `project_id` = 全部） |
+| 响应 | `{ "tasks": [ { id, description, status, turns, last_at, project_id, agent_id, updated_at } ] }` |
+| ✅ 已确认（2026-09-21） | **① 支持按 project 过滤**：`?project_id=project-xxxx` 只返回该 project 的任务。<br>**② 每行带 `project_id` / `agent_id` / `updated_at`** —— 控制面列表要显示所属项目、要能直接跳到该 agent 的详情/事件流，有这两个字段就免掉 N+1 查询。 |
+| 我们依赖的语义 | `project_id` 省略 → 全部；**未知 `project_id` → `200` + 空数组**（不要 404/500）；`updated_at` 随每次运行推进刷新（列表排序 / 「多久没动」）；`agent_id` 用来拼 `/api/tasks/{id}/agents/{agent_id}/events` |
+| 待确认（非阻塞） | 分页 / 上限：任务变多会不会一次全返回？（量级不大可以不分页，我们照显） |
+| 状态 | ✅ 支持已确认；分页待确认 |
 
 ### A4. 任务详情 / 进展
 
@@ -136,16 +138,15 @@ project（context_ref.project）
 （仅供参考，当前不需要）控制面也有一条现成的 `GET /api/projects/{projectId}/service-repos`（内部就是「项目 → 组织 → 服务中心」）；
 若以后想省掉自己拼链路，可以改用它。
 
-## 4. 需要 autonomy 方明确答复的阻塞级问题（4 条）
+## 4. 需要 autonomy 方明确答复的阻塞级问题（3 条）
 
 | # | 问题 | 影响 |
 |---|---|---|
 | 1 | `context_ref.project` 指向未知 project 时的行为（硬失败 / 静默照跑） | 决定新入口是否可能「任务跑在一个没有仓库的世界里」而没人发现 |
-| 2 | `GET /api/tasks` 能否**按 project 过滤** + 每行是否带 `project_id` / `agent_id` / `updated_at` | 决定控制面「Autonomy 任务」页要不要 N+1 查询、能不能按项目分组 |
-| 3 | `events[].role` / `plans[].steps[].status` 的枚举**冻结程度** | 决定 UI 图标/配色映射是否会被上游扩枚举打破 |
-| 4 | `message_seq` 是否**跨重启单调** + 历史保留期 | 决定时间线能否断点续传、翻历史 |
+| 2 | `events[].role` / `plans[].steps[].status` 的枚举**冻结程度** | 决定 UI 图标/配色映射是否会被上游扩枚举打破 |
+| 3 | `message_seq` 是否**跨重启单调** + 历史保留期 | 决定时间线能否断点续传、翻历史 |
 
-> 原第 3 条「仓库地址到底从哪来」已**关闭**：autonomy **自行推导「项目 → 仓库」**，控制面无需新增接口（详见第 3 节 ✅）。
+> 已关闭：~~仓库地址从哪来~~（**autonomy 自行推导**，见第 3 节 ✅）· ~~`GET /api/tasks` 按 project 过滤 + 行字段~~（**已确认支持**，见 A3 ✅）。
 
 ## 5. 验收方式（他实现完，互通时逐条跑）
 
@@ -159,9 +160,11 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks \
   -d '{"description":"打印一行 hello 并结束","context_ref":{"project":"project-59c41b54"}}'
 # 期望：202 {"task_id":"task-…","agent_id":<int>,"status":"pending","message_id":<int>,"queued":<int>}
 
-# A3 列表（含我们最想要的过滤）
-curl -s 'http://127.0.0.1:4300/api/tasks?project_id=project-59c41b54'
-# 期望：只含该 project 的任务；每行建议带 project_id / agent_id / updated_at
+# A3 列表（按 project 过滤 —— 已确认支持）
+curl -s 'http://127.0.0.1:4300/api/tasks?project_id=project-59c41b54'   # 只含该 project
+curl -s 'http://127.0.0.1:4300/api/tasks'                                # 省略 = 全部
+curl -s 'http://127.0.0.1:4300/api/tasks?project_id=project-nope'        # 未知 → 200 + 空数组
+# 期望：每行 id/description/status/turns/last_at + project_id/agent_id/updated_at
 
 # A4/A5 详情与 agent 状态（用上一步返回的 id/agent_id）
 curl -s http://127.0.0.1:4300/api/tasks/<task_id>
@@ -202,3 +205,4 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 |---|---|---|
 | v1 | 2026-09-20 | 初稿：A1–A8 接口需求 + 控制面提供的接口 + 5 条阻塞级问题；对 `:4300` 实测标注 |
 | v1.1 | 2026-09-21 | **仓库来源已确认**：由 autonomy **自行推导「项目 → 仓库」**（project → department.departmentId → 服务中心 组织服务清单），控制面无需新增接口；⚠️ 阻塞项关闭，阻塞级问题 5 → 4 条 |
+| v1.2 | 2026-09-21 | **列表已确认**：`GET /api/tasks` 支持按 `project_id` 过滤，每行带 `project_id` / `agent_id` / `updated_at`（A3 ✅）；阻塞级问题 4 → 3 条 |

@@ -30,6 +30,13 @@
       → 201 返回**我们的** task（前端当普通任务展示）
       失败：4xx/503 + 原文；任务保留并标 error（时间线 `executor_failed`）
 
+继续：前端（详情底部的输入框，同一个 ChatInput）→ POST 控制面 /api/tasks/{我们的 id}/messages { message }
+      → 控制面先 GET autonomy /api/tasks/{executor_task_id}（确认它真有这条 task）
+      → POST autonomy /api/tasks { task_id: <executor_task_id>, description: <那句话> }   ← 追加一条指令（忙则排队）
+      → 202 { task_id, agent_id, status, message_id, queued }
+      → 202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus } 给前端（本机不跑 run）
+      只收文字：带图 → 400 且**不投递**；它不可达/被拒 → 503/4xx + 原文（绝不回落成本机 agent）
+
 查看：前端 → GET 控制面 /api/tasks/{我们的 id}/executor → autonomy GET /api/tasks/{executor_task_id}（状态 + plans/steps + project）
      前端 → GET 控制面 /api/autonomy/tasks            → autonomy GET /api/tasks（列表；对账 + 显示执行方状态）
      前端 → GET 控制面 /api/autonomy/tasks/{id}/agents/{aid}/events?last_synced_message_seq=N（M2，时间线）
@@ -58,10 +65,11 @@
 | 调用 | `POST /api/tasks` |
 | 请求（文档） | `{ description, domain?, goal_type?, task_id?, context_ref?: { project } }` |
 | 响应 `202` | `{ task_id, agent_id, status: "pending", message_id, queued }` |
-| 我们的用法 | **只传** `description` + `context_ref.project`（= 当前 projectId）。不传 `domain` / `goal_type` / `task_id` |
+| 我们的用法 | **建任务**时**只传** `description` + `context_ref.project`（= 当前 projectId），不传 `domain` / `goal_type`；**继续对话**（chat 输入）时传 `task_id`（= 我们记下的 `executorTaskId`）+ `description`（那句话），不传 `context_ref`（它按行里已有的上下文走） |
 | ✅ 已确认（2026-09-21） | **`context_ref.project` 指向未知 project → 硬失败**：返回 4xx + `{"error": "…"}`，**不创建任何 task 行**（不要「照跑但世界只剩 id」）。控制面把这段原文直接显示给用户 —— 这正是我们「任务不许跑在一个没有仓库的世界里」的保证。 |
-| ❓ | ① 能否**显式**传组织/仓库（注册表读不到时兜底）？字段名？<br>② 省略 `domain`/`goal_type` 是否 OK（默认取行内已有值）？我们不想猜枚举、猜错就 400<br>③ **同一 `task_id` 再次 POST** 是否＝给同一只 owner agent 追加一条指令、忙则排队？（M2「继续对话」要用）<br>④ `queued` 是否**含**正在跑的那条（文档说含）<br>⑤ 响应能否顺带回 **`context_ref` 的解析结果**（project 名 / organization / 仓库）？这样创建完立刻能显示「这条任务的世界」，不必再查一次详情 |
-| 状态 | 未知识别/未知 project 已确认（硬失败）；其余 ❓ 待回 |
+| ✅ 已实测（2026-09-21，③） | **同一 `task_id` 再次 POST ＝ 给同一只 owner agent 追加一条指令，忙则排队**（不会被拒）：`202 {task_id, agent_id, status, message_id, queued}`；实测投递后那一轮的 `thinking` 里就引用了我们发的那句话。→ **chat 输入**（控制面详情底部的输入框）就架在它上面，不需要新接口。<br>⚠️ 同一实测也确认了**它的反面**：`task_id` 在它库里**未知**时，这条路会**当成新任务建出来**（接受路径就是创建路径，`src/api_service.go`）。所以控制面**投递前先 `GET /api/tasks/{id}` 确认它真有这条 task**，否则 404 且**不投递**。 |
+| ❓ | ① 能否**显式**传组织/仓库（注册表读不到时兜底）？字段名？<br>② 省略 `domain`/`goal_type` 是否 OK（默认取行内已有值）？我们不想猜枚举、猜错就 400<br>④ `queued` 是否**含**正在跑的那条（文档说含）<br>⑤ 响应能否顺带回 **`context_ref` 的解析结果**（project 名 / organization / 仓库）？这样创建完立刻能显示「这条任务的世界」，不必再查一次详情 |
+| 状态 | 未知 project（硬失败）、**同一 task 追加指令（③）**已确认；其余 ❓ 待回 |
 
 ### A3. 任务列表（控制面侧栏 Tasks 列表里的一行）
 
@@ -258,7 +266,8 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 - **本契约覆盖**：M1 = 新入口创建 + 列表 + 详情（可用性/状态/计划）。控制面侧只做代理，前端只做查询。
 - **M1 的展示口径**：任务仍只有一套 —— `agentPath = autonomy` 的行并进同一个侧栏列表、详情渲染在同一个主区（同一套 chip / 版式，只是数据来自代理）；**没有独立页面 / 入口**，也没有「autonomy 任务」这个类别。该路径暂时拿不到的字段一律留空不显示。
-- **M2（下一份）**：时间线（A6 映射）、继续对话（A2④）、停止（A7）。
+- **M1.5（本次）**：**继续对话**（A2④）—— 详情底部的输入框把消息**投递**给执行方（文字、忙则排队），回执写清 `message_id` / 「它前面还有几条」；前端还只显示**本页投递过的那几条**（它那边的完整对话 = 事件流，属 M2）。
+- **M2（下一份）**：时间线（A6 映射：`role` 枚举 + 工具入参/结果 + 每轮终态）、停止（A7）。
 - **M3（可选）**：广播（A8）、把 evaluation 侧的对比页串起来。
 - **不做**：把 autonomy 的 runs / 事件 / 对话镜像进我们的库（看板 / 用量 / 统计仍只统计本机跑的）、双向同步、双建「对照任务」（已明确砍掉）。<br>（v2 起：**任务行**是我们建的，所以「落库」指的是我们的 task 行；执行数据仍在它那边。）
 
@@ -282,6 +291,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 | v1.2 | 2026-09-21 | **列表已确认**：`GET /api/tasks` 支持按 `project_id` 过滤，每行带 `project_id` / `agent_id` / `updated_at`（A3 ✅）；阻塞级问题 4 → 3 条 |
 | v1.3 | 2026-09-21 | 三个答复落纸：**未知 project → 硬失败**（A2 ✅）· **`message_seq` 跨重启单调 + 历史永久保留**（A6 ✅）· 新增 **A6.1 事件模型要求**（要与我们现有时间线一致所需的 `role` 枚举 / 工具入参结果 / 每轮终态 / `cycle`，含降级代价）→ 第 4 节 3 条收敛为 1 条 |
 | v1.4 | 2026-09-21 | 新增 **A6.2 游标作用域**：控制面 `events.seq` 是单库全局 `AUTOINCREMENT`（按 task 稀疏、与其它 task 交错，实测 min=1/max=509266/105 tasks），autonomy `message_seq` 是它库内的全局单调 id；**两边各自独立、不共用不比较，因此不需要对齐编号空间**（并写明若将来合并展示要用 `(source, seq)` 复合键；需要的保证只有：全局单调 / 跨重启单调 / 永久保留） |
+| v2.1 | 2026-09-21 | **「继续对话」已落地（M1.5）**：实测确认 A2③（同一 `task_id` 再 POST = 追加指令、忙则排队）→ 控制面 `POST /api/tasks/{id}/messages` 对 `agentPath=autonomy` 改为**投递给执行方**（`task_id` + `description`），返回 `202 {executor:true, executorTaskId, messageId, queueAhead, executorStatus}`，本机不跑 run；带图 400 且不投递、投递前先确认执行方真有这条 task（否则它会**新建**一条）、不可达 503 原文。前端：同一个 `ChatInput` 的执行方变体（只收文字、无模式选择、忙则排队）+ 投递回执 + 本页投递记录 |
 | v2.0 | 2026-09-21 | **任务归属定稿**：任务始终由**控制面创建并落库**（`POST /api/tasks` + `agentPath`），autonomy 只负责**执行**（agent 由它创建）；我们存 `executor_task_id` / `executor_agent_id` 做对应，新增 `GET /api/tasks/{id}/executor` 按我们的 taskId 读执行方状态，`POST /api/autonomy/tasks` 下线（创建入口统一）。交接失败 → 任务保留 + `error` + 原文（`executor_failed`），绝不回落本机执行。第 0 节「不落库」改为「执行数据不镜像」 |
 | v1.6 | 2026-09-21 | **展示口径定稿**：任务只有一套（都是 web-cursor 的任务），区别只在 **agent 创建路径**（`agentPath`：`control-plane` / `autonomy`）→ 同一个侧栏列表、同一个详情外壳、**没有独立页面**；接口暂时拿不到的字段一律**留空不显示**（等 M2 补齐）。第 0 节「不落库」明确为**数据层**约束（界面上合并 ≠ 控制面存了这些行） |
 | v1.5 | 2026-09-21 | 新增 **第 7 节「切换与下线（未来）」**：旧入口最终会下线 → **兼容只是过渡态**，双方都不为兼容做基建（不对齐编号、不双向同步、不镜像任务）；控制面侧只需两件事：入口做成开关（`TASK_ENTRY`：`both` / `autonomy` / `gateway`）+ 旧任务保持只读可用。原第 7 节变更记录顺延为第 8 节 |

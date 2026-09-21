@@ -40,6 +40,7 @@ import ProjectDialog, {
 } from "./components/ProjectDialog";
 import Timeline from "./components/Timeline";
 import ChatInput, { type AgentMode } from "./components/ChatInput";
+import ExecutorChat from "./components/ExecutorChat";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
 
@@ -895,6 +896,8 @@ export default function App() {
     null,
   );
   const [forking, setForking] = useState(false);
+  /** 给执行方投递了新指令 → 计划区/状态立刻重读一次（老任务不用）。 */
+  const [executorReload, setExecutorReload] = useState(0);
 
   /** 弹窗等待用户选择（Promise 化，发送逻辑才能"先问再发"）。 */
   const askFork = useCallback((view: ContextView, taskId: string): Promise<ForkChoice> => {
@@ -1233,6 +1236,7 @@ export default function App() {
                   taskId={detail.task.taskId}
                   {...(selectedRow ? { row: selectedRow } : {})}
                   {...(autonomyMeta ? { meta: autonomyMeta } : {})}
+                  reloadSignal={executorReload}
                 />
               ) : null}
               {detail.task.agentPath === "autonomy" ? null : (
@@ -1283,7 +1287,15 @@ export default function App() {
                   saveTaskIntent({ taskId: detail.task.taskId, ...patch })
                 }
               />
-              {detail.task.agentPath === "autonomy" ? null : (
+              {detail.task.agentPath === "autonomy" ? (
+                /* agent 由 autonomy 创建：同一个输入框，但消息**投递给执行方**（本机不跑 run）。 */
+                <ExecutorChat
+                  key={detail.task.taskId}
+                  taskId={detail.task.taskId}
+                  status={selectedRow?.status ?? detail.task.status ?? ""}
+                  onDelivered={() => setExecutorReload((n) => n + 1)}
+                />
+              ) : (
                 <ChatInput
                   onSend={sendMessage}
                   onStop={() => void stopAgent()}

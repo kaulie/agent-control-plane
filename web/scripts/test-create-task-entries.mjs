@@ -416,7 +416,9 @@ const render = (props) =>
   assert.ok(html.includes("冒烟任务"), "描述先用列表里那行渲染，不空窗");
   // 拿不到的字段：**不渲染**（也不写占位）
   assert.ok(!html.includes("Timeline"), "没有它给不了的时间线");
-  assert.ok(!html.includes("chat-input"), "没有输入框（继续对话要等它的接口）");
+  // chat 输入只挂在**我们建的**任务详情上（App 里按 agentPath 分派）——「对账行」不是我们建的，
+  // 没有我们这边的 task 行可投递，所以这个面板本身不带输入框。
+  assert.ok(!html.includes("chat-input"), "对账行（不是我们建的）这个面板不带输入框");
   assert.ok(!html.includes("usage-bar"), "没有 token 用量");
   assert.ok(!html.includes("context-meter"), "没有上下文占用");
   assert.ok(!html.includes("未解析出来"), "缺字段不写占位文案");
@@ -446,7 +448,8 @@ const render = (props) =>
   assert.ok(bodyHtml.includes("执行 agent"), "执行方那侧的 agent id 也写清");
   assert.ok(bodyHtml.includes("10002"));
   assert.ok(bodyHtml.includes("轮次"), "轮次（它给的）");
-  assert.ok(!bodyHtml.includes("chat-input"), "没有输入框（继续对话要等它的接口）");
+  // 执行方数据块本身只管状态 / 计划；输入框由 App 挂在详情底部（同一个 ChatInput，执行方变体）。
+  assert.ok(!bodyHtml.includes("chat-input"), "执行方数据块本身不带输入框（输入框在详情底部）");
   assert.ok(!bodyHtml.includes("Timeline"), "没有时间线占位");
 
   // provider 拿不到时：列表行留空，不写占位

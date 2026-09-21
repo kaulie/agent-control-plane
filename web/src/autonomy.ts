@@ -389,3 +389,31 @@ export function planPhase(opts: {
   const s = (opts.status ?? "").trim().toLowerCase();
   return ACTIVE_STATUSES.has(s) ? "planning" : "none";
 }
+
+/** 执行方是不是「正在忙」（决定 chat 的措辞：忙就排队）。 */
+export function executorBusy(status: string | undefined): boolean {
+  const s = (status ?? "").trim().toLowerCase();
+  return s === "running" || s === "pending" || s === "queued" || s === "planning";
+}
+
+/**
+ * 投递回执（chat 输入发出去之后的回话）—— **只写接口真给了的**：
+ * `message_id` / `queued`（它前面还有几条）/ `status`（执行方状态）。
+ *
+ * 例：`已投递给执行方 · 指令 #1000010 · 前面还有 0 条`
+ */
+export function deliveryReceipt(res: {
+  executor?: boolean;
+  messageId?: number;
+  /** = autonomy 的 `queued`（它前面还有几条）。 */
+  queueAhead?: number;
+  executorStatus?: string;
+}): string {
+  const parts = ["已投递给执行方（autonomy）"];
+  if (res.messageId != null) parts.push(`指令 #${res.messageId}`);
+  if (typeof res.queueAhead === "number") {
+    parts.push(res.queueAhead > 0 ? `前面还有 ${res.queueAhead} 条` : "马上处理");
+  }
+  if (res.executorStatus) parts.push(`它那边状态 ${res.executorStatus}`);
+  return parts.join(" · ");
+}

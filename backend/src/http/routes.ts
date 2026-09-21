@@ -8,6 +8,7 @@ import type { TaskEntry } from "../config.js";
 import { AGENT_PATHS, isAgentPath, normalizeAgentPath } from "../agent-path.js";
 import type {
   AutonomyCreateResult,
+  AutonomyInstructionResult,
   AutonomyStatus,
   AutonomyTaskDetailResult,
   AutonomyTaskListResult,
@@ -64,6 +65,11 @@ export async function registerRoutes(
       listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
       getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
       createTask(input: { description: string; projectId?: string }): Promise<AutonomyCreateResult>;
+      /** chat 输入：给**已存在**的执行方任务追加一条指令（忙则排队）。 */
+      addInstruction(input: {
+        taskId: string;
+        message: string;
+      }): Promise<AutonomyInstructionResult>;
     };
     /** 新建任务入口开关（`TASK_ENTRY`）：both（默认）/ autonomy / gateway。 */
     taskEntry?: TaskEntry;
@@ -920,6 +926,65 @@ export async function registerRoutes(
     const detail = gateway.getTaskDetail(req.params.taskId);
     if (!detail) {
       return reply.code(404).send({ error: "task not found" });
+    }
+    // ---- agent 由 autonomy 创建：这条消息投递给**执行方**（不本机跑 run）----
+    //
+    // 同一个入口（`POST /api/tasks`）带 `task_id` = 给那只 agent 追加一条指令（忙则排队）——
+    // 契约 A2④。三条不假装的口径：
+    // ① 图片它只收文字 → 400 且**不投递**（不是「投了但忽略」）；
+    // ② 投递前先 `GET` 确认执行方**真有**这条 task —— 否则 autonomy 会把「未知 task_id+指令」
+    //    当成**新任务**建出来（src/api_service.go：接受路径就是 task 的创建路径），
+    //    那就等于拿错了 id 还悄悄造一条新任务；
+    // ③ 不可达 / 被拒 → 503/4xx + 原文，绝不回落成本机 agent 执行。
+    if (detail.task.agentPath === "autonomy") {
+      const text = message.trim();
+      if (validated.images.length > 0) {
+        return reply.code(400).send({
+          error: "执行方（autonomy）只收文字：这条消息没有投递（请去掉图片附件）",
+        });
+      }
+      if (!text) {
+        return reply.code(400).send({
+          error: "message text is required（执行方只收文字消息）",
+        });
+      }
+      const executorTaskId = detail.task.executorTaskId?.trim();
+      if (!executorTaskId) {
+        return reply.code(404).send({
+          error: "这条任务的 agent 不是 autonomy 创建的（没有执行方记录）",
+        });
+      }
+      if (!autonomy) {
+        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      }
+      const known = await autonomy.getTask(executorTaskId);
+      if (!known.available) {
+        return reply
+          .code(known.status === 404 ? 404 : 503)
+          .send({
+            error:
+              known.status === 404
+                ? `执行方那边没有这条任务（${executorTaskId}）：没有投递`
+                : (known.error ?? "autonomy 不可达"),
+          });
+      }
+      const sent = await autonomy.addInstruction({ taskId: executorTaskId, message: text });
+      if (!sent.ok) {
+        return reply
+          .code(sent.httpStatus && sent.httpStatus >= 400 && sent.httpStatus < 500 ? sent.httpStatus : 503)
+          .send({ error: sent.error });
+      }
+      reply.code(202);
+      return {
+        executor: true as const,
+        executorTaskId: sent.taskId,
+        ...(sent.agentId != null ? { executorAgentId: sent.agentId } : {}),
+        ...(sent.status ? { executorStatus: sent.status } : {}),
+        ...(sent.messageId != null ? { messageId: sent.messageId } : {}),
+        // autonomy 的 `queued` = 「它前面还有几条」（数字）；本机那条 `queued` 是 boolean，
+        // 语义不同 → 这里用独立字段名，免得前端两种含义串味。
+        ...(sent.queued != null ? { queueAhead: sent.queued } : {}),
+      };
     }
     try {
       const { runId, queued, queueLength } = await gateway.sendMessage(

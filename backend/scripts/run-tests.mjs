@@ -19,6 +19,8 @@ const tests = [
   // 「交给 autonomy」入口：客户端（best-effort 读 / 不静默降级写）+ 代理（不落库）
   { file: "scripts/test-autonomy-client.mjs", via: "tsx" },
   { file: "scripts/test-autonomy-proxy.mjs", via: "tsx" },
+  // autonomy 任务也能 chat：同一入口带 task_id 投递（只收文字 / 先确认 task 存在 / 不可达不假装）
+  { file: "scripts/test-autonomy-chat.mjs", via: "tsx" },
   { file: "scripts/test-shutdown.mjs", via: "tsx" },
   { file: "scripts/test-organization.mjs", via: "tsx" },
   { file: "scripts/test-injected-repos.mjs", via: "tsx" },
@@ -91,6 +93,12 @@ const tests = [
   // 主界面计划区（正在规划 / 最新计划 + 已完成 step + 当前 step 进展 / 拿不到就不显示）
   {
     file: "../web/scripts/test-executor-plan-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
+  // 给执行方（autonomy）发消息（只收文字 / 忙则排队 / 回执只写真拿到的）
+  {
+    file: "../web/scripts/test-executor-chat.mjs",
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },

@@ -118,6 +118,15 @@ export type AutonomyCreateResult =
     }
   | { ok: false; /** 服务端状态码（有的话）；网络/超时错误没有。 */ httpStatus?: number; error: string };
 
+/**
+ * 追加一条指令给**已存在**的执行方任务（chat 输入）。
+ *
+ * 与 `createTask` 是同一个入口（`POST /api/tasks`）带 `task_id` —— 契约 A2：同一个 `task_id`
+ * 再 POST = 给同一条 task 的那只 agent 追加一条指令，**忙则排队**（不会被拒），
+ * 所以它同样是**写**：失败原样带出（`httpStatus`），绝不静默降级。
+ */
+export type AutonomyInstructionResult = AutonomyCreateResult;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -300,6 +309,45 @@ export class AutonomyClient {
           description,
           ...(projectId ? { context_ref: { project: projectId } } : {}),
         }),
+      });
+      const payload = await res.json().catch(() => undefined);
+      if (!res.ok) {
+        return {
+          ok: false,
+          httpStatus: res.status,
+          error: readAutonomyError(payload, `autonomy 返回 HTTP ${res.status}`),
+        };
+      }
+      return normalizeCreateResult(payload);
+    } catch (err) {
+      return { ok: false, error: this.reason(err) };
+    }
+  }
+
+  /**
+   * 追加一条指令给**已存在**的执行方任务（chat 输入）。
+   *
+   * 与 `createTask` 走同一个入口，区别只有 `task_id`：autonomy 会把它当成「同一条 task 的下一条
+   * 指令」投进那只 agent 的 inbox（忙则排队），返回 `202 { task_id, agent_id, status, message_id, queued }`。
+   *
+   * 与读接口相反：**失败就是失败**（同 `createTask`）——由路由转成 4xx/503，把原文带出给用户。
+   */
+  async addInstruction(input: {
+    taskId: string;
+    message: string;
+  }): Promise<AutonomyInstructionResult> {
+    const taskId = input.taskId.trim();
+    const message = input.message.trim();
+    if (!taskId) return { ok: false, httpStatus: 400, error: "taskId is required（执行方那边的 task id）" };
+    if (!message) {
+      return { ok: false, httpStatus: 400, error: "message is required（投递的指令不能为空）" };
+    }
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}${TASKS_PATH}`, {
+        method: "POST",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ task_id: taskId, description: message }),
       });
       const payload = await res.json().catch(() => undefined);
       if (!res.ok) {

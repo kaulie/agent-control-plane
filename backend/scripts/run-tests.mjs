@@ -115,6 +115,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 阻塞态交互（谁在挡 / 它在等什么 / 它给的选项 / 自由输入；不猜散文枚举）
+  {
+    file: "../web/scripts/test-executor-blocked-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
 ];
 
 const needsDist = tests.some((t) => t.via === "node");

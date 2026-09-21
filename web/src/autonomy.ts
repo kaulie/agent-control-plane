@@ -489,26 +489,31 @@ function oneLine(text: unknown, max = 150): string {
 }
 
 /**
- * `need` 里的「它在等什么」：autonomy 把 need 记成 JSON（接口上可能是**字符串**，也可能是对象）。
- * 取最常见的几个键（`description` / `text` / `question` / `reason`）——它拿不到就退回 `reason`。
+ * `need` 解析：autonomy 把 need 记成 JSON，接口上可能是**字符串**（常见）也可能是对象。
+ * 返回对象形态（解不开就当纯文本，由调用方用 `plainText(need)` 兜底）。
+ */
+function needRecord(need: unknown): Record<string, unknown> | null {
+  if (need && typeof need === "object" && !Array.isArray(need)) {
+    return need as Record<string, unknown>;
+  }
+  const direct = plainText(need);
+  if (!direct) return null;
+  try {
+    const parsed = JSON.parse(direct) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null; // 不是 JSON 字符串 → 当纯文本用
+  }
+}
+
+/**
+ * `need` 里的「它在等什么」：取最常见的几个键
+ * （`description` / `text` / `question` / `reason` / `message`）——它拿不到就退回 `reason`。
  */
 function needText(need: unknown): string {
-  const direct = plainText(need);
-  const obj = (() => {
-    if (direct) {
-      try {
-        const parsed = JSON.parse(direct) as unknown;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : null;
-      } catch {
-        return null; // 不是 JSON 字符串 → 当纯文本用
-      }
-    }
-    return need && typeof need === "object" && !Array.isArray(need)
-      ? (need as Record<string, unknown>)
-      : null;
-  })();
+  const obj = needRecord(need);
   if (obj) {
     for (const key of ["description", "text", "question", "reason", "message"]) {
       const t = plainText(obj[key]);
@@ -516,7 +521,7 @@ function needText(need: unknown): string {
     }
     return "";
   }
-  return direct;
+  return plainText(need);
 }
 
 /** 这条 task 在主界面该显示成哪一态（`detail` 还没读到时由调用方决定不画）。 */
@@ -585,3 +590,188 @@ export function executorPhaseView(detail: AutonomyTaskDetail | null): ExecutorPh
   return view("executing", `${head}${tail}`);
 }
 
+/** ------------------------------------------------------------------ *
+ * 阻塞态：把「它在等什么 / 它给了哪些选项 / 你能怎么答」备齐。
+ *
+ * 事实（拿线上 payload 核过，别再靠猜）：
+ * - `need` 是**字符串里的 JSON**：`{"type":"approval|decision|…","description":"…"}`；
+ *   真实样本里 `description` 会把选择写成散文枚举（`(1) … (2) …`），所以这一层**不猜枚举**：
+ *   只有 autonomy 在 `need.options` 里**结构化**给出时才当选项，其余交给用户在输入框自己写。
+ * - 它没填 `need`（老 payload 是 `{}`）时退到 `reason`，并**标明**这段话来自 reason。
+ * ------------------------------------------------------------------ */
+
+/** 阻塞分类：来自它自己的 `status` / `need.type`（不是我们替它编的）。 */
+export type BlockedKind =
+  | "approval"
+  | "decision"
+  | "input"
+  | "external"
+  | "error"
+  | "stopped"
+  | "unverified";
+
+const BLOCKED_KIND_LABEL: Record<BlockedKind, string> = {
+  approval: "等你拍板",
+  decision: "等你定",
+  input: "等你的输入",
+  external: "等外部",
+  error: "执行方出错",
+  stopped: "执行方已停",
+  unverified: "验证未通过",
+};
+
+/** 每个分类的**依据**：照实说它是靠哪个字段判出来的（`{s}` 换成原始值）。 */
+const BLOCKED_KIND_BASIS: Record<BlockedKind, string> = {
+  approval: "它标了 need.type=approval：要人批准 / 合入",
+  decision: "它标了 need.type=decision：要人定一个",
+  input: "执行方状态 need_input：要你的输入",
+  external: "决策 blocked：它在等外部条件",
+  error: "执行方状态 {s}：它出错了",
+  stopped: "执行方状态 {s}：它停下来了",
+  unverified: "执行方状态 unverified：它说做完了，引擎没认",
+};
+
+export interface LinkView {
+  url: string;
+  label: string;
+}
+
+/** URL → 短标签（PR / 流水线 / 部署 / 其它）。 */
+export function linkLabel(url: string): string {
+  const pr = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+  if (pr) return `${pr[1]}/${pr[2]} PR #${pr[3]}`;
+  const pipe = /\/api\/pipelines\/([^/?#]+)/.exec(url);
+  if (pipe) return `流水线 ${pipe[1]}`;
+  const dep = /\/deployments\/([^/?#]+)/.exec(url);
+  if (dep) return `部署 ${dep[1]}`;
+  try {
+    const u = new URL(url);
+    const path = u.pathname === "/" ? "" : u.pathname;
+    return `${u.host}${path}`.slice(0, 60);
+  } catch {
+    return url.slice(0, 60);
+  }
+}
+
+/** 文本里的链接（去重、去掉尾部标点）—— 面板把它们变成可点的证据。 */
+export function linksIn(text: string): LinkView[] {
+  const out: LinkView[] = [];
+  const seen = new Set<string>();
+  const re = /https?:\/\/[^\s<>()[\]"'\uff0c\u3002\uff1b\u3001\uff09]+/g;
+  for (const m of text.matchAll(re)) {
+    const url = m[0].replace(/[.,;:]+$/, "");
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, label: linkLabel(url) });
+  }
+  return out;
+}
+
+/** 选项上限：面板按 1..N 编号，超过 9 就不列了（超出的交给自由输入）。 */
+export const MAX_NEED_OPTIONS = 9;
+
+/**
+ * `need.options` → 干净的选项：**只认它真给的**（字符串、非空、去重、最多 9 条）。
+ * 没有这个字段 / 不是数组 → 空数组（= 它没给选项，没有选项就不显示选项）。
+ */
+export function needOptions(need: unknown): string[] {
+  const rec = needRecord(need);
+  const raw = rec ? rec.options : undefined;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    const text = typeof item === "string" ? item.replace(/\s+/g, " ").trim() : "";
+    if (!text || out.includes(text)) continue;
+    out.push(text);
+    if (out.length >= MAX_NEED_OPTIONS) break;
+  }
+  return out;
+}
+
+/** 这段话是从哪来的（面板要写明，不让人以为它一定说了）。 */
+export type BlockedAskSource = "need" | "reason" | "error" | "none";
+
+export interface BlockedView {
+  kind: BlockedKind;
+  /** 标题：等你拍板 / 等你定 / 等你的输入 / 等外部 / 执行方出错 / 执行方已停 / 验证未通过。 */
+  kindLabel: string;
+  /** 依据：靠哪个字段判出来的（照实说）。 */
+  basis: string;
+  /** 它自己的 need.type（approval / decision / capability…），没有就是空串。 */
+  needType: string;
+  /** 它在等什么 / 在问什么：`need.description` 全文（照抄，不转述）。 */
+  ask: string;
+  /** `ask` 的来源（面板照实标注）。 */
+  askSource: BlockedAskSource;
+  /** 它给的理由（面板里折叠）。 */
+  reason: string;
+  /** **结构化**选项（`need.options`）；空 = 它没给选项（那就只走自由输入）。 */
+  options: string[];
+  /** `ask` / `reason` 里的链接（PR / 流水线…）。 */
+  links: LinkView[];
+  /** 「复制阻塞详情」用的一行。 */
+  summaryLine: string;
+}
+
+/**
+ * 阻塞态的面板原料；**不是阻塞态就返回 `null`**（面板不渲染、不占版面）。
+ * `phase` 可以由调用方传进来（它已经算过四态），省一次重复计算。
+ */
+export function blockedView(
+  detail: AutonomyTaskDetail | null,
+  phase?: ExecutorPhaseView,
+): BlockedView | null {
+  const view = phase ?? executorPhaseView(detail);
+  if (view.phase !== "blocked") return null;
+  const raw = (detail?.status ?? "").trim();
+  const s = raw.toLowerCase();
+  const plan = latestPlan(detail);
+  const needType = (() => {
+    const rec = needRecord(plan?.need);
+    return rec ? plainText(rec.type).trim() : "";
+  })();
+  const needFull = needText(plan?.need).trim();
+  const reason = oneLine(plan?.reason, 600);
+  const errText = oneLine(detail?.error, 400);
+  const ask = needFull || reason || errText;
+  const askSource: BlockedAskSource = needFull
+    ? "need"
+    : reason
+      ? "reason"
+      : errText
+        ? "error"
+        : "none";
+  const decision = (plan?.decisionType ?? "").trim().toLowerCase();
+  const needTypeLower = needType.toLowerCase();
+  const kind: BlockedKind =
+    needTypeLower === "approval"
+      ? "approval"
+      : needTypeLower === "decision"
+        ? "decision"
+        : s === "unverified"
+          ? "unverified"
+          : s === "error" || s === "failed"
+            ? "error"
+            : s === "stopped"
+              ? "stopped"
+              : s === "blocked" || decision === "blocked"
+                ? "external"
+                : "input";
+  const links = linksIn(`${ask}\n${reason}`);
+  const options = needOptions(plan?.need);
+  return {
+    kind,
+    kindLabel: BLOCKED_KIND_LABEL[kind],
+    basis: BLOCKED_KIND_BASIS[kind].replace("{s}", raw || "未知"),
+    needType,
+    ask,
+    askSource,
+    reason,
+    options,
+    links,
+    summaryLine:
+      `【阻塞 \u00b7 ${BLOCKED_KIND_LABEL[kind]}】${ask || reason}` +
+      (options.length > 0 ? `（它给了 ${options.length} 个选项）` : "") +
+      (links.length > 0 ? `（${links[0].url}）` : ""),
+  };
+}

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { deliveryReceipt, executorBusy } from "../autonomy";
 import { formatDateTime } from "../format";
 import ChatInput, { type ChatPayload } from "./ChatInput";
+import { onExecutorPrefill } from "../executorPrefill";
 
 /**
  * 给**执行方**（autonomy）发消息 —— 「autonomy 创建的 agent 也要能 chat」。
@@ -47,6 +48,12 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busy = executorBusy(status);
+  // 阻塞面板的选项/预填通过这条总线把话塞进输入框（只填不发）
+  const [prefill, setPrefill] = useState({ text: "", nonce: 0 });
+  useEffect(
+    () => onExecutorPrefill((text) => setPrefill((prev) => ({ text, nonce: prev.nonce + 1 }))),
+    [],
+  );
 
   const send = async (payload: ChatPayload): Promise<boolean> => {
     setError(null);
@@ -122,6 +129,7 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
             ? "执行方工作中，消息将排到它后面…（只收文字）"
             : "发一条指令给执行方（autonomy）…（只收文字）"
         }
+        prefill={prefill}
       />
     </div>
   );

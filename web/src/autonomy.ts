@@ -222,6 +222,11 @@ export interface PlanView {
   stepCount?: number;
   /** 接口里的 `executed`（执行了几步）。 */
   executed?: number;
+  /**
+   * 接口里的 `need`（原始形态：接口上可能是 JSON **字符串**也可能是对象）——
+   * `need_input` / `blocked` 时它就是「它在等什么、要人做什么」。
+   */
+  need?: unknown;
   steps: PlanStepView[];
 }
 
@@ -303,6 +308,7 @@ function toPlanView(plan: RawPlan, i: number): PlanView {
   const reason = plainText(plan.reason);
   const stepCount = typeof plan.step_count === "number" ? plan.step_count : undefined;
   const executed = typeof plan.executed === "number" ? plan.executed : undefined;
+  const need = plan.need;
   return {
     key,
     ...(planId != null ? { planId } : {}),
@@ -311,6 +317,7 @@ function toPlanView(plan: RawPlan, i: number): PlanView {
     ...(reason ? { reason } : {}),
     ...(stepCount != null ? { stepCount } : {}),
     ...(executed != null ? { executed } : {}),
+    ...(need != null && need !== "" ? { need } : {}),
     steps,
   };
 }
@@ -481,6 +488,37 @@ function oneLine(text: unknown, max = 150): string {
   return raw.length > max ? `${raw.slice(0, max)}…` : raw;
 }
 
+/**
+ * `need` 里的「它在等什么」：autonomy 把 need 记成 JSON（接口上可能是**字符串**，也可能是对象）。
+ * 取最常见的几个键（`description` / `text` / `question` / `reason`）——它拿不到就退回 `reason`。
+ */
+function needText(need: unknown): string {
+  const direct = plainText(need);
+  const obj = (() => {
+    if (direct) {
+      try {
+        const parsed = JSON.parse(direct) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : null;
+      } catch {
+        return null; // 不是 JSON 字符串 → 当纯文本用
+      }
+    }
+    return need && typeof need === "object" && !Array.isArray(need)
+      ? (need as Record<string, unknown>)
+      : null;
+  })();
+  if (obj) {
+    for (const key of ["description", "text", "question", "reason", "message"]) {
+      const t = plainText(obj[key]);
+      if (t) return t;
+    }
+    return "";
+  }
+  return direct;
+}
+
 /** 这条 task 在主界面该显示成哪一态（`detail` 还没读到时由调用方决定不画）。 */
 export function executorPhaseView(detail: AutonomyTaskDetail | null): ExecutorPhaseView {
   const raw = (detail?.status ?? "").trim();
@@ -509,12 +547,18 @@ export function executorPhaseView(detail: AutonomyTaskDetail | null): ExecutorPh
     );
   }
   // ② 阻塞（二）：停了 / 出错 / 被挡 / 等输入。
+  //    状态本身就是 `need_input` / `blocked` 时，「在等什么」以 `need` 为准（比 `reason` 具体）。
   if (BLOCKED_STATUSES.has(s)) {
-    return view("blocked", `执行方状态 ${raw}${err || why ? `：${err || why}` : ""}`);
+    const ask =
+      decision === "blocked" || decision === "need_input" ? oneLine(needText(plan?.need)) : "";
+    const tail = ask || err || why;
+    return view("blocked", `执行方状态 ${raw}${tail ? `：${tail}` : ""}`);
   }
   // ② 阻塞（三）：它自己给出的最新一轮「决定」是在等外部 / 等输入。
+  //    等什么，`need` 里说得比 `reason` 具体（例：`{"type":"approval","description":"等人 review/合 PR #117"}`）。
   if (decision === "blocked" || decision === "need_input") {
-    return view("blocked", `执行方在等外部 / 等输入（${decision}）${why ? `：${why}` : ""}`);
+    const ask = oneLine(needText(plan?.need)) || why;
+    return view("blocked", `执行方在等外部 / 等输入（${decision}）${ask ? `：${ask}` : ""}`);
   }
   // ③ 规划中：还没有任何「带步骤」的计划 —— 这一轮还在规划。
   const stepped = latestSteppedPlan(detail);

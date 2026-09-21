@@ -25,6 +25,8 @@
  *   把 autonomy 的原文带出给用户（契约第 0 节：不落库、不回落成本机 agent 执行）。
  */
 
+import { DEFAULT_AUTONOMY_TIMEOUT_MS } from "./config.js";
+
 const META_PATH = "/api/meta";
 const HEALTH_PATH = "/health";
 const TASKS_PATH = "/api/tasks";
@@ -215,7 +217,7 @@ export class AutonomyClient {
 
   constructor(options: AutonomyClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.timeoutMs = options.timeoutMs ?? 3000;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_AUTONOMY_TIMEOUT_MS;
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.failureTtlMs = options.failureTtlMs ?? DEFAULT_FAILURE_TTL_MS;
     this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);

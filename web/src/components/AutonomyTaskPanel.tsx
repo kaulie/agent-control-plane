@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
-import { AUTONOMY_TASK_REFRESH_MS, statusClass, worldLine } from "../autonomy";
+import {
+  AUTONOMY_TASK_REFRESH_MS,
+  EMPTY_EXECUTOR_READ,
+  reduceExecutorRead,
+  statusClass,
+  worldLine,
+} from "../autonomy";
 import PlanSection from "./ExecutorPlan";
 import VerificationSection from "./ExecutorVerification";
 import ExecutorChat from "./ExecutorChat";
 import ExecutorPhaseBar from "./ExecutorPhaseBar";
 import ExecutorBlockedPanel from "./ExecutorBlockedPanel";
 import TaskIdsBar from "./TaskIdsBar";
-import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
+import type { AutonomyMeta, TaskListRow } from "../types";
 
 /**
  * 「agent 由 autonomy 创建」那部分数据的展示件（和老任务共用同一套版式）。
@@ -35,19 +41,25 @@ interface BodyProps {
 }
 
 export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal = 0 }: BodyProps) {
-  const [detail, setDetail] = useState<AutonomyTaskDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [read, dispatch] = useReducer(reduceExecutorRead, EMPTY_EXECUTOR_READ);
+  const detail = read.detail;
+  const error = read.error;
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      setDetail(
-        via === "task" ? await api.taskExecutor(taskId) : await api.autonomyTask(taskId),
-      );
-      setError(null);
+      const next =
+        via === "task" ? await api.taskExecutor(taskId) : await api.autonomyTask(taskId);
+      dispatch({ type: "ok", detail: next });
     } catch (e) {
-      setDetail(null);
-      setError(errorText(e));
+      // 读失败**不清内容**：保留上一次成功读到的 detail，只记下原因；页面继续显示已有内容，
+      // 顶部给一条非破坏性的提醒即可（需求：端读失败时不要清空当前内容）。
+      dispatch({ type: "error", error: errorText(e) });
     }
+  }, [taskId, via]);
+
+  // 换了一条 task：先丢掉上一条的内容，免得「新 task 首次读失败」时把旧 task 的内容当成它的。
+  useEffect(() => {
+    dispatch({ type: "switch" });
   }, [taskId, via]);
 
   useEffect(() => {
@@ -116,7 +128,13 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
       <VerificationSection detail={detail} />
 
       <div className="auto-detail">
-        {error ? <div className="auto-banner bad">读执行方失败：{error}</div> : null}
+        {error ? (
+          /* 非破坏性提醒：读失败只提醒，**不清内容**（上面仍是上一次读到的内容）。 */
+          <div className="auto-banner warn" role="status">
+            读执行方失败：{error}
+            {detail ? "（下面保留的是上一次读到的内容）" : ""}
+          </div>
+        ) : null}
         {detail?.error ? (
           <div className="auto-detail-row">
             <span>error</span>

@@ -87,8 +87,13 @@ export function resolveServiceRegistryTimeoutMs(
  */
 export const DEFAULT_AUTONOMY_API_URL = "http://127.0.0.1:4300";
 
-/** How long we wait for autonomy before degrading to 「不可达」. */
-export const DEFAULT_AUTONOMY_TIMEOUT_MS = 3000;
+/**
+ * How long we wait for autonomy before degrading to 「不可达」.
+ *
+ * 5s（原 3s）：主界面详情每 5s 轮询一次，3s 太紧——autonomy 偶发慢一拍就被判超时，
+ * 页面反而看不到进展。抬到 5s 与轮询同口径，减少这种假超时（任务需求：超时改成 5000ms）。
+ */
+export const DEFAULT_AUTONOMY_TIMEOUT_MS = 5000;
 
 /**
  * 「新建任务」入口开关（`TASK_ENTRY`）：`both`（默认，两个入口都在）/ `autonomy`（只有新入口）/ `gateway`（只有老入口）。

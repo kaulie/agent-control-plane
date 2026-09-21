@@ -279,6 +279,61 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   assert.equal(deliveries().length, 1, "共享的那只假 autonomy 上只投递成功过一次（上面第 1 项）");
 }
 
+// ---- 9) 对账行：按**它那边的 task id** 投递（我们库里没有这个 task 行）----
+{
+  const before = counts();
+  const beforeCalls = autonomy.calls.length;
+  const res = await post("/api/autonomy/tasks/task-exec-1/messages", { message: " 接着干  " });
+  assert.equal(res.statusCode, 202, "对账行也能投递");
+  const body = await json(res);
+  assert.equal(body.executor, true);
+  assert.equal(body.executorTaskId, "task-exec-1");
+  assert.equal(body.messageId, 1000010);
+  assert.equal(body.queueAhead, 0);
+  assert.deepEqual(
+    autonomy.calls.filter((c) => c[0] === "addInstruction").at(-1)[1],
+    { taskId: "task-exec-1", message: "接着干" },
+    "按它的 task id 投递，内容 trim",
+  );
+  assert.deepEqual(counts(), before, "纯代理：我方库一行都不写");
+  assert.ok(autonomy.calls.length > beforeCalls, "走的是 autonomy 那份客户端");
+
+  // 未知 task → 404 且不投递（同一条规矩：别让它把未知 id 当成新建任务）
+  const beforeDeliveries = deliveries().length;
+  const missing = await post("/api/autonomy/tasks/task-missing/messages", { message: "hi" });
+  assert.equal(missing.statusCode, 404);
+  assert.match((await json(missing)).error, /没有这条任务/);
+  assert.equal(deliveries().length, beforeDeliveries, "未知 task 不投递");
+
+  // 不可达 → 503；空消息 / 带图 → 400（都不投递）
+  assert.equal((await post("/api/autonomy/tasks/task-down/messages", { message: "hi" })).statusCode, 503);
+  assert.equal((await post("/api/autonomy/tasks/task-exec-1/messages", { message: "   " })).statusCode, 400);
+  assert.equal(
+    (
+      await post("/api/autonomy/tasks/task-exec-1/messages", {
+        message: "",
+        images: [{ data: "aGk=", mimeType: "image/png" }],
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(deliveries().length, beforeDeliveries, "上面这些（未知 / 不可达 / 空 / 带图）都没有投递");
+}
+
+// ---- 10) 没配 autonomy → 对账行这条也是 503 ----
+{
+  const bare2 = Fastify({ logger: false });
+  await registerRoutes(bare2, gateway, providers, { dataDir, appVersion: APP_VERSION });
+  const res = await bare2.inject({
+    method: "POST",
+    url: "/api/autonomy/tasks/task-exec-1/messages",
+    headers: uiHeaders,
+    payload: { message: "hello" },
+  });
+  assert.equal(res.statusCode, 503);
+  assert.match(JSON.parse(res.body).error, /autonomy 未配置/);
+}
+
 console.log(
-  "PASS: autonomy 任务能 chat（投递给执行方 / 只收文字 / 先确认 task 存在 / 不可达不假装 / 本机路径不变）",
+  "PASS: autonomy 任务能 chat（两种寻址都投递给执行方 / 只收文字 / 先确认 task 存在 / 不可达不假装 / 纯代理不写库 / 本机路径不变）",
 );

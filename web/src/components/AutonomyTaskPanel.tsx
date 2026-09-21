@@ -3,6 +3,7 @@ import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
 import { statusClass, worldLine } from "../autonomy";
 import PlanSection from "./ExecutorPlan";
+import ExecutorChat from "./ExecutorChat";
 import TaskIdsBar from "./TaskIdsBar";
 import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
 
@@ -132,6 +133,21 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
           </details>
         ) : null}
       </div>
+
+      {via === "executor" ? (
+        /*
+         * **对账行**（只在 autonomy 那边存在、我们没建过的任务）也能 chat：
+         * 这个消息按**它那边的 task id** 投递（控制面只代理，我方库一行不写）。
+         * 我们建的任务（via="task"）的输入框在详情底部（App 里），不在这里重复画。
+         */
+        <ExecutorChat
+          key={taskId}
+          via="executor"
+          taskId={taskId}
+          status={status}
+          onDelivered={() => void load()}
+        />
+      ) : null}
     </>
   );
 }

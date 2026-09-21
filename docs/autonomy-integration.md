@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **草稿 v1 — 待 autonomy 方复查**（第 4 节是阻塞级待确认清单） |
+| 状态 | **v1.1 — 待 autonomy 方复查**（第 4 节：4 条阻塞级待确认；仓库来源已确认「自行推导」转第 3 节） |
 | 双方 | 调用方：web-cursor 控制面（agent-control-plane，`:4211`）· 被调方：autonomy runtime（`:4300`） |
 | 事实来源 | autonomy `docs/http-api.md` + 对运行中的 `http://127.0.0.1:4300` 实测（下文标「实测」）；控制面实测 `http://127.0.0.1:4211` |
 | 目的 | 新建任务扩成**两个入口**：①「本机 agent」（现状，控制面自己跑）②「交给 autonomy」（autonomy 自己跑）。两边只通过 autonomy 的 task id 关联 |
@@ -117,28 +117,35 @@
 | `GET /api/tasks/{taskId}` | `taskId, projectId, title, status, description, goal, provider, model, agentId, workspace, prUrl, lastUserInputAt, taskType, createdAt` | `context_ref: { task }` 解析用（autonomy 文档提到用平台 task 注册表） |
 | `GET /api/projects/{projectId}/service-repos` | `{ projectId, repos: { available, orgId, orgName, items: [{ name, namespace, gitRepoUrl, description, … }] } }` | **按项目查仓库的现成接口**（控制面内部按 `department.departmentId` 去服务中心查） |
 
-### ⚠️ 阻塞级错配：**仓库地址从哪来**
+### ✅ 已确认：仓库由 autonomy **自行推导**（本项已关闭）
 
-autonomy `docs/http-api.md` 写的是「平台的 **project 注册表**提供 project 的名字、**仓库**与所属部门」，但控制面的
-`GET /api/projects` **已经不返回仓库地址**了：项目级 `gitRepoUrl` 字段已从产品里删除（接口不返回、UI 不展示），
-仓库的唯一真源是**服务中心** `GET /v1/orgs/{orgId}/services`（按 `department.departmentId` 查）。
+仓库不需要控制面额外提供：**autonomy 自己推导「项目 → 仓库」**，控制面不新增/不改动任何接口。推导链路：
 
-所以请确认 autonomy 取仓库的路径，二选一（或告诉我第三种）：
+```
+project（context_ref.project）
+  → 控制面 GET /api/projects 取 department.departmentId（组织 id）
+  → 服务中心 GET /v1/orgs/{orgId}/services 取该组织登记的服务（含 gitRepoUrl）
+```
 
-1. autonomy 自己拿 `department.departmentId` 去查服务中心；或
-2. autonomy 改成调控制面的 **`GET /api/projects/{projectId}/service-repos`**（推荐：它已经把「项目 → 组织 → 服务中心」这层收口好了，且与老入口注入给 agent 的仓库清单**同一真源**，两边才可能拿到同一个仓库）。
+控制面 `GET /api/projects` 返回 `[{ projectId, name, department?: { departmentId, departmentName } }]` ——
+**不含仓库地址**（项目级 `gitRepoUrl` 字段已从产品里删除）；仓库的唯一真源是**服务中心**，
+与老入口注入给 agent 的仓库清单是同一处，所以两个入口拿到的仓库一致。
 
-> 这条直接决定**新入口建的任务能不能拿到正确的仓库**，属于阻塞级。
+> 与老入口一致的边界：**没设「所属部门」的 project 推导不出仓库**（服务清单按组织查；实测 `project-default` 就没有 `department`）。此时两个入口都拿不到仓库 —— 行为一致，不是新入口的缺陷。
 
-## 4. 需要 autonomy 方明确答复的阻塞级问题（5 条）
+（仅供参考，当前不需要）控制面也有一条现成的 `GET /api/projects/{projectId}/service-repos`（内部就是「项目 → 组织 → 服务中心」）；
+若以后想省掉自己拼链路，可以改用它。
+
+## 4. 需要 autonomy 方明确答复的阻塞级问题（4 条）
 
 | # | 问题 | 影响 |
 |---|---|---|
 | 1 | `context_ref.project` 指向未知 project 时的行为（硬失败 / 静默照跑） | 决定新入口是否可能「任务跑在一个没有仓库的世界里」而没人发现 |
 | 2 | `GET /api/tasks` 能否**按 project 过滤** + 每行是否带 `project_id` / `agent_id` / `updated_at` | 决定控制面「Autonomy 任务」页要不要 N+1 查询、能不能按项目分组 |
-| 3 | **仓库地址到底从哪来**（见第 3 节 ⚠️） | 决定新入口的任务能否拿到正确仓库（与老入口同一真源） |
-| 4 | `events[].role` / `plans[].steps[].status` 的枚举**冻结程度** | 决定 UI 图标/配色映射是否会被上游扩枚举打破 |
-| 5 | `message_seq` 是否**跨重启单调** + 历史保留期 | 决定时间线能否断点续传、翻历史 |
+| 3 | `events[].role` / `plans[].steps[].status` 的枚举**冻结程度** | 决定 UI 图标/配色映射是否会被上游扩枚举打破 |
+| 4 | `message_seq` 是否**跨重启单调** + 历史保留期 | 决定时间线能否断点续传、翻历史 |
+
+> 原第 3 条「仓库地址到底从哪来」已**关闭**：autonomy **自行推导「项目 → 仓库」**，控制面无需新增接口（详见第 3 节 ✅）。
 
 ## 5. 验收方式（他实现完，互通时逐条跑）
 
@@ -194,3 +201,4 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1 | 2026-09-20 | 初稿：A1–A8 接口需求 + 控制面提供的接口 + 5 条阻塞级问题；对 `:4300` 实测标注 |
+| v1.1 | 2026-09-21 | **仓库来源已确认**：由 autonomy **自行推导「项目 → 仓库」**（project → department.departmentId → 服务中心 组织服务清单），控制面无需新增接口；⚠️ 阻塞项关闭，阻塞级问题 5 → 4 条 |

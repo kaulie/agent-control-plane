@@ -1004,3 +1004,48 @@ export function verificationView(detail: AutonomyTaskDetail | null): Verificatio
     tone,
   };
 }
+
+/**
+ * 详情读取（`GET .../executor` 或 `/api/autonomy/tasks/{id}`）的本地状态。
+ *
+ * 关键口径：**读失败不清内容**。失败只是「这次没读到」，不是「内容没了」——
+ * `error` 与 `detail` 互不排斥：报错时保留上一次读到的 `detail`，页面继续显示已有内容，
+ * 顶部给一条非破坏性的提醒即可（任务需求：端读失败时不要清空当前内容，给出提醒即可）。
+ */
+export interface ExecutorReadState {
+  /** 上一次**成功**读到的内容；读失败时原样保留（不因为一次失败就抹掉）。 */
+  detail: AutonomyTaskDetail | null;
+  /** 最近一次读失败的原因；下次读到就清空。 */
+  error: string | null;
+}
+
+/** 还没读到任何东西、也没失败过的起点。 */
+export const EMPTY_EXECUTOR_READ: ExecutorReadState = { detail: null, error: null };
+
+export type ExecutorReadEvent =
+  | { type: "ok"; detail: AutonomyTaskDetail }
+  | { type: "error"; error: string }
+  /** 换了一条 task：丢弃上一条的内容，免得「新 task 读失败」时把旧 task 的内容当它的显示出来。 */
+  | { type: "switch" };
+
+/**
+ * 详情读取的状态机（纯函数，便于单测）。
+ *
+ * - `ok`：换成新内容，清掉上一次的失败提醒；
+ * - `error`：**保留**上一次的内容（不 `setDetail(null)`），只记下原因 —— 页面继续显示旧内容；
+ * - `switch`：清空（换 task）。
+ */
+export function reduceExecutorRead(
+  state: ExecutorReadState,
+  event: ExecutorReadEvent,
+): ExecutorReadState {
+  switch (event.type) {
+    case "ok":
+      return { detail: event.detail, error: null };
+    case "error":
+      return { detail: state.detail, error: event.error };
+    case "switch":
+      return EMPTY_EXECUTOR_READ;
+  }
+}
+

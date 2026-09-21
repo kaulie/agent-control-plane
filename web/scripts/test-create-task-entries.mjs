@@ -6,8 +6,8 @@
  *
  * 守四件事：
  * 1. **老入口 / 老行不变**：`TASK_ENTRY=gateway` 时对话框与以前逐字一致；两个入口都在时默认仍落在老入口。
- * 2. **新入口只说必要的话**：类型 / 目标 / Provider / Model 都不显示（autonomy 有自己的一套），
- *    并且 `api.createAutonomyTask` 只发 `description` + `projectId`。
+ * 2. **任务还是我们建的**：新入口走 `POST /api/tasks` + `agentPath: "autonomy"`（控制面落库，
+ *    执行交给 autonomy）；执行方状态按**我们的 taskId** 读 `/api/tasks/{id}/executor`。
  * 3. **一个列表、一个外壳**：agent 由 autonomy 创建的任务并进同一个 `TaskList`（同一套行 class），
  *    详情走同一个 `<main>` + 同一个 `TaskIdsBar`；**没有独立页面**（无 `🛰` / 无 `AutonomyPage`
  *    / `AppView` 里没有 `"autonomy"`）。
@@ -26,7 +26,7 @@ const { default: CreateTaskDialog } = await import(
   "../src/components/CreateTaskDialog.tsx"
 );
 const { api } = await import("../src/api.ts");
-const { default: AutonomyTaskPanel } = await import(
+const { default: AutonomyTaskPanel, ExecutorTaskBody } = await import(
   "../src/components/AutonomyTaskPanel.tsx"
 );
 const { default: TaskList } = await import("../src/components/TaskList.tsx");
@@ -107,7 +107,7 @@ const render = (props) =>
   assert.ok(html.includes("ECONNREFUSED"), "把原因写出来");
 }
 
-// ---- 5) api 层：写请求只发 description + projectId，并且带 UI 版本头 ----
+// ---- 5) api 层：任务用 POST /api/tasks（+ agentPath）创建；执行方读 /api/tasks/{id}/executor ----
 {
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -122,39 +122,58 @@ const render = (props) =>
         },
       };
     }
+    if (String(url).endsWith("/executor")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ task_id: "task-exec-1", status: "running", turns: 2 }),
+        clone() {
+          return this;
+        },
+      };
+    }
     return {
       ok: true,
-      status: 202,
+      status: 201,
       json: async () => ({
-        taskId: "task-x",
-        agentId: 10000,
-        queued: 0,
-        url: "http://127.0.0.1:4300",
-        entry: "both",
+        taskId: "task-ours",
+        projectId: "project-59c41b54",
+        agentPath: "autonomy",
+        provider: "autonomy",
+        executorTaskId: "task-exec-1",
+        executorAgentId: "10001",
       }),
       clone() {
         return this;
       },
     };
   };
-  const accepted = await api.createAutonomyTask({
+
+  const task = await api.createTask({
     description: "写个 demo",
     projectId: "project-59c41b54",
+    agentPath: "autonomy",
   });
-  assert.equal(accepted.taskId, "task-x");
   const post = calls.find((c) => c.init.method === "POST");
   assert.ok(post, "发出了 POST");
-  assert.equal(post.url, "/api/autonomy/tasks");
+  assert.equal(post.url, "/api/tasks", "任务统一走 POST /api/tasks（不再有 POST /api/autonomy/tasks）");
   const body = JSON.parse(post.init.body);
-  assert.deepEqual(body, {
-    description: "写个 demo",
-    projectId: "project-59c41b54",
-  });
-  assert.ok(!("provider" in body) && !("goal" in body), "不带 provider / goal（新入口不适用）");
+  assert.equal(body.agentPath, "autonomy", "agent 创建路径随创建一起下发");
+  assert.equal(body.description, "写个 demo");
+  assert.equal(body.projectId, "project-59c41b54");
+  assert.ok(!("provider" in body) && !("model" in body), "新入口不猜 provider/model（执行方自己决定）");
   assert.equal(
     post.init.headers["x-ui-version"],
-    "0.0.0-test",
+    "0.0.0-selfest".replace("selfest", "test"),
     "写请求带 UI 版本（写守卫）"
+  );
+  assert.equal(task.executorTaskId, "task-exec-1", "返回里带着执行方那侧的 id");
+
+  const exec = await api.taskExecutor("task-ours");
+  assert.equal(exec.status, "running");
+  assert.ok(
+    calls.some((c) => c.url === "/api/tasks/task-ours/executor"),
+    "执行方状态按**我们的** taskId 读"
   );
 }
 
@@ -186,6 +205,40 @@ const render = (props) =>
     "时间用最后活动 → 与老列表同一个排序口径"
   );
   assert.equal(row.taskType, undefined, "它没有我们的类型分类 → 不显示类型徽标");
+
+  // 我们建的任务：agentPath 由**后端**决定；执行方状态优先显示（真正在跑的是那边）
+  const ours = localTaskToRow(
+    {
+      taskId: "task-ours",
+      projectId: "project-59c41b54",
+      title: "我们建的任务",
+      createdAt: "2026-09-21T00:00:00.000Z",
+      status: "active",
+      workspace: "",
+      provider: "autonomy",
+      taskType: "general",
+      agentPath: "autonomy",
+      executorTaskId: "task-exec-1",
+      executorAgentId: "10001",
+    },
+    { executorStatus: "running" },
+  );
+  assert.equal(ours.agentPath, "autonomy", "agentPath 来自后端（谁建的就是谁建的）");
+  assert.equal(ours.status, "running", "列表显示执行方那边的状态");
+  assert.equal(
+    localTaskToRow({
+      taskId: "task-local",
+      projectId: "p",
+      title: "老任务",
+      createdAt: "2026-09-21T00:00:00.000Z",
+      status: "active",
+      workspace: "/tmp/ws",
+      provider: "cursor",
+      taskType: "general",
+    }).agentPath,
+    "control-plane",
+    "老任务 = 控制面创建"
+  );
 
   const noBackend = autonomyTaskToRow(summary);
   assert.equal(noBackend.provider, "", "拿不到 LLM 后端就留空（不写占位）");
@@ -242,6 +295,18 @@ const render = (props) =>
     mergeTaskRows(local, []),
     local,
     "没有 autonomy 行时**原样返回**（老列表逐字不变，连顺序都不动）"
+  );
+  assert.deepEqual(
+    mergeTaskRows(local, autonomy, { executorIds: new Set(["task-auto-mid"]) }).map(
+      (r) => r.taskId
+    ),
+    ["task-local-old", "task-local-new"],
+    "已经在我们这边建过、并交接出去的行不再重复显示（它的真身是本地那行；此时只剩本地行 → 原样返回，顺序也不动）"
+  );
+  assert.deepEqual(
+    mergeTaskRows(local, autonomy, { executorIds: new Set(["other"]) }).map((r) => r.taskId),
+    ["task-local-new", "task-auto-mid", "task-local-old"],
+    "对不上的行（我们没建过的）照旧并进列表并参与排序"
   );
 }
 
@@ -357,6 +422,33 @@ const render = (props) =>
   assert.ok(!html.includes("未解析出来"), "缺字段不写占位文案");
   assert.ok(!html.includes("计划步骤"), "它还没给步骤 → 这一行整段不显示");
 
+  // 我们建的任务（agentPath=autonomy）：同一套 chip 的**执行方数据块**嵌在本地详情里
+  const oursRow = localTaskToRow(
+    {
+      taskId: "task-ours",
+      projectId: "project-59c41b54",
+      title: "我们建的任务",
+      createdAt: "2026-09-21T00:00:00.000Z",
+      status: "active",
+      workspace: "",
+      provider: "autonomy",
+      taskType: "general",
+      agentPath: "autonomy",
+      executorTaskId: "task-exec-1",
+      executorAgentId: "10002",
+    },
+    { executorStatus: "running", executorTurns: 4 },
+  );
+  const bodyHtml = renderToStaticMarkup(
+    React.createElement(ExecutorTaskBody, { taskId: oursRow.taskId, row: oursRow })
+  );
+  assert.ok(bodyHtml.includes("running"), "执行方状态");
+  assert.ok(bodyHtml.includes("执行 agent"), "执行方那侧的 agent id 也写清");
+  assert.ok(bodyHtml.includes("10002"));
+  assert.ok(bodyHtml.includes("轮次"), "轮次（它给的）");
+  assert.ok(!bodyHtml.includes("chat-input"), "没有输入框（继续对话要等它的接口）");
+  assert.ok(!bodyHtml.includes("Timeline"), "没有时间线占位");
+
   // provider 拿不到时：列表行留空，不写占位
   const bare = autonomyTaskToRow({
     id: "task-x",
@@ -392,7 +484,19 @@ const render = (props) =>
   assert.ok(!app.includes("🛰"), "导航里不再有单独的 autonomy 入口");
   assert.ok(!app.includes('setView("autonomy")'), "代码里不再跳转到独立视图");
   assert.ok(app.includes("<AutonomyTaskPanel"), "详情用同一个主区里的面板");
+  assert.ok(app.includes("<ExecutorTaskBody"), "我们建的任务把执行方数据块嵌进同一个详情");
   assert.ok(app.includes("tasks={taskRows}"), "列表用的是合并后的行");
+  // 创建入口只剩一个：POST /api/tasks（+ agentPath）；老的 /api/autonomy/tasks 创建已下线
+  const apiSrc = read("src/api.ts");
+  assert.ok(
+    !apiSrc.includes("createAutonomyTask"),
+    "前端不再有单独的「交给 autonomy」创建接口"
+  );
+  assert.ok(apiSrc.includes("taskExecutor"), "执行方状态按我们的 taskId 读");
+  assert.ok(
+    app.includes('agentPath: "autonomy"'),
+    "新入口创建时下发 agentPath（任务还是我们建的）"
+  );
 }
 
 // ---- 11) agent 创建路径的显示口径（列表和详情共用）----

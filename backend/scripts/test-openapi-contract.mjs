@@ -87,7 +87,17 @@ for (const key of specKeys) {
 for (const key of ["POST /api/tasks", "POST /api/projects"]) {
   const op = operations.find((o) => o.key === key)?.op;
   assert.ok(op, `缺少 ${key}`);
-  assert.deepEqual(Object.keys(op.responses), ["201"], `${key} 应该是 201`);
+  assert.ok(Object.keys(op.responses).includes("201"), `${key} 应该是 201`);
+}
+// `POST /api/tasks` 额外文档化了「执行交给 autonomy」的两种失败（400 它明确拒绝 / 503 不可达）——
+// 201 之外只允许这两个，多一个就说明契约漂了。
+{
+  const op = operations.find((o) => o.key === "POST /api/tasks").op;
+  assert.deepEqual(
+    Object.keys(op.responses).sort(),
+    ["201", "400", "503"],
+    "POST /api/tasks 的响应集合",
+  );
 }
 
 console.log(

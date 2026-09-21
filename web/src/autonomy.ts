@@ -67,9 +67,23 @@ export function rowActivityMs(row: {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-/** 本地任务行 → 列表行（补上 agent 创建路径：现状都是控制面创建）。 */
-export function localTaskToRow(task: Task): TaskListRow {
-  return { ...task, agentPath: "control-plane" };
+/**
+ * 本地任务行 → 列表行。
+ *
+ * `agentPath` **来自后端**（谁建的就是谁建的）；`executorStatus` 是执行方（autonomy）那边的
+ * 状态 —— 有就显示它（真正在跑的是那边），拿不到就显示我们自己的状态。
+ */
+export function localTaskToRow(
+  task: Task,
+  opts: { executorStatus?: string; executorTurns?: number } = {},
+): TaskListRow {
+  const executorStatus = opts.executorStatus?.trim();
+  return {
+    ...task,
+    agentPath: task.agentPath ?? "control-plane",
+    ...(executorStatus ? { status: executorStatus } : {}),
+    ...(opts.executorTurns != null ? { turns: opts.executorTurns } : {}),
+  };
 }
 
 /**
@@ -81,9 +95,14 @@ export function localTaskToRow(task: Task): TaskListRow {
 export function mergeTaskRows(
   local: TaskListRow[],
   autonomy: TaskListRow[],
+  opts: { executorIds?: Set<string> } = {},
 ): TaskListRow[] {
-  if (autonomy.length === 0) return local;
-  return [...local, ...autonomy].sort(
+  // 已经在我们这边建过、并交接出去的任务（按执行方 id 对上）不再重复显示一遍 ——
+  // 它的「真身」是本地那行（点击进的是我们自己的任务详情）。
+  const known = opts.executorIds ?? new Set<string>();
+  const extra = autonomy.filter((row) => !known.has(row.taskId));
+  if (extra.length === 0) return local;
+  return [...local, ...extra].sort(
     (a, b) => rowActivityMs(b) - rowActivityMs(a),
   );
 }

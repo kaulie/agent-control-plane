@@ -1,6 +1,5 @@
 import type {
   AgentBoard,
-  AutonomyAccepted,
   AutonomyMeta,
   AutonomyTaskDetail,
   AutonomyTaskList,
@@ -190,9 +189,14 @@ export const api = {
       j<AutonomyTaskDetail>(r),
     ),
 
-  /** 把一条任务指令交给 autonomy（新入口；失败时抛出 autonomy 的原文）。 */
-  createAutonomyTask: (body: { description: string; projectId?: string }) =>
-    write<AutonomyAccepted>("/autonomy/tasks", { method: "POST", body }),
+  /**
+   * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读（控制面代理）。
+   * 只对 `agentPath=autonomy` 的任务有意义（没有交接记录 → 404）。
+   */
+  taskExecutor: (taskId: string) =>
+    fetch(`${BASE}/tasks/${encodeURIComponent(taskId)}/executor`).then((r) =>
+      j<AutonomyTaskDetail>(r),
+    ),
 
   listTasks: (projectId?: string) => {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
@@ -211,6 +215,11 @@ export const api = {
     projectId?: string;
     provider?: string;
     model?: string;
+    /**
+     * agent 创建路径：`autonomy` = 任务仍由控制面创建，**执行**交给 autonomy
+     * （agent 由它的 runtime 创建；交接失败时任务保留并标 error，错误原文在 4xx/503 里）。
+     */
+    agentPath?: "control-plane" | "autonomy";
   }) => write<Task>("/tasks", { method: "POST", body }),
 
   /**

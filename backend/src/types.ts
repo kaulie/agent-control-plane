@@ -1,3 +1,4 @@
+import type { AgentPath } from "./agent-path.js";
 import type { BillingCostInfo } from "./billing/types.js";
 
 export type TaskStatus = "active" | "completed" | "error";
@@ -184,6 +185,17 @@ export interface Task {
   lastUserInputAt: string;
   /** 从哪个 task fork 而来（上下文将满时分流；页面显示"fork 自 #xxx"）。 */
   forkedFrom?: string;
+  /**
+   * 这条 task 的 **agent 创建路径**（见 `./agent-path.ts`）：
+   * `control-plane`（默认：控制面在本地工作区创建 agent）/ `autonomy`（**执行**交给 autonomy：
+   * 任务仍由我们创建并落库，autonomy 的 runtime 创建 agent 执行）。
+   * 老任务读到 NULL → 不带这个字段（= 控制面，老行为）。
+   */
+  agentPath?: AgentPath;
+  /** 执行方（autonomy）那侧的 task id；`agentPath=autonomy` 时才有。 */
+  executorTaskId?: string;
+  /** 执行方那侧的 agent id（M2 拼它的事件流用）；`agentPath=autonomy` 时才有。 */
+  executorAgentId?: string;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";

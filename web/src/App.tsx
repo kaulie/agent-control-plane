@@ -22,7 +22,9 @@ import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
 import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
-import AutonomyTaskPanel from "./components/AutonomyTaskPanel";
+import AutonomyTaskPanel, {
+  ExecutorTaskBody,
+} from "./components/AutonomyTaskPanel";
 import {
   autonomyTaskToRow,
   localTaskToRow,
@@ -686,41 +688,75 @@ export default function App() {
   }, [autonomyMeta?.available, autonomyRows.length, loadAutonomy]);
 
   /**
-   * 「交给 autonomy」新建：只把描述 + 当前项目交给控制面代理（`POST /api/autonomy/tasks`），
-   * 控制面不落库；成功后**在同一个列表里**选中这条（失败则把原文抛给对话框显示）。
+   * 「交给 autonomy」新建：任务**还是我们创建的**（`POST /api/tasks` + `agentPath=autonomy`），
+   * 控制面把「执行」交给 autonomy（agent 由它的 runtime 创建）。
+   *
+   * 交接失败时后端会保留任务并标 error —— 这里也刷新列表，让那条失败的任务**看得见**，
+   * 同时把原文抛给对话框显示。
    */
   const createAutonomyTask = useCallback(
     async (input: { description: string }) => {
       if (!selectedProjectId) return;
-      const accepted = await api.createAutonomyTask({
-        description: input.description,
-        projectId: selectedProjectId,
-      });
-      setAutonomyFocusId(accepted.taskId);
-      setSelectedId(accepted.taskId);
-      setDetail(null);
-      setEvents([]);
-      await loadAutonomy();
+      try {
+        const task = await api.createTask({
+          description: input.description,
+          projectId: selectedProjectId,
+          agentPath: "autonomy",
+        });
+        await refreshTasks(selectedProjectId);
+        await loadAutonomy();
+        await selectTask(task.taskId);
+      } catch (err) {
+        await refreshTasks(selectedProjectId);
+        await loadAutonomy();
+        throw err;
+      }
     },
-    [selectedProjectId, loadAutonomy],
+    [selectedProjectId, refreshTasks, loadAutonomy, selectTask],
   );
 
-  /** 侧栏列表 = 本地任务 + agent 由 autonomy 创建的任务（同一套行模型）。 */
+  /** 执行方（autonomy）那边的状态，按它那侧的 task id 索引 —— 给我们的行显示「真正在跑」的状态。 */
+  const executorById = useMemo(() => {
+    const map = new Map<string, TaskListRow>();
+    for (const row of autonomyRows) map.set(row.taskId, row);
+    return map;
+  }, [autonomyRows]);
+
+  /** 侧栏列表 = 我们的任务 + 只在 autonomy 那边存在、我们没建过的行（同一套行模型）。 */
   const taskRows = useMemo(
-    () => mergeTaskRows(tasks.map(localTaskToRow), autonomyRows),
-    [tasks, autonomyRows],
+    () =>
+      mergeTaskRows(
+        tasks.map((task) => {
+          const exec = task.executorTaskId
+            ? executorById.get(task.executorTaskId)
+            : undefined;
+          return localTaskToRow(task, {
+            ...(exec?.status ? { executorStatus: exec.status } : {}),
+            ...(exec?.turns != null ? { executorTurns: exec.turns } : {}),
+          });
+        }),
+        autonomyRows,
+        {
+          executorIds: new Set(
+            tasks
+              .map((task) => task.executorTaskId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        },
+      ),
+    [tasks, autonomyRows, executorById],
   );
 
-  /** agent 由 autonomy 创建的那些 task id（点行时决定去详情哪一路）。 */
-  const autonomyIds = useMemo(
-    () => new Set(autonomyRows.map((row) => row.taskId)),
-    [autonomyRows],
-  );
+  /** 只在 autonomy 那边存在、我们没建过的行（点它只能看代理数据）。 */
+  const extraAutonomyIds = useMemo(() => {
+    const localIds = new Set(tasks.map((task) => task.taskId));
+    return new Set(
+      autonomyRows.map((row) => row.taskId).filter((id) => !localIds.has(id)),
+    );
+  }, [tasks, autonomyRows]);
 
-  /** 选中的这行是不是「agent 由 autonomy 创建」。 */
-  const autonomySelection =
-    selectedId != null &&
-    (autonomyIds.has(selectedId) || selectedId === autonomyFocusId);
+  /** 选中的是不是「只在 autonomy 那边存在」的那类行。 */
+  const selectedIsExtraRow = selectedId != null && extraAutonomyIds.has(selectedId);
 
   const selectedRow = useMemo(
     () => taskRows.find((row) => row.taskId === selectedId),
@@ -733,12 +769,12 @@ export default function App() {
   );
 
   /**
-   * 点列表行：agent 由 autonomy 创建 → 主区走代理详情（没有本地事件流）；
-   * 其余和以前一模一样（本地详情 + 事件流）。
+   * 点列表行：我们建的任务（含 `agentPath=autonomy` 的）照走本地详情 + 事件流；
+   * 只有「我们没建过、只在 autonomy 那边存在」的行才走纯代理视图。
    */
   const selectRow = useCallback(
     (taskId: string) => {
-      if (autonomyIds.has(taskId) || taskId === autonomyFocusId) {
+      if (extraAutonomyIds.has(taskId)) {
         setSelectedId(taskId);
         setDetail(null);
         setEvents([]);
@@ -746,7 +782,7 @@ export default function App() {
       }
       void selectTask(taskId);
     },
-    [autonomyIds, autonomyFocusId, selectTask],
+    [extraAutonomyIds, selectTask],
   );
 
   const createProject = useCallback(
@@ -1163,12 +1199,12 @@ export default function App() {
           onCreate={() => void openCreateTask()}
         />
         <main className="main">
-          {autonomySelection && selectedId ? (
-            /* agent 由 autonomy 创建：同一个主区、同一个 TaskIdsBar，只是数据走代理。 */
+          {selectedIsExtraRow && selectedId ? (
+            /* 我们没建过、只在 autonomy 那边存在的行：同一个主区、同一个 TaskIdsBar，纯代理。 */
             <AutonomyTaskPanel
               taskId={selectedId}
               {...(selectedRow ? { row: selectedRow } : {})}
-              meta={autonomyMeta}
+              {...(autonomyMeta ? { meta: autonomyMeta } : {})}
               {...(selectedRowProject?.department?.departmentId
                 ? { orgId: selectedRowProject.department.departmentId }
                 : {})}
@@ -1179,11 +1215,27 @@ export default function App() {
           ) : selectedId && detail ? (
             <>
               <TaskIdsBar
-                task={detail.task}
+                task={
+                  detail.task.agentPath === "autonomy"
+                    ? {
+                        ...detail.task,
+                        agentId: detail.task.executorAgentId ?? "",
+                      }
+                    : detail.task
+                }
                 orgId={detailProject?.department?.departmentId}
                 orgName={detailProject?.department?.departmentName}
-                agentPath="control-plane"
+                agentPath={detail.task.agentPath ?? "control-plane"}
               />
+              {/* agent 由 autonomy 创建：读它的状态/进展（代理）；跑不了的本地块一概不画。 */}
+              {detail.task.agentPath === "autonomy" ? (
+                <ExecutorTaskBody
+                  taskId={detail.task.taskId}
+                  {...(selectedRow ? { row: selectedRow } : {})}
+                  {...(autonomyMeta ? { meta: autonomyMeta } : {})}
+                />
+              ) : null}
+              {detail.task.agentPath === "autonomy" ? null : (
               <AgentRoundsBar
                 runs={detail.runs}
                 agentId={detail.task.agentId}
@@ -1192,13 +1244,18 @@ export default function App() {
                   setView("agent-timeline");
                 }}
               />
-              <UsageBar task={detail.task} stats={detail.stats} />
-              <ContextMeter
-                context={detail.context}
-                forkedTo={detail.forkedTo}
-                forking={forking}
-                onFork={() => void handleFork(detail.task.taskId)}
-              />
+              )}
+              {detail.task.agentPath === "autonomy" ? null : (
+                <>
+                  <UsageBar task={detail.task} stats={detail.stats} />
+                  <ContextMeter
+                    context={detail.context}
+                    forkedTo={detail.forkedTo}
+                    forking={forking}
+                    onFork={() => void handleFork(detail.task.taskId)}
+                  />
+                </>
+              )}
               <Timeline
                 events={events}
                 running={running}
@@ -1226,15 +1283,17 @@ export default function App() {
                   saveTaskIntent({ taskId: detail.task.taskId, ...patch })
                 }
               />
-              <ChatInput
-                onSend={sendMessage}
-                onStop={() => void stopAgent()}
-                disabled={stopping}
-                running={running}
-                activeRunMode={activeRunMode}
-                queueLength={queueLength}
-                stopping={stopping}
-              />
+              {detail.task.agentPath === "autonomy" ? null : (
+                <ChatInput
+                  onSend={sendMessage}
+                  onStop={() => void stopAgent()}
+                  disabled={stopping}
+                  running={running}
+                  activeRunMode={activeRunMode}
+                  queueLength={queueLength}
+                  stopping={stopping}
+                />
+              )}
             </>
           ) : (
             <div className="empty">

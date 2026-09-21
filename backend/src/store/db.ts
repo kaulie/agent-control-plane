@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { isAgentPath, normalizeAgentPath, type AgentPath } from "../agent-path.js";
 import type {
   AgentEvent,
   AgentRunSample,
@@ -86,6 +87,11 @@ interface TaskRow {
   description: string | null;
   last_user_input_at: string | null;
   forked_from: string | null;
+  /** agent 创建路径（NULL = 老任务 = 控制面）。 */
+  agent_path: string | null;
+  /** 执行方（autonomy）那侧的 task / agent id。 */
+  executor_task_id: string | null;
+  executor_agent_id: string | null;
 }
 
 interface RunRow {
@@ -322,6 +328,15 @@ export class Store {
     if (!taskCols.some((c) => c.name === "forked_from")) {
       // fork 新 task 时记来源；老库自动补列（透明化：页面能显示"fork 自 #xxx"）。
       this.db.exec(`ALTER TABLE tasks ADD COLUMN forked_from TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "agent_path")) {
+      // agent 创建路径：老任务为 NULL（读出来 = control-plane，老行为不变）。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_path TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "executor_task_id")) {
+      // 执行方（autonomy）那侧的 task / agent id —— 只有 agentPath=autonomy 的 task 才有。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_task_id TEXT`);
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_agent_id TEXT`);
     }
     if (!taskCols.some((c) => c.name === "last_user_input_at")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
@@ -941,6 +956,11 @@ export class Store {
     agentId?: string;
     /** 这个 task 是从哪个 task fork 来的（上下文将满时的分流）。 */
     forkedFrom?: string;
+    /**
+     * agent 创建路径：`control-plane`（默认）/ `autonomy`（执行交给 autonomy）。
+     * 缺省 / 非法 → 老行为（控制面）。
+     */
+    agentPath?: string;
   }): Task {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
@@ -967,11 +987,14 @@ export class Store {
       ...(description ? { description } : {}),
       lastUserInputAt: now,
       ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
+      ...(normalizeAgentPath(input.agentPath) === "autonomy"
+        ? { agentPath: "autonomy" as const }
+        : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from, agent_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -990,6 +1013,7 @@ export class Store {
         task.description ?? null,
         task.lastUserInputAt,
         task.forkedFrom ?? null,
+        task.agentPath ?? null,
       );
     return task;
   }
@@ -1037,6 +1061,31 @@ export class Store {
     this.db
       .prepare(`UPDATE tasks SET last_user_input_at = ? WHERE task_id = ?`)
       .run(at, taskId);
+    return this.getTask(taskId);
+  }
+
+  /**
+   * 记下**执行方**（autonomy）那侧的 task / agent id。
+   *
+   * `agentPath = autonomy` 的任务由我们创建（行在我们库里），执行交给 autonomy；
+   * 这两个 id 就是把两边对起来的钥匙（详情/进展代理、以后的继续对话与停止都用它）。
+   */
+  setTaskExecutor(
+    taskId: string,
+    executor: { taskId?: string; agentId?: string },
+  ): Task | undefined {
+    if (!this.getTask(taskId)) return undefined;
+    this.db
+      .prepare(
+        `UPDATE tasks SET executor_task_id = COALESCE(?, executor_task_id),
+                          executor_agent_id = COALESCE(?, executor_agent_id)
+         WHERE task_id = ?`,
+      )
+      .run(
+        executor.taskId?.trim() || null,
+        executor.agentId?.trim() || null,
+        taskId,
+      );
     return this.getTask(taskId);
   }
 
@@ -1241,6 +1290,10 @@ export class Store {
       ...(description ? { description } : {}),
       lastUserInputAt: r.last_user_input_at || r.created_at,
       ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),
+      // 老任务 agent_path 为 NULL → 不带字段（读出来 = 控制面，老行为）。
+      ...(isAgentPath(r.agent_path) ? { agentPath: r.agent_path.trim() as AgentPath } : {}),
+      ...(r.executor_task_id ? { executorTaskId: r.executor_task_id } : {}),
+      ...(r.executor_agent_id ? { executorAgentId: r.executor_agent_id } : {}),
     };
   }
 

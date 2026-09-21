@@ -66,6 +66,7 @@ import {
   taskGoalInfo,
   taskGoalLabel,
 } from "../task-goals.js";
+import { normalizeAgentPath } from "../agent-path.js";
 import {
   mergeSettings,
   resolveRuntimeDefaults,
@@ -612,12 +613,38 @@ export class AgentGateway {
     taskType?: string;
     /** 交付目标（**会改变 agent 的动作**）；缺省 = 没设目标（老行为）。 */
     goal?: string;
+    /**
+     * agent 创建路径（`./agent-path.ts`）：`control-plane`（默认：控制面本地创建并执行）/
+     * `autonomy`（**执行**交给 autonomy：仍在我们库里建任务，但不建本地工作区、不预分配本地 agent）。
+     */
+    agentPath?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
     const project = this.store.getProject(projectId);
     if (!project) {
       throw new Error(`project ${projectId} not found`);
+    }
+
+    if (normalizeAgentPath(input.agentPath) === "autonomy") {
+      // 执行交给 autonomy：**不**建本地工作区、**不**预分配本地 agent、也不校验 provider
+      // （provider 记成执行方，列表那一格照旧显示 provider/model；model 未知就留空）。
+      const task = this.store.createTask({
+        taskId: newId("task"),
+        title,
+        workspace: "",
+        provider: "autonomy",
+        projectId,
+        createdBy: input.createdBy,
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        taskType: normalizeTaskType(input.taskType),
+        goal: normalizeTaskGoal(input.goal),
+        agentPath: "autonomy",
+      });
+      this.publish({ type: "task_created", task });
+      return task;
     }
 
     const globalSettings = this.store.getGlobalSettings();
@@ -670,6 +697,69 @@ export class AgentGateway {
     });
     this.publish({ type: "task_created", task });
     return task;
+  }
+
+  /** 时间线留一条系统说明（交接成功 / 失败都留痕，可审计）。 */
+  private recordTaskNotice(taskId: string, status: string, message: string): void {
+    const task = this.store.getTask(taskId);
+    if (!task) return;
+    const note: AgentEvent = {
+      eventId: newId("event"),
+      taskId,
+      runId: `run-executor-${taskId}`,
+      agentId: task.executorAgentId ?? task.agentId ?? "",
+      timestamp: new Date().toISOString(),
+      eventType: "status",
+      payload: {
+        status,
+        message,
+        ...(task.executorTaskId ? { executorTaskId: task.executorTaskId } : {}),
+        ...(task.executorAgentId ? { executorAgentId: task.executorAgentId } : {}),
+      },
+    };
+    this.store.appendEvent(note);
+    this.publish({ type: "agent_event", event: note });
+  }
+
+  /**
+   * 交接成功：把执行方（autonomy）那侧的 task / agent id 记到**我们这条 task** 上。
+   *
+   * 任务本身仍是我们库里的那一条（谁建的就是谁建的）；这两个 id 是把两边对起来的钥匙。
+   */
+  saveTaskExecutor(
+    taskId: string,
+    executor: { taskId: string; agentId?: string },
+  ): Task | undefined {
+    const updated = this.store.setTaskExecutor(taskId, executor);
+    if (!updated) return undefined;
+    this.recordTaskNotice(
+      taskId,
+      "executor_attached",
+      `已交给 autonomy 执行（它的 task ${executor.taskId}${
+        executor.agentId != null ? `，agent ${executor.agentId}` : ""
+      }）：agent 由 autonomy 创建，执行与进展在它那边，这里只做代理。`,
+    );
+    const task = this.store.getTask(taskId) ?? updated;
+    this.publish({ type: "task_updated", task });
+    return task;
+  }
+
+  /**
+   * 交接失败：**任务保留**（毕竟是我们建的），标记 `error` 并把原文写进时间线 ——
+   * 不静默消失、也不回落成本机 agent 执行。
+   */
+  recordTaskExecutorFailure(taskId: string, error: string): Task | undefined {
+    const task = this.store.getTask(taskId);
+    if (!task) return undefined;
+    this.store.updateTaskStatus(taskId, "error");
+    this.recordTaskNotice(
+      taskId,
+      "executor_failed",
+      `交给 autonomy 失败：${error}（任务已保留；可稍后重试交接）`,
+    );
+    const updated = this.store.getTask(taskId) ?? task;
+    this.publish({ type: "task_updated", task: updated });
+    return updated;
   }
 
   /**

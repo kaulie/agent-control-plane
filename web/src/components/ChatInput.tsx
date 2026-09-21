@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 export type AgentMode = "agent" | "plan";
 
@@ -55,11 +55,6 @@ interface Props {
   hideMode?: boolean;
   allowImages?: boolean;
   placeholderOverride?: string;
-  /**
-   * 外部塞一句话进来（阻塞面板的选项/预填）：**变一次 `nonce` 填一次**，并聚焦到句尾。
-   * 只填不自动发 —— 投递不可逆，让用户看一眼再按发送。
-   */
-  prefill?: { text: string; nonce: number };
 }
 
 const ALLOWED = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -117,7 +112,6 @@ export default function ChatInput({
   hideMode = false,
   allowImages = true,
   placeholderOverride,
-  prefill,
 }: Props) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
@@ -128,19 +122,6 @@ export default function ChatInput({
   const [sending, setSending] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const areaRef = useRef<HTMLTextAreaElement | null>(null);
-  // 预填：nonce 变一次填一次（同一个句子重复点也生效）
-  const prefillNonce = prefill?.nonce ?? 0;
-  const prefillText = prefill?.text ?? "";
-  useEffect(() => {
-    if (!prefillNonce) return;
-    setText(prefillText);
-    const el = areaRef.current;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(prefillText.length, prefillText.length);
-    }
-  }, [prefillNonce, prefillText]);
   const effectiveMode: AgentMode = mode;
 
   const canSend =
@@ -286,7 +267,6 @@ export default function ChatInput({
           </select>
         )}
         <textarea
-          ref={areaRef}
           value={text}
           placeholder={placeholder}
           disabled={disabled || stopping || sending}

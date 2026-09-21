@@ -299,6 +299,62 @@ export async function registerRoutes(
     },
   );
 
+  /**
+   * chat 输入（**对账行**口径）：给只在 autonomy 那边存在、我们没建过的任务投递一条指令。
+   *
+   * 与 `POST /api/tasks/{我们的 id}/messages` 是同一件事（autonomy 的 `POST /api/tasks` 带 `task_id`
+   * = 给同一只 agent 追加一条指令，忙则排队，契约 A2③），区别只在**寻址**：这里直接用它的 task id
+   * （那些行在我们库里没有 task 行，`executor` 就是它的 id）。
+   *
+   * 口径与另一条完全一致：只收文字（带图 400 且不投递）、投递前先确认它真有这条 task（未知 id 会被
+   * autonomy 当成**新建**任务）、不可达 / 被拒 → 4xx/5xx + 原文、**我方库一行都不写**（纯代理）。
+   */
+  app.post<{
+    Params: { taskId: string };
+    Body: { message?: string; images?: IncomingImage[] };
+  }>("/api/autonomy/tasks/:taskId/messages", async (req, reply) => {
+    if (!autonomy) {
+      return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+    }
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
+    if (rawImages && rawImages.length > 0) {
+      return reply.code(400).send({
+        error: "执行方（autonomy）只收文字：这条消息没有投递（请去掉图片附件）",
+      });
+    }
+    if (!message) {
+      return reply.code(400).send({ error: "message text is required（执行方只收文字消息）" });
+    }
+    const executorTaskId = req.params.taskId.trim();
+    const known = await autonomy.getTask(executorTaskId);
+    if (!known.available) {
+      return reply
+        .code(known.status === 404 ? 404 : 503)
+        .send({
+          error:
+            known.status === 404
+              ? `autonomy 没有这条任务（${executorTaskId}）：没有投递`
+              : (known.error ?? "autonomy 不可达"),
+        });
+    }
+    const sent = await autonomy.addInstruction({ taskId: executorTaskId, message });
+    if (!sent.ok) {
+      return reply
+        .code(sent.httpStatus && sent.httpStatus >= 400 && sent.httpStatus < 500 ? sent.httpStatus : 503)
+        .send({ error: sent.error });
+    }
+    reply.code(202);
+    return {
+      executor: true as const,
+      executorTaskId: sent.taskId,
+      ...(sent.agentId != null ? { executorAgentId: sent.agentId } : {}),
+      ...(sent.status ? { executorStatus: sent.status } : {}),
+      ...(sent.messageId != null ? { messageId: sent.messageId } : {}),
+      ...(sent.queued != null ? { queueAhead: sent.queued } : {}),
+    };
+  });
+
   // ---- settings ----
 
   app.get("/api/settings/global", async () => gateway.getGlobalSettings());

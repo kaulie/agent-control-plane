@@ -145,6 +145,22 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     description:
       "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
   },
+  "POST /api/autonomy/tasks/{taskId}/messages": {
+    summary: "给**对账行**（只在 autonomy 那边存在的任务）投递一条指令",
+    tags: ["autonomy"],
+    description:
+      "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` " +
+      "= 给同一只 agent 追加一条指令，忙则排队，契约 A2③），区别只在寻址：这里直接用它的 task id。" +
+      "**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task" +
+      "（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。" +
+      "成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus }`。",
+    responses: {
+      202: { description: "已投递给执行方（`executor: true` + `messageId` / `queueAhead`）" },
+      400: { description: "空消息 / 带图（执行方只收文字）：消息没有投递" },
+      404: { description: "autonomy 没有这条任务（没有投递）" },
+      503: { description: "autonomy 不可达 / 未配置（没有投递）" },
+    },
+  },
   "GET /api/tasks": {
     summary: "任务列表（带 stats，可按 projectId 过滤）",
     tags: ["tasks"],

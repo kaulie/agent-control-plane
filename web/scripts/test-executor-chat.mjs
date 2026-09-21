@@ -58,6 +58,14 @@ assert.equal(
   assert.ok(busy.includes("Queue"), "发送按钮这时是 Queue（进队，不是被拒）");
   assert.ok(!busy.includes("btn-stop"), "忙也没有停止按钮");
 
+  // 对账行（via="executor"）：同一个输入框，但寻址是「它的 task id」
+  const viaExecutor = render({ via: "executor", status: "unverified" });
+  assert.ok(viaExecutor.includes("<textarea"), "对账行也有输入框");
+  assert.ok(viaExecutor.includes("这条任务我们没建过"), "写明这行是纯代理（我们没建过）");
+  assert.ok(viaExecutor.includes("task id"), "写明按它的 task id 投递");
+  assert.ok(!viaExecutor.includes("本机不跑 run"), "不要用「我们建的任务」那套措辞");
+  assert.ok(!viaExecutor.includes("btn-attach"), "对账行同样只收文字");
+
   // 投递记录 / 回执是发出去之后才有（首帧不写占位）
   assert.ok(!idle.includes("executor-receipt"), "还没发过 → 不写回执");
   assert.ok(!idle.includes("executor-sent"), "还没发过 → 不写投递记录");

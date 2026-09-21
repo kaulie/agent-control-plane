@@ -320,6 +320,23 @@ export const api = {
     );
   },
 
+  /**
+   * 给**对账行**（只在 autonomy 那边存在、我们没建过的任务）投递一条指令 —— 按它的 task id。
+   * 与 `sendMessage` 对 `agentPath=autonomy` 的任务做的事完全一样，只是寻址不同。
+   */
+  sendMessageToExecutor: (executorTaskId: string, message: string) =>
+    write<{
+      executor?: boolean;
+      executorTaskId?: string;
+      executorAgentId?: number;
+      executorStatus?: string;
+      messageId?: number;
+      queueAhead?: number;
+    }>(`/autonomy/tasks/${executorTaskId}/messages`, {
+      method: "POST",
+      body: { message },
+    }),
+
   sendMessage: (
     id: string,
     message: string,

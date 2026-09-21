@@ -416,9 +416,11 @@ const render = (props) =>
   assert.ok(html.includes("冒烟任务"), "描述先用列表里那行渲染，不空窗");
   // 拿不到的字段：**不渲染**（也不写占位）
   assert.ok(!html.includes("Timeline"), "没有它给不了的时间线");
-  // chat 输入只挂在**我们建的**任务详情上（App 里按 agentPath 分派）——「对账行」不是我们建的，
-  // 没有我们这边的 task 行可投递，所以这个面板本身不带输入框。
-  assert.ok(!html.includes("chat-input"), "对账行（不是我们建的）这个面板不带输入框");
+  // chat 输入：**对账行也能发**（按它那边的 task id 投递；控制面只代理，我方库不写）。
+  assert.ok(html.includes("chat-input"), "对账行也有输入框");
+  assert.ok(html.includes("发给执行方"), "写明消息投给执行方");
+  assert.ok(html.includes("这条任务我们没建过"), "写明这行是纯代理");
+  assert.ok(!html.includes("btn-attach"), "执行方只收文字 → 不给附件");
   assert.ok(!html.includes("usage-bar"), "没有 token 用量");
   assert.ok(!html.includes("context-meter"), "没有上下文占用");
   assert.ok(!html.includes("未解析出来"), "缺字段不写占位文案");

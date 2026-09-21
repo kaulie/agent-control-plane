@@ -7,9 +7,14 @@ import ChatInput, { type ChatPayload } from "./ChatInput";
 /**
  * 给**执行方**（autonomy）发消息 —— 「autonomy 创建的 agent 也要能 chat」。
  *
- * 链路：同一个输入框 → 控制面 `POST /api/tasks/{我们的 id}/messages` → autonomy
- * `POST /api/tasks { task_id, description }`（= 给同一条 task 的那只 agent 追加一条指令，**忙则排队**，
- * 契约 A2④）→ `202 { message_id, queued }`。**本机不跑 run**。
+ * 链路：同一个输入框 → 控制面（按 `via` 选路）→ autonomy `POST /api/tasks { task_id, description }`
+ * （= 给同一条 task 的那只 agent 追加一条指令，**忙则排队**，契约 A2③）→ `202 { message_id, queued }`。
+ * **本机不跑 run**。
+ *
+ * `via` 只决定**寻址**（都走控制面代理，都不写我们的库）：
+ * - `via="task"`（默认）：我们建的任务（`agentPath=autonomy`）→ `POST /api/tasks/{我们的 id}/messages`；
+ * - `via="executor"`：只在 autonomy 那边存在、我们没建过的**对账行** →
+ *   `POST /api/autonomy/tasks/{它的 id}/messages`。
  *
  * 三条不假装的规矩：
  * 1. 只收文字 → 不显示附件与 Plan/Agent 模式（**不置灰、不占位**）；
@@ -17,8 +22,13 @@ import ChatInput, { type ChatPayload } from "./ChatInput";
  * 3. 它那边的完整对话（事件流）**还没接**（契约 A6.1 待定）→ 这里只列**本页投递过的**，并写明是「本页记录」。
  */
 interface Props {
-  /** 我们的 taskId（控制面按它找交接记录）。 */
+  /**
+   * `task`：我们的 taskId（控制面按它找交接记录）；
+   * `executor`：对账行的 taskId **就是** autonomy 那边的 id。
+   */
   taskId: string;
+  /** 寻址方式（见上面注释）；默认 `task`。 */
+  via?: "task" | "executor";
   /** 执行方状态（running / pending…）——决定「忙则排队」的措辞。 */
   status: string;
   /** 投递成功后回调（详情/计划区立刻刷新一次）。 */
@@ -32,7 +42,7 @@ interface Sent {
   queueAhead?: number;
 }
 
-export default function ExecutorChat({ taskId, status, onDelivered }: Props) {
+export default function ExecutorChat({ taskId, via = "task", status, onDelivered }: Props) {
   const [sent, setSent] = useState<Sent[]>([]);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +53,10 @@ export default function ExecutorChat({ taskId, status, onDelivered }: Props) {
     setReceipt(null);
     try {
       // 执行方只收文字：不带 images / mode（后端也会拦带图的请求）。
-      const res = await api.sendMessage(taskId, payload.text);
+      const res =
+        via === "executor"
+          ? await api.sendMessageToExecutor(taskId, payload.text)
+          : await api.sendMessage(taskId, payload.text);
       setReceipt(deliveryReceipt(res));
       setSent((prev) => [
         ...prev,
@@ -68,7 +81,9 @@ export default function ExecutorChat({ taskId, status, onDelivered }: Props) {
       <div className="executor-chat-head">
         <span className="task-id-label">发给执行方</span>
         <span className="auto-plan-hint">
-          这条消息投递给 autonomy 那边这只 agent（它忙就排队）；本机不跑 run
+          {via === "executor"
+            ? "这条任务我们没建过（只在 autonomy 那边）：消息按它的 task id 投递给它那只 agent；我们这边不落库、不跑 run"
+            : "这条消息投递给 autonomy 那边这只 agent（它忙就排队）；本机不跑 run"}
         </span>
       </div>
       {error ? <div className="auto-banner bad">没有投递：{error}</div> : null}

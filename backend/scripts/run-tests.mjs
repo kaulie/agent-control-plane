@@ -96,6 +96,13 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 主界面四态条（规划中 / 执行中 / 阻塞 / 已完成：依据写清、pending 不谎称进行中、unverified 不算完成）
+  {
+    file: "../web/scripts/test-executor-status.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
+
   // 给执行方（autonomy）发消息（只收文字 / 忙则排队 / 回执只写真拿到的）
   {
     file: "../web/scripts/test-executor-chat.mjs",

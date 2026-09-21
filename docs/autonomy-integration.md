@@ -287,6 +287,33 @@ execution_step ──(execution_step_interaction.reason_turn_id)──▶ reason
 
 > 展示口径：我们若要把这种残留显示出来，应写「**未执行**（进程重启打断）」，不要写成「进行中」。
 
+### A10. 主界面**四态**：规划中 / 执行中 / 阻塞 / 已完成（控制面侧展示层）
+
+用户要的是「一眼看出这条任务处在哪一步」，而 autonomy 给的是**它自己的状态字汇**
+（`running` / `pending` / `completed` / `unverified` / `blocked` / `need_input` / `error` / `stopped`）——
+直接显示会让人问「这算在跑还是卡住了」。所以由**控制面把这些字汇翻成四个词**
+（实现在 `web/src/autonomy.ts` 的 `executorPhaseView` + `web/src/components/ExecutorPhaseBar.tsx`；
+只依据 `GET /api/tasks/{id}/executor` 或 `GET /api/autonomy/tasks/{id}` 的同一个 payload，**不改 autonomy 的接口**）。
+
+| 四态 | 判定（按优先级） | 界面上的依据行（例） |
+|---|---|---|
+| **已完成** | 任务状态 = `completed`（它说这条 task 结束了） | `执行方状态 completed：PR #113 已合入` |
+| **阻塞** | ① `unverified`（**自称完成、引擎验证没过** —— 不当完成）<br>② 状态 = `stopped` / `blocked` / `need_input` / `error` / `failed`<br>③ 最新一轮「决定」= `blocked` / `need_input`（等外部 / 等输入）<br>④ `error` 字段非空 | `执行方自称已完成，但引擎验证没通过（unverified）：… —— 需要重试或人工确认` |
+| **规划中** | 还没有任何**带步骤**的计划（`plans` 为空，或只有「决定」没有 steps）→ 这一轮还在规划 | `执行方还没给出这一轮的计划（拿到就显示在这里）` / `指令已受理，等执行方开始规划` |
+| **执行中** | 已经有带步骤的计划在推进；上一轮计划执行完、最新一轮是「决定」时也算（它马上给下一步） | `最新计划 3 步：2 步已完成 · 第 3 步 review（pull_request.review）还没执行（可能在跑，也可能上次运行被中断）` |
+
+两条**硬口径**（都来自实测，见 A9.2）：
+
+1. plan 里 `status=pending` 的步骤**不等于「正在跑」**（执行行是**跑完才写**的）→ 一律写
+   「第 k 步 <名字>还没执行」，**不写「进行中」**；
+2. `unverified` 不是完成态 —— 主界面必须让人看见它「自称完成但没验过」。
+
+其它：
+
+- **原始状态不隐藏**：四态条把 autonomy 的原始 status 放进 `title` 悬停（口径是「显示它真给的」，不是换个说法盖过去）；
+- **首帧不画**（还没读到 detail 时不闪一个错的态）；
+- 四态条挂在 `ExecutorTaskBody` 最上面 → **两种入口共用**（我们建的 `agentPath=autonomy` 任务、只在它那边存在的对账行）。
+
 ## 3. 控制面提供给 autonomy 的（也请一起复查）
 
 | 接口 | 实际返回 | 备注 |
@@ -391,6 +418,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.6 | 2026-09-21 | 新增 **A10 主界面四态（规划中 / 执行中 / 阻塞 / 已完成）**：autonomy 的状态字汇由控制面**展示层**翻成四个词（`web/src/autonomy.ts` `executorPhaseView` + `ExecutorPhaseBar`），只依据接口原字段、不改它的接口；硬口径：`pending` 的步骤写「还没执行」**不写进行中**、`unverified` 算**阻塞**不算完成；原始状态留悬停；四态条挂在 `ExecutorTaskBody` → 两种入口共用；新增 `web/scripts/test-executor-status.mjs`（已进 `npm test`，47 个脚本） |
 | v2.5 | 2026-09-21 | 新增 **A9.2 `pending` 是什么**：`steps[].status=pending` 是 autonomy 的**默认值**（计划有、`execution_step` 无）；而 step 行/日志都在 `cap.Run()` **返回后**才写 → 执行中被打断＝永远 pending。实测：plan 14 的 `deployment.monitor{watch:true}` 跟着的正是**部署 autonomy 自己**那次流水线，15:41:13/14 自重启把观察者杀掉；plan 10（14:11）同模式。被观察的部署其实成功，pending ≠ 失败，且重启不补跑旧 step |
 | v2.4 | 2026-09-21 | 新增 **A9.1 谁干的活**：`execution_step.agent_id` 是**委托方**（planner），不是 worker；worker 每次委托都**新建**（`Runtime.AcquireAgent` 首行 `agents.NewAgent()`，无复用分支；复用只针对 planner）——附 `execution_step_interaction.reason_turn_id → reason_turns.agent_id` 的映射链与三批指令 → 10003/10007/10008 实测 |
 | v2.3 | 2026-09-21 | 新增 **A9 数据落点与粒度**：线上 autonomy 库是 **PostgreSQL**（那份 `data/autonomy.db` SQLite 已是旧库，对着它查会得到「这条 task 没数据」的假象）；`agent_messages`（任务级对话）/ `reason_turns`（每次 LLM 调用）/ `llm_messages`（每条消息）/ `llm_events`（流式事件，本部署未落）**粒度不同、行数天然不等**（`llm_messages.turn_id` ↔ `reason_turns.id` 是 **N:1**，实测 41 : 5），附「真·错配」判据与只读自查 SQL |

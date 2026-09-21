@@ -3185,6 +3185,88 @@ button.agent-rounds-chip-link:focus-visible {
   border-color: rgba(160, 160, 160, 0.4);
 }
 
+/* 执行方（autonomy）任务的**四态条**：规划中 / 执行中 / 阻塞 / 已完成 */
+.exec-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-2);
+  font-size: 12.5px;
+}
+.exec-phase-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.exec-phase-label {
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.exec-phase-hint {
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exec-phase.is-planning {
+  border-color: rgba(90, 160, 255, 0.45);
+  background: rgba(90, 160, 255, 0.1);
+}
+.exec-phase.is-planning .exec-phase-dot {
+  background: var(--accent);
+}
+.exec-phase.is-planning .exec-phase-label {
+  color: #9cc6ff;
+}
+.exec-phase.is-executing {
+  border-color: rgba(80, 200, 120, 0.45);
+  background: rgba(80, 200, 120, 0.1);
+}
+.exec-phase.is-executing .exec-phase-dot {
+  background: var(--green);
+  animation: exec-phase-pulse 1.6s ease-in-out infinite;
+}
+.exec-phase.is-executing .exec-phase-label {
+  color: #8fe0a8;
+}
+.exec-phase.is-blocked {
+  border-color: rgba(230, 180, 70, 0.45);
+  background: rgba(230, 180, 70, 0.1);
+}
+.exec-phase.is-blocked .exec-phase-dot {
+  background: var(--amber);
+}
+.exec-phase.is-blocked .exec-phase-label {
+  color: #f0d38a;
+}
+.exec-phase.is-done {
+  border-color: rgba(80, 200, 120, 0.45);
+  background: rgba(80, 200, 120, 0.16);
+}
+.exec-phase.is-done .exec-phase-dot {
+  background: var(--green);
+}
+.exec-phase.is-done .exec-phase-label {
+  color: #8fe0a8;
+}
+@keyframes exec-phase-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .auto-banner {
   padding: 8px 12px;
   border-radius: 6px;

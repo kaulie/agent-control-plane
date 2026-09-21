@@ -417,3 +417,127 @@ export function deliveryReceipt(res: {
   if (res.executorStatus) parts.push(`它那边状态 ${res.executorStatus}`);
   return parts.join(" · ");
 }
+
+/** ------------------------------------------------------------------ *
+ * 主界面**四态**：规划中 / 执行中 / 阻塞 / 已完成。
+ *
+ * 为什么要有它：autonomy 自己的状态字汇（`running` / `unverified` / `stopped` /
+ * `need_input`…）是**它的**口径，主界面直接显示出来问「这算在跑还是卡住了」；
+ * 这里把它翻成用户要的四个词，并**在括号里写清依据**（只写接口真给了的字段）。
+ *
+ * 判定（按优先级，全部来自 `GET /api/tasks/{id}` 或 `/api/executor` 的同一个 payload）：
+ *
+ * | 四态 | 依据 |
+ * |---|---|
+ * | **已完成** | 任务状态 = `completed`（它说这条 task 结束了） |
+ * | **阻塞** | 状态 = `stopped` / `blocked` / `need_input` / `error` / `failed`；<br>或 `unverified`（**自称完成、引擎验证没通过** —— 不当作完成）；<br>或**最新一轮是「决定」**且决定为 `blocked` / `need_input`（在等外部/等输入）；<br>或 `error` 字段非空 |
+ * | **规划中** | 还没形成任何**带步骤**的计划（`plans` 为空，或只有「决定」没有 steps）→ 还在等这一轮的 plan |
+ * | **执行中** | 已经有带步骤的计划（正在推进）；上一轮计划全部执行完、最新一轮是「决定」时也算执行中（它马上要给出下一步） |
+ *
+ * 两条硬口径（都是实测过的坑，见 docs/autonomy-integration.md 的 A9.2）：
+ * 1. plan 里 `status=pending` 的步骤**不等于「正在跑」** —— 执行行是**跑完才写**的，
+ *    所以这里写成「第 k 步 <名字> 还没执行」，**不写「进行中」**；
+ * 2. `unverified` 不是完成态：它是「执行方自称做完、引擎没验过」，主界面必须让人看见。
+ * ------------------------------------------------------------------ */
+
+/** 主界面四态。 */
+export type ExecutorPhase = "planning" | "executing" | "blocked" | "done";
+
+/** 四态的固定文案（用户要的就是这四个词，不跟着 autonomy 的字汇变）。 */
+export const EXECUTOR_PHASE_LABEL: Record<ExecutorPhase, string> = {
+  planning: "规划中",
+  executing: "执行中",
+  blocked: "阻塞",
+  done: "已完成",
+};
+
+/** 执行方说这条 task 结束了。 */
+const FINISHED_STATUSES = new Set(["completed", "verified", "done", "succeeded", "success"]);
+
+/** 「不是正常在跑」的状态 —— 都按**阻塞**显示（原始状态与原因写进依据）。 */
+const BLOCKED_STATUSES = new Set([
+  "stopped",
+  "blocked",
+  "need_input",
+  "error",
+  "failed",
+  "failure",
+]);
+
+export interface ExecutorPhaseView {
+  phase: ExecutorPhase;
+  /** 角标文字：规划中 / 执行中 / 阻塞 / 已完成。 */
+  label: string;
+  /** 一句话依据（悬停看全文）。 */
+  hint: string;
+  /** 执行方的原始状态（拿不到就是空串）—— 角标悬停时照实给。 */
+  raw: string;
+}
+
+/** 压成一行并截断（长 `reason` 不撑破版面；悬停看全文）。 */
+function oneLine(text: unknown, max = 150): string {
+  const raw = plainText(text).replace(/\s+/g, " ");
+  if (!raw) return "";
+  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+}
+
+/** 这条 task 在主界面该显示成哪一态（`detail` 还没读到时由调用方决定不画）。 */
+export function executorPhaseView(detail: AutonomyTaskDetail | null): ExecutorPhaseView {
+  const raw = (detail?.status ?? "").trim();
+  const s = raw.toLowerCase();
+  const plan = latestPlan(detail);
+  const decision = (plan?.decisionType ?? "").toLowerCase();
+  const err = oneLine(detail?.error);
+  const why = oneLine(plan?.reason) || err;
+  const view = (phase: ExecutorPhase, hint: string): ExecutorPhaseView => ({
+    phase,
+    label: EXECUTOR_PHASE_LABEL[phase],
+    hint,
+    raw,
+  });
+
+  // ① 已完成：它说这条 task 结束了。
+  if (FINISHED_STATUSES.has(s)) {
+    return view("done", why ? `执行方状态 ${raw}：${why}` : `执行方状态 ${raw}`);
+  }
+  // ② 阻塞（一）：自称完成但引擎没验过 —— 不能当完成。
+  if (s === "unverified") {
+    return view(
+      "blocked",
+      `执行方自称已完成，但引擎验证没通过（unverified）${why ? `：${why}` : ""}` +
+        " —— 需要重试或人工确认",
+    );
+  }
+  // ② 阻塞（二）：停了 / 出错 / 被挡 / 等输入。
+  if (BLOCKED_STATUSES.has(s)) {
+    return view("blocked", `执行方状态 ${raw}${err || why ? `：${err || why}` : ""}`);
+  }
+  // ② 阻塞（三）：它自己给出的最新一轮「决定」是在等外部 / 等输入。
+  if (decision === "blocked" || decision === "need_input") {
+    return view("blocked", `执行方在等外部 / 等输入（${decision}）${why ? `：${why}` : ""}`);
+  }
+  // ③ 规划中：还没有任何「带步骤」的计划 —— 这一轮还在规划。
+  const stepped = latestSteppedPlan(detail);
+  if (!stepped) {
+    return view(
+      "planning",
+      s === "pending"
+        ? "指令已受理，等执行方开始规划"
+        : "执行方还没给出这一轮的计划（拿到就显示在这里）",
+    );
+  }
+  // ④ 执行中：已有带步骤的计划在推进。
+  if (plan && plan.steps.length === 0) {
+    // 最新一轮是「决定」（没有步骤）→ 上一轮的计划已经跑完，它正在给下一步。
+    const { done, total } = stepProgress(stepped);
+    return view("executing", `上一轮计划 ${total} 步：${done} 步已执行完，执行方正在给出下一步`);
+  }
+  const { done, failed, total } = stepProgress(stepped);
+  const next = currentStep(stepped);
+  const head = `最新计划 ${total} 步：${done} 步已完成${failed ? ` · ${failed} 步失败` : ""}`;
+  const tail = next
+    ? ` · 第 ${next.idx} 步 ${stepLabel(next)}还没执行（可能在跑，也可能上次运行被中断）`
+    : " · 已全部执行完";
+  return view("executing", `${head}${tail}`);
+}
+

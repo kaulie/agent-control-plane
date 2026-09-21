@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
-import type { ModelInfo, ProviderInfo, TaskGoal, TaskType } from "../types";
+import type {
+  ModelInfo,
+  ProviderInfo,
+  TaskEntry,
+  TaskGoal,
+  TaskType,
+} from "../types";
 import {
   DEFAULT_TASK_TYPE,
   TASK_TYPE_OPTIONS,
@@ -25,6 +31,20 @@ interface Props {
   projectDefaultModel?: string;
   onClose: () => void;
   onCreate: (input: CreateTaskInput) => Promise<void>;
+  /**
+   * 入口开关（`TASK_ENTRY`）：`both`（默认，两个入口）/
+   * `autonomy`（只留「交给 autonomy」）/ `gateway`（只留现状入口）。
+   */
+  entry?: TaskEntry;
+  /** autonomy 的可用性 / 当前 LLM 后端（来自 `GET /api/autonomy/meta`；null = 还没探到）。 */
+  autonomy?: {
+    available: boolean;
+    backend?: string;
+    model?: string;
+    error?: string;
+  } | null;
+  /** 「交给 autonomy」入口：只传描述（provider/model/类型/目标都不适用，见契约）。 */
+  onCreateAutonomy?: (input: { description: string }) => Promise<void>;
 }
 
 export default function CreateTaskDialog({
@@ -34,6 +54,9 @@ export default function CreateTaskDialog({
   projectDefaultModel,
   onClose,
   onCreate,
+  entry = "both",
+  autonomy = null,
+  onCreateAutonomy,
 }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -47,6 +70,11 @@ export default function CreateTaskDialog({
   const [resolved, setResolved] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 这次用哪个入口建任务（两个入口都在时由用户选，默认现状入口）。 */
+  const [entryMode, setEntryMode] = useState<"gateway" | "autonomy">(
+    // 首帧就落在正确入口上（只留新入口时别先闪一下老入口的字段）。
+    entry === "autonomy" ? "autonomy" : "gateway",
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -57,11 +85,13 @@ export default function CreateTaskDialog({
     setProvider(projectDefaultProvider ?? "");
     setModel(projectDefaultModel ?? "");
     setError(null);
+    // 只留新入口时（TASK_ENTRY=autonomy）直接落在新入口上。
+    setEntryMode(entry === "autonomy" ? "autonomy" : "gateway");
     void api.listProviders().then((r) => {
       setProviders(r.providers);
       setEnvDefault(r.defaultProvider);
     });
-  }, [open, projectDefaultProvider, projectDefaultModel, projectId]);
+  }, [open, projectDefaultProvider, projectDefaultModel, projectId, entry]);
 
   const effectiveProvider =
     provider || projectDefaultProvider || envDefault || "cursor";
@@ -91,7 +121,20 @@ export default function CreateTaskDialog({
 
   const option = taskTypeOption(taskType);
   const goalOption = TASK_GOAL_OPTIONS.find((g) => g.id === goal)!;
-  const canSubmit = description.trim().length > 0 && !saving;
+  /** 「交给 autonomy」这一侧：任务由它的 agent 执行，我们只能填描述。 */
+  const autonomyMode = entryMode === "autonomy";
+  /** 入口选择器里「交给 autonomy」按钮用（JSX 里名字短一点好读）。 */
+  const autoMode0 = autonomyMode;
+  const autonomyDown = autonomy != null && !autonomy.available;
+  const autonomyHint = autonomyMode
+    ? autonomyDown
+      ? `autonomy 不可达：${autonomy?.error ?? "未配置"} —— 先修好它，或改用「本机 agent」入口。`
+      : `任务由 autonomy 的 agent 执行：Provider / Model 由 autonomy 进程决定（当前 ${
+          autonomy?.backend ?? "未知"
+        }${autonomy?.model ? ` / ${autonomy.model}` : ""}），类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。`
+    : "";
+  const canSubmit =
+    description.trim().length > 0 && !saving && !(autonomyMode && autonomyDown);
 
   /** 标题可选：留空时用描述首行兜底，避免出现 "Task 9/19/2026, …" 这种标题。 */
   const titleOrFallback = (): string | undefined => {
@@ -110,14 +153,20 @@ export default function CreateTaskDialog({
     setSaving(true);
     setError(null);
     try {
-      await onCreate({
-        title: titleOrFallback(),
-        description: description.trim(),
-        taskType,
-        goal,
-        provider: provider.trim() || undefined,
-        model: model.trim() || undefined,
-      });
+      if (autonomyMode) {
+        if (!onCreateAutonomy) throw new Error("autonomy 入口未接线");
+        // 只交描述 + 项目上下文：类型/目标/provider/model 都不适用（契约第 2 节 A2）。
+        await onCreateAutonomy({ description: description.trim() });
+      } else {
+        await onCreate({
+          title: titleOrFallback(),
+          description: description.trim(),
+          taskType,
+          goal,
+          provider: provider.trim() || undefined,
+          model: model.trim() || undefined,
+        });
+      }
       onClose();
     } catch (e) {
       setError(errorText(e));
@@ -137,6 +186,44 @@ export default function CreateTaskDialog({
         <h2 id="create-task-title" className="modal-title">
           New Task
         </h2>
+        {entry !== "gateway" && (
+          <div className="runtime-field runtime-field-wide">
+            <span className="runtime-field-label">入口</span>
+            <div className="intent-type-chips">
+              {entry === "both" && (
+                <button
+                  type="button"
+                  className={`intent-type-chip ${
+                    autoMode0 ? "" : "selected"
+                  }`}
+                  title="现状入口：在本项目里建任务，由控制面的 agent 执行（行为不变）"
+                  onClick={() => setEntryMode("gateway")}
+                >
+                  本机 agent（现状）
+                </button>
+              )}
+              <button
+                type="button"
+                className={`intent-type-chip ${autoMode0 ? "selected" : ""}`}
+                title={
+                  autonomyDown
+                    ? `autonomy 不可达：${autonomy?.error ?? "未配置"}`
+                    : "把任务指令交给 autonomy，由它自己的 agent 执行（控制面只代理，不落库）"
+                }
+                onClick={() => setEntryMode("autonomy")}
+              >
+                交给 autonomy
+              </button>
+            </div>
+            <span className="intent-hint">
+              {autoMode0
+                ? autonomyHint
+                : "在本项目里建任务，由控制面的 agent 执行（现有入口，行为与以前一致）。"}
+            </span>
+          </div>
+        )}
+        {!autonomyMode && (
+          <>
         <div className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">类型</span>
           <div className="intent-type-chips">
@@ -188,6 +275,8 @@ export default function CreateTaskDialog({
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
+          </>
+        )}
         <label className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">
             任务描述 <b className="intent-required">必填</b>
@@ -215,6 +304,7 @@ export default function CreateTaskDialog({
             ) : null}
           </span>
         </label>
+        {!autonomyMode && (
         <div className="runtime-fields">
           <label className="runtime-field">
             <span className="runtime-field-label">Provider</span>
@@ -262,6 +352,10 @@ export default function CreateTaskDialog({
             </select>
           </label>
         </div>
+        )}
+        {autonomyMode && autonomyHint && (
+          <div className="intent-hint">{autonomyHint}</div>
+        )}
         {error && <div className="modal-error">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="modal-cancel" onClick={onClose}>
@@ -271,10 +365,22 @@ export default function CreateTaskDialog({
             type="button"
             className="settings-save"
             disabled={!canSubmit}
-            title={canSubmit ? undefined : "任务描述必填"}
+            title={
+              canSubmit
+                ? undefined
+                : autonomyMode && autonomyDown
+                  ? "autonomy 不可达，先修好它或用「本机 agent」入口"
+                  : "任务描述必填"
+            }
             onClick={() => void submit()}
           >
-            {saving ? "创建中…" : "创建并开始"}
+            {saving
+              ? autonomyMode
+                ? "提交中…"
+                : "创建中…"
+              : autonomyMode
+                ? "交给 autonomy 创建"
+                : "创建并开始"}
           </button>
         </div>
       </div>

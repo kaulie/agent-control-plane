@@ -1,5 +1,9 @@
 import type {
   AgentBoard,
+  AutonomyAccepted,
+  AutonomyMeta,
+  AutonomyTaskDetail,
+  AutonomyTaskList,
   AgentBoardScope,
   AgentEvent,
   AgentRuntimeStatus,
@@ -164,6 +168,31 @@ export const api = {
 
   updateProject: (projectId: string, body: { name?: string }) =>
     write<Project>(`/projects/${projectId}`, { method: "PATCH", body }),
+
+  // ---- 「交给 autonomy」入口（控制面只代理，不落库）-------------------------------
+  // 数据源全是 autonomy；控制面只转发、不改写、不缓存业务状态。
+
+  /** autonomy 可用性 / 版本 / LLM 后端 + 入口开关（不可达时 available:false，不是 500）。 */
+  autonomyMeta: () =>
+    fetch(`${BASE}/autonomy/meta`).then((r) => j<AutonomyMeta>(r)),
+
+  /** autonomy 任务列表（可按当前 project 过滤）。 */
+  autonomyTasks: (projectId?: string) => {
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return fetch(`${BASE}/autonomy/tasks${q}`).then((r) =>
+      j<AutonomyTaskList>(r),
+    );
+  },
+
+  /** autonomy 任务详情 / 进展（404 会抛出它的原文）。 */
+  autonomyTask: (taskId: string) =>
+    fetch(`${BASE}/autonomy/tasks/${encodeURIComponent(taskId)}`).then((r) =>
+      j<AutonomyTaskDetail>(r),
+    ),
+
+  /** 把一条任务指令交给 autonomy（新入口；失败时抛出 autonomy 的原文）。 */
+  createAutonomyTask: (body: { description: string; projectId?: string }) =>
+    write<AutonomyAccepted>("/autonomy/tasks", { method: "POST", body }),
 
   listTasks: (projectId?: string) => {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";

@@ -3138,3 +3138,162 @@ button.agent-rounds-chip-link:focus-visible {
   border-color: var(--accent);
 }
 
+
+/* ---- 「Autonomy 任务」页（数据源是 autonomy 本身；控制面只代理）--------------------- */
+.auto-scope {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 0 16px 12px;
+}
+.auto-scope-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.auto-banner {
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.auto-banner.bad {
+  background: rgba(220, 80, 80, 0.12);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  color: #ffb4b4;
+}
+.auto-empty {
+  color: var(--text-dim);
+  padding: 28px 16px;
+  font-size: 13px;
+}
+.auto-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.auto-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.auto-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.auto-row {
+  cursor: pointer;
+}
+.auto-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.auto-row.selected {
+  background: rgba(100, 150, 255, 0.1);
+}
+.auto-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+.auto-status.running {
+  background: rgba(90, 160, 255, 0.18);
+  color: #9cc6ff;
+  border-color: rgba(90, 160, 255, 0.45);
+}
+.auto-status.ok {
+  background: rgba(80, 200, 120, 0.16);
+  color: #8fe0a8;
+  border-color: rgba(80, 200, 120, 0.45);
+}
+.auto-status.warn {
+  background: rgba(230, 180, 70, 0.16);
+  color: #f0d38a;
+  border-color: rgba(230, 180, 70, 0.45);
+}
+.auto-status.bad {
+  background: rgba(220, 80, 80, 0.16);
+  color: #ffb4b4;
+  border-color: rgba(220, 80, 80, 0.45);
+}
+.auto-status.stopped {
+  background: rgba(160, 160, 160, 0.16);
+  color: #cfcfcf;
+  border-color: rgba(160, 160, 160, 0.4);
+}
+.auto-cell-task {
+  max-width: 420px;
+}
+.auto-task-id {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.auto-task-desc {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+.auto-cell-dim {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.auto-detail {
+  margin: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.auto-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.auto-detail-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.auto-detail-row > span:first-child {
+  color: var(--text-dim);
+}
+.auto-err {
+  color: #ffb4b4;
+}
+.auto-step {
+  display: inline-block;
+  margin: 0 6px 4px 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+}
+.auto-step.ok {
+  border-color: rgba(80, 200, 120, 0.45);
+  color: #8fe0a8;
+}
+.auto-step.failed,
+.auto-step.bad {
+  border-color: rgba(220, 80, 80, 0.45);
+  color: #ffb4b4;
+}
+.auto-raw {
+  margin-top: 10px;
+}
+.auto-pre {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px;
+  border-radius: 6px;
+}

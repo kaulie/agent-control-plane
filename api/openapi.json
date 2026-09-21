@@ -41,6 +41,10 @@
     {
       "name": "usage",
       "description": "用量统计"
+    },
+    {
+      "name": "autonomy",
+      "description": "自治系统（「交给 autonomy」入口）：投递指令 / 查任务与进展。数据源是 autonomy 本身，控制面只代理、不落库"
     }
   ],
   "paths": {
@@ -78,6 +82,70 @@
         "operationId": "getApiAuth",
         "tags": [
           "catalog"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/meta": {
+      "get": {
+        "summary": "autonomy 可用性 / 版本 / 当前 LLM 后端（读不到时 available=false，不是 500）",
+        "description": "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。",
+        "operationId": "getApiAutonomyMeta",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/tasks": {
+      "get": {
+        "summary": "autonomy 任务列表（只代理；可按 projectId 过滤）",
+        "description": "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面不落库、不掺进 /api/tasks。",
+        "operationId": "getApiAutonomyTasks",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "把一条任务指令交给 autonomy（新入口；描述必填，控制面不落库）",
+        "description": "转发 autonomy 的 `POST /api/tasks`（body: description + projectId → context_ref.project）。autonomy 明确拒绝（4xx）原文带出；连不上 / 超时 → 503，**不**回落成本机 agent 执行。",
+        "operationId": "postApiAutonomyTasks",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "202": {
+            "description": "autonomy 已受理（task_id / agent_id / queued）"
+          },
+          "400": {
+            "description": "描述缺失或 autonomy 拒绝（原文在 error 里）"
+          },
+          "503": {
+            "description": "autonomy 不可达 / 超时"
+          }
+        }
+      }
+    },
+    "/api/autonomy/tasks/{taskId}": {
+      "get": {
+        "summary": "autonomy 任务详情 / 进展（只代理；404 原样透传）",
+        "description": "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
+        "operationId": "getApiAutonomyTasksTaskId",
+        "tags": [
+          "autonomy"
         ],
         "responses": {
           "200": {

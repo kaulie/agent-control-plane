@@ -43,6 +43,11 @@ export const OPENAPI_TAGS: Array<{ name: string; description: string }> = [
   { name: "agents", description: "Agent 看板与时间线" },
   { name: "billing", description: "计费规则（峰谷价目与时段）" },
   { name: "usage", description: "用量统计" },
+  {
+    name: "autonomy",
+    description:
+      "自治系统（「交给 autonomy」入口）：投递指令 / 查任务与进展。数据源是 autonomy 本身，控制面只代理、不落库",
+  },
 ];
 
 /**
@@ -121,6 +126,36 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
   "GET /api/org/departments": {
     summary: "部门目录（organization 服务；不可达时 available=false）",
     tags: ["org"],
+  },
+  "GET /api/autonomy/meta": {
+    summary: "autonomy 可用性 / 版本 / 当前 LLM 后端（读不到时 available=false，不是 500）",
+    tags: ["autonomy"],
+    description:
+      "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。",
+  },
+  "GET /api/autonomy/tasks": {
+    summary: "autonomy 任务列表（只代理；可按 projectId 过滤）",
+    tags: ["autonomy"],
+    description:
+      "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面不落库、不掺进 /api/tasks。",
+  },
+  "GET /api/autonomy/tasks/{taskId}": {
+    summary: "autonomy 任务详情 / 进展（只代理；404 原样透传）",
+    tags: ["autonomy"],
+    description:
+      "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
+  },
+  "POST /api/autonomy/tasks": {
+    summary: "把一条任务指令交给 autonomy（新入口；描述必填，控制面不落库）",
+    tags: ["autonomy"],
+    description:
+      "转发 autonomy 的 `POST /api/tasks`（body: description + projectId → context_ref.project）。" +
+      "autonomy 明确拒绝（4xx）原文带出；连不上 / 超时 → 503，**不**回落成本机 agent 执行。",
+    responses: {
+      202: { description: "autonomy 已受理（task_id / agent_id / queued）" },
+      400: { description: "描述缺失或 autonomy 拒绝（原文在 error 里）" },
+      503: { description: "autonomy 不可达 / 超时" },
+    },
   },
   "GET /api/tasks": {
     summary: "任务列表（带 stats，可按 projectId 过滤）",

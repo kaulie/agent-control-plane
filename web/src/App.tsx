@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "./api";
 import { connectWs, type ServerMessage } from "./ws";
-import type { AgentEvent, AppView, AuthStatus, Project, Task, TaskDetail, TaskGoal, TaskType } from "./types";
+import type {
+  AgentEvent,
+  AppView,
+  AuthStatus,
+  AutonomyMeta,
+  Project,
+  Task,
+  TaskDetail,
+  TaskGoal,
+  TaskType,
+} from "./types";
 import TaskList from "./components/TaskList";
 import UsageBar from "./components/UsageBar";
 import TaskIdsBar from "./components/TaskIdsBar";
@@ -11,6 +21,7 @@ import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
 import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
+import AutonomyPage from "./components/AutonomyPage";
 import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
@@ -130,6 +141,10 @@ export default function App() {
   /** 写操作因「页面版本 ≠ 项目版本」被拒绝时的提示（必须先刷新页面）。 */
   const [staleWrite, setStaleWrite] = useState<StaleWriteNotice | null>(null);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  /** autonomy 的可用性 / 版本 / LLM 后端 + 入口开关（`TASK_ENTRY`）。 */
+  const [autonomyMeta, setAutonomyMeta] = useState<AutonomyMeta | null>(null);
+  /** 刚交给 autonomy 的那条：跳过去时直接展开。 */
+  const [autonomyTaskFocus, setAutonomyTaskFocus] = useState("");
   /** 项目相关的弹框（新建 / 重命名 / Git 地址），全部居中显示。 */
   const [projectDialog, setProjectDialog] = useState<ProjectDialogMode | null>(
     null,
@@ -611,6 +626,42 @@ export default function App() {
     [refreshTasks, selectTask, selectedProjectId],
   );
 
+  /**
+   * 探一次 autonomy（在新入口能不能点 / 数据源版本）：打不开对话框时也探一次，
+   * 这样「交给 autonomy」按钮的置灰是有依据的。读接口 best-effort，不会抛。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .autonomyMeta()
+      .then((m) => {
+        if (!cancelled) setAutonomyMeta(m);
+      })
+      .catch(() => {
+        if (!cancelled) setAutonomyMeta(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateTask]);
+
+  /**
+   * 「交给 autonomy」新建：只把描述 + 当前项目交给控制面代理（`POST /api/autonomy/tasks`），
+   * 控制面不落库；成功后直接跳到「Autonomy 任务」页并展开这条（失败则把原文抛给对话框显示）。
+   */
+  const createAutonomyTask = useCallback(
+    async (input: { description: string }) => {
+      if (!selectedProjectId) return;
+      const accepted = await api.createAutonomyTask({
+        description: input.description,
+        projectId: selectedProjectId,
+      });
+      setAutonomyTaskFocus(accepted.taskId);
+      setView("autonomy");
+    },
+    [selectedProjectId],
+  );
+
   const createProject = useCallback(
     async (input: ProjectDialogResult) => {
       const project = await api.createProject(input.name, {
@@ -938,6 +989,14 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
+            title="Autonomy 任务（交给 autonomy 执行的任务；数据源是 autonomy 本身）"
+            onClick={() => setView("autonomy")}
+          >
+            🛰
+          </button>
+          <button
+            type="button"
+            className="icon-btn header-settings"
             title="全局设置"
             onClick={() => setView("global-settings")}
           >
@@ -991,6 +1050,17 @@ export default function App() {
           />
         ) : view === "agent-runtime" ? (
           <AgentRuntimePage onBack={() => setView("chat")} />
+        ) : view === "autonomy" ? (
+          <AutonomyPage
+            projectId={selectedProjectId ?? undefined}
+            projectName={
+              projects.find((p) => p.projectId === selectedProjectId)?.name ??
+              selectedProjectId ??
+              undefined
+            }
+            highlightTaskId={autonomyTaskFocus}
+            onBack={() => setView("chat")}
+          />
         ) : view === "agent-board" ? (
           <AgentBoardPage
             onOpenTask={(taskId, projectId) =>
@@ -1249,6 +1319,18 @@ export default function App() {
           projectDefaultModel={createTaskDefaults.model}
           onClose={() => setShowCreateTask(false)}
           onCreate={createTask}
+          entry={autonomyMeta?.entry ?? "both"}
+          autonomy={
+            autonomyMeta
+              ? {
+                  available: autonomyMeta.available,
+                  ...(autonomyMeta.llmBackend ? { backend: autonomyMeta.llmBackend } : {}),
+                  ...(autonomyMeta.llmModel ? { model: autonomyMeta.llmModel } : {}),
+                  ...(autonomyMeta.error ? { error: autonomyMeta.error } : {}),
+                }
+              : null
+          }
+          onCreateAutonomy={createAutonomyTask}
         />
       )}
       <ProjectDialog

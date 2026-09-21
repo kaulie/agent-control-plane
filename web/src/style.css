@@ -3315,6 +3315,12 @@ button.agent-rounds-chip-link:focus-visible {
   border: 1px solid rgba(220, 80, 80, 0.4);
   color: #ffb4b4;
 }
+/* 非破坏性提醒（例如「读执行方失败，保留上一次内容」）—— 不表示内容已丢。 */
+.auto-banner.warn {
+  background: rgba(230, 170, 60, 0.12);
+  border: 1px solid rgba(230, 170, 60, 0.4);
+  color: #ffd79a;
+}
 
 .auto-detail {
   margin: 16px;

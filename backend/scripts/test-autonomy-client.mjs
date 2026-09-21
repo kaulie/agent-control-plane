@@ -17,6 +17,10 @@ import {
   normalizeTaskList,
   readAutonomyError,
 } from "../src/autonomy.ts";
+import {
+  DEFAULT_AUTONOMY_TIMEOUT_MS,
+  resolveAutonomyTimeoutMs,
+} from "../src/config.ts";
 
 const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 const fail = (status, body) => ({ ok: false, status, json: async () => body });
@@ -103,6 +107,26 @@ await check("status(): 超时文案带 timeoutMs", async () => {
   const s = await client.status();
   assert.equal(s.available, false);
   assert.match(s.error, />2500ms/);
+});
+
+await check("默认超时 5000ms（需求：3s → 5s），env 仍可覆盖", async () => {
+  assert.equal(DEFAULT_AUTONOMY_TIMEOUT_MS, 5000, "默认值就是 5000ms");
+  assert.equal(resolveAutonomyTimeoutMs({}), 5000, "无 env → 5000ms");
+  assert.equal(resolveAutonomyTimeoutMs({ AUTONOMY_TIMEOUT_MS: "8000" }), 8000, "env 覆盖仍生效");
+  assert.equal(resolveAutonomyTimeoutMs({ AUTONOMY_TIMEOUT_MS: "abc" }), 5000, "非法值回落 5000ms");
+});
+
+await check("客户端不带 timeoutMs 时用默认 5000ms：超时文案 >5000ms", async () => {
+  const boom = () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    throw err;
+  };
+  const { impl } = makeFetch({ "/api/meta": boom, "/health": boom });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const s = await client.status();
+  assert.equal(s.available, false);
+  assert.match(s.error, />5000ms/, "默认超时是 5000ms（不是 3000）");
 });
 
 await check("createTask(): 202 → 接受信息（task_id / agent_id / queued）+ 正确的 body", async () => {

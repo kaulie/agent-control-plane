@@ -115,6 +115,12 @@ const tests = [
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },
+  // 详情读取「失败不清内容，只提醒」（需求：端读失败别清空当前内容）
+  {
+    file: "../web/scripts/test-executor-read-resilience.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
   // 阻塞态交互（谁在挡 / 它在等什么 / 它给的选项 / 自由输入；不猜散文枚举）
   {
     file: "../web/scripts/test-executor-blocked-ui.mjs",

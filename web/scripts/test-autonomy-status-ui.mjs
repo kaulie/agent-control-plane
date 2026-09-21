@@ -132,7 +132,9 @@ assert.ok(
   "本地任务不应出现 autonomy 状态徽标（行为不变）",
 );
 
-// ---- 4) 详情状态条：四个大字 + 原始 status ----
+// ---- 4) 详情：四个大字**只出现一次**（口径归并）----
+// 详情顶部的四态条（`ExecutorPhaseBar`，带「依据」）就是唯一那处；
+// 状态条里不再重复一个徽标（同一屏两个「阻塞」是 bug），原始 status 照旧显示。
 const detailBar = renderToStaticMarkup(
   React.createElement(ExecutorTaskBody, {
     taskId: "task-exec-1",
@@ -140,11 +142,41 @@ const detailBar = renderToStaticMarkup(
     row: { ...baseTask, status: "blocked", agentPath: "autonomy" },
   }),
 );
+const { default: ExecutorPhaseBar } = await import("../src/components/ExecutorPhaseBar.tsx");
+const phaseBar = renderToStaticMarkup(
+  React.createElement(ExecutorPhaseBar, {
+    detail: { task_id: "task-exec-1", status: "blocked", plans: [] },
+    loaded: true,
+  }),
+);
 assert.ok(
-  detailBar.includes("task-phase-badge phase-blocked"),
-  "详情条要有「阻塞」大字",
+  phaseBar.includes("exec-phase is-blocked") && phaseBar.includes("exec-phase-label"),
+  "四态条要显示「阻塞」",
+);
+assert.equal((phaseBar.match(/exec-phase-label/g) ?? []).length, 1, "四态只渲染一处");
+assert.ok(
+  !detailBar.includes("task-phase-badge"),
+  "详情状态条里不再重复状态徽标（由四态条负责）",
 );
 assert.ok(detailBar.includes("auto-status warn"), "原始 status 仍按老配色显示");
 assert.ok(detailBar.includes("blocked"));
+
+// ---- 5) 口径只留一套：四态文案与 autonomy.ts 的 EXECUTOR_PHASE_LABEL 完全一致 ----
+const { EXECUTOR_PHASE_LABEL, executorPhaseView } = await import("../src/autonomy.ts");
+for (const option of TASK_PHASE_OPTIONS) {
+  const shared =
+    option.id === "completed" ? EXECUTOR_PHASE_LABEL.done : EXECUTOR_PHASE_LABEL[option.id];
+  assert.equal(option.label, shared, `${option.id} 的文案必须取自唯一来源（不许各写一套）`);
+}
+// 同一个 status：列表入口（纯 status）与详情入口（有 detail 时）不能给出不同的字
+const blockedDetail = {
+  task_id: "task-exec-1",
+  status: "need_input",
+  plans: [{ plan_id: 1, cycle: 1, decision_type: "need_input", reason: "", need: "{}" }],
+};
+assert.equal(taskPhaseLabel("need_input"), "阻塞");
+assert.equal(executorPhaseView(blockedDetail).label, "阻塞");
+assert.equal(taskPhaseLabel("completed"), "已完成");
+assert.equal(executorPhaseView({ task_id: "t", status: "completed", plans: [] }).label, "已完成");
 
 console.log("✅ autonomy task-status UI OK");

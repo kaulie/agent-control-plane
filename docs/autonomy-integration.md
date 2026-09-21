@@ -353,6 +353,76 @@ project（context_ref.project）
 
 > 已关闭：~~仓库地址从哪来~~（autonomy 自行推导，第 3 节 ✅）· ~~列表按 project 过滤 + 行字段~~（已确认支持，A3 ✅）· ~~未知 project 的行为~~（**硬失败**，A2 ✅）· ~~`message_seq` 单调性 / 历史保留期~~（**跨重启单调 + 永久保留**，A6 ✅）· ~~两个来源的游标要不要对齐编号~~（**不需要**：各自独立、不共用不比较，见 A6.2 ✅）
 
+### A10.1 阻塞态的交互口径：谁在挡 / 它在等什么 / 它给的选项 / 你自己写
+
+**目的**：阻塞不是「再跑一次就好」。人打开详情要能一眼回答三件事：谁在挡、它在等什么、我能怎么答。
+四块都在 `ExecutorBlockedPanel`（挂在四态条下面；**非阻塞态整块不渲染**，不占版面）。
+
+**① 谁在挡 + 依据**（分类只来自它自己的字段，并把依据写出来 —— 不替它讲故事）：
+
+| 它的字段 | 分类 | 依据（面板原文） |
+|---|---|---|
+| `need.type=approval` | 等你拍板 | 它标了 need.type=approval：要人批准 / 合入 |
+| `need.type=decision` | 等你定 | 它标了 need.type=decision：要人定一个 |
+| `status=need_input` | 等你的输入 | 执行方状态 need_input：要你的输入 |
+| `decision=blocked` / `status=blocked` | 等外部 | 决策 blocked：它在等外部条件 |
+| `status=error` / `failed` | 执行方出错 | 执行方状态 `<原始值>`：它出错了 |
+| `status=stopped` | 执行方已停 | 执行方状态 `<原始值>`：它停下来了 |
+| `status=unverified` | 验证未通过 | 执行方状态 unverified：它说做完了，引擎没认 |
+
+**② 它在等什么**：**`need.description` 全文照抄**（接口上是 JSON 字符串，见 A10.2）。它这次没填 `need`
+（老 payload 是 `{}`）就退到 `reason`，并在标题里**标明来源**：`它在等什么（need.description 原文）` /
+`它给的理由（这次它没填 need，照抄 reason）`；两者都没有就直说「它没说明在等什么」——**不编**。
+
+**③ 它给的选项**：**只认 `need.options` 里结构化的**（1..N，最多 9 条；点一个 → **填进下面的输入框**，可改，
+不自动投递）。散文里像 `(1) … (2) …` 的枚举**不当选项** —— 实测 `task-2c438baf5499b592` 的
+`need.description` 把「范围二选一」和「请人合 PR」写在同一段长文里，猜错等于给用户看假选项。
+
+**④ 自由输入永远在**：没有选项、或都不合适，就直接在输入框写自己的意见 —— 走 M1.5 那条通道
+（`POST /api/tasks/{id}/messages`，只收文字、忙则排队）。
+
+**三条硬口径**
+
+- **不替它说话**：面板上每句话都能指到它的某个字段（分类 → `status`/`need.type`；等什么 → `need.description`/
+  `reason`/`error`）。**没有**任何我们自己写的固定话术模板（v2.8 之前那版自造话术已删）。
+- **不猜**：选项只来自 `need.options`；散文枚举不解析。
+- **不假装知道时间**：payload 里没有「何时开始阻塞」→ 只显示「本页看到这个状态已 N 分钟（页面观察，它那边不给时间）」，
+  状态 / 计划 / 分类一变就重新计时。
+
+**投递语义（要与 autonomy 对齐）**：点选项 → 投递**选项原文**（它自己写的文本，它能对上）；
+**不投**我们生成的编号（1/2/3 是 UI 生成的，它不知道）。
+
+**实测证据**
+
+- `task-2c438baf5499b592`（`status=need_input`）最后一条决策：
+  `need = {"type":"approval","description":"The web-cursor feature is implemented and open as PR …/pull/117,
+  and the context report is open as PR …/pull/136, but completion contract C2 requires the change to be merged …"}`
+  → 面板显示「等你拍板」+ 两个可点 PR 链接 + 自由输入。
+- 同一任务更早一条 `need.type=decision`：`… (1) Scope decision: … (2) Approval/action to land: …` → 这是**散文枚举**，
+  不当选项（见 ③）。
+- `autonomy` 侧 `Need` 的结构：`src/decision.go` 只有 `type` + `description`；`recordPlan` 用 `jsonNeed(decision.Need)` 落库，
+  `api_service.go` 把它当**字符串**返回（`plans[].need`）。
+
+### A10.2 建议 autonomy 给 `need` 加结构化 `options`（建议，不强制必填）
+
+现状：选项只能藏在 `description` 的散文里（上一条实测：枚举还与长解释混在同一段）。建议：
+
+```go
+type Need struct {
+    Type        string   `json:"type"`
+    Description string   `json:"description"`
+    Options     []string `json:"options,omitempty"` // 需要人择一时列 2..9 条；开放问题留空
+}
+```
+
+- **规则：非空才校验**（≥2 项、去空、去重、≤9）。`description` 的必填规则（`blocked.need_describes_what_is_missing`）不变。
+- **为什么不要「强制必填」**：`blocked` 的真实形态常是「没有能力能做这件事」（autonomy 自己的测试里就是
+  `Need{Type:"capability", Description:"nothing available can do this"}`）——**没有真选项**；强制只会逼 planner 编选项，
+  比散文更难辨真假。
+- **兼容**：`jsonNeed` 是 `json.Marshal(need)` + `omitempty` → 老 payload 一字不变；控制面已把它当 JSON 字符串解析、
+  未知键忽略，**不需要版本协商**。
+- **控制面这边已经兼容**：有 `options` 就渲染 1..N（见 A10.1 ③），没有就只有自由输入。
+
 ## 5. 验收方式（他实现完，互通时逐条跑）
 
 ```bash
@@ -422,6 +492,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.8 | 2026-09-21 | 新增 **A10.1 阻塞态交互口径**（`ExecutorBlockedPanel`）：分类+依据 / `need.description` 全文（它没填就退 `reason` 并**标明来源**）/ **只认 `need.options` 的结构化选项**（点一下填进输入框、不自动投递）+ 自由输入永远在；**删掉自造话术**、不猜散文枚举、时间只报「本页观察」；另加 **A10.2**：建议 autonomy 给 `need` 加 `options`（**不强制必填**，附理由与兼容说明）。**口径归并**：四态文案只留一套（`task-status.ts` 取 `autonomy.ts` 的 `EXECUTOR_PHASE_LABEL`），详情页重复的状态徽标删除（侧栏列表徽标保留）；新增 `web/scripts/test-executor-blocked-ui.mjs`（已进 `npm test`）。**不做**：停止任务按钮（A7 未代理，属 M2） |
 | v2.7 | 2026-09-21 | 四态条的「等什么」口径：`need_input` / `blocked` 时读 plan 的 **`need`**（接口上是 JSON 字符串，取 `description`；拿不到退回 `reason`）——`task-2c438baf5499b592` 实测显示「在等人工 review/合 PR」而不是一条泛泛的 reason |
 | v2.6 | 2026-09-21 | 新增 **A10 主界面四态（规划中 / 执行中 / 阻塞 / 已完成）**：autonomy 的状态字汇由控制面**展示层**翻成四个词（`web/src/autonomy.ts` `executorPhaseView` + `ExecutorPhaseBar`），只依据接口原字段、不改它的接口；硬口径：`pending` 的步骤写「还没执行」**不写进行中**、`unverified` 算**阻塞**不算完成；原始状态留悬停；四态条挂在 `ExecutorTaskBody` → 两种入口共用；新增 `web/scripts/test-executor-status.mjs`（已进 `npm test`，47 个脚本） |
 | v2.5 | 2026-09-21 | 新增 **A9.2 `pending` 是什么**：`steps[].status=pending` 是 autonomy 的**默认值**（计划有、`execution_step` 无）；而 step 行/日志都在 `cap.Run()` **返回后**才写 → 执行中被打断＝永远 pending。实测：plan 14 的 `deployment.monitor{watch:true}` 跟着的正是**部署 autonomy 自己**那次流水线，15:41:13/14 自重启把观察者杀掉；plan 10（14:11）同模式。被观察的部署其实成功，pending ≠ 失败，且重启不补跑旧 step |

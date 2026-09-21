@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
 import { statusClass, worldLine } from "../autonomy";
-import { taskPhaseClass, taskPhaseLabel } from "../task-status";
 import PlanSection from "./ExecutorPlan";
 import ExecutorChat from "./ExecutorChat";
 import ExecutorPhaseBar from "./ExecutorPhaseBar";
+import ExecutorBlockedPanel from "./ExecutorBlockedPanel";
 import TaskIdsBar from "./TaskIdsBar";
 import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
 
@@ -78,16 +78,10 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
       {/* 四态条：主界面第一眼要看到的东西（依据也写在这一行里） */}
       <ExecutorPhaseBar detail={detail} loaded={detail !== null || error !== null} />
 
+      {/* 阻塞态：把「谁在挡、等什么、下一步能做什么」就地铺开 */}
+      <ExecutorBlockedPanel detail={detail} />
+
       <div className="task-ids task-status-bar" role="group" aria-label="执行方状态">
-        {/* 四个大字（规划中 / 执行中 / 阻塞 / 已完成）——由 autonomy 真实 status 汇总，一眼可见。 */}
-        {status ? (
-          <span
-            className={`task-phase-badge ${taskPhaseClass(status)}`}
-            title={`autonomy 原始状态：${status}`}
-          >
-            {taskPhaseLabel(status)}
-          </span>
-        ) : null}
         {status ? (
           <span className={`auto-status ${statusClass(status)}`}>{status}</span>
         ) : null}

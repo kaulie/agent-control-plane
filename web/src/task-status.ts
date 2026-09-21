@@ -17,7 +17,20 @@
  * - 已完成：收尾成功（`completed` / `done` / `ok` …）。
  */
 
+import { EXECUTOR_PHASE_LABEL, type ExecutorPhase } from "./autonomy";
+
 export type TaskPhase = "planning" | "executing" | "blocked" | "completed";
+
+/**
+ * 四态词只有一套（`autonomy.ts` 的 `EXECUTOR_PHASE_LABEL`）：这里只做 `completed` ↔ `done`
+ * 的对应，**不另写文案** —— 详情条和侧栏徽标必须是同一个字，否则同一屏两个说法。
+ */
+const SHARED_PHASE: Record<TaskPhase, ExecutorPhase> = {
+  planning: "planning",
+  executing: "executing",
+  blocked: "blocked",
+  completed: "done",
+};
 
 export interface TaskPhaseOption {
   id: TaskPhase;
@@ -30,22 +43,22 @@ export interface TaskPhaseOption {
 export const TASK_PHASE_OPTIONS: TaskPhaseOption[] = [
   {
     id: "planning",
-    label: "规划中",
+    label: EXECUTOR_PHASE_LABEL[SHARED_PHASE.planning] || "规划中",
     hint: "autonomy 正在准备 / 排队（pending、planning、queued…），还没真正开跑。",
   },
   {
     id: "executing",
-    label: "执行中",
+    label: EXECUTOR_PHASE_LABEL[SHARED_PHASE.executing] || "执行中",
     hint: "autonomy 正在执行（running、in_progress、executing…）。",
   },
   {
     id: "blocked",
-    label: "阻塞",
+    label: EXECUTOR_PHASE_LABEL[SHARED_PHASE.blocked] || "阻塞",
     hint: "跑不下去了、需要处理（blocked、need_input、unverified、error、stopped…）。",
   },
   {
     id: "completed",
-    label: "已完成",
+    label: EXECUTOR_PHASE_LABEL[SHARED_PHASE.completed] || "已完成",
     hint: "autonomy 已收尾（completed、done、ok…）。",
   },
 ];

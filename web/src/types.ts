@@ -732,6 +732,38 @@ export type AutonomyTaskDetail = Record<string, unknown> & {
       duration_ms?: number;
     }>;
   }>;
+  /**
+   * 引擎自己那一侧的「做完了吗」：cycle 1 钉住的**完成契约** + **每一次判定**
+   * （autonomy 的 `GET /api/tasks/{id}` → `verification`，见 docs/verification.md）。
+   *
+   * `status=unverified` 的答案在这里：哪个判据、问的谁、期望什么、实际答什么、为什么没过。
+   * 没被判定过的 task **不带这个字段**（不是空对象）—— 「没判过」和「判过、全过」是两件事。
+   */
+  verification?: {
+    /** 钉住的契约（判据原文，按它第一轮写的样子）。 */
+    contract?: Array<{
+      idx?: number;
+      name?: string;
+      /** 判据原文：`{requirement, evidence:{source}, expect:{…}}`（可能是字符串）。 */
+      criterion?: unknown;
+    }>;
+    /** 每一次判定，早的在前：一条判据每轮 `done` 一行。 */
+    verdicts?: Array<{
+      id?: number;
+      plan_id?: number;
+      cycle?: number;
+      criterion?: string;
+      /** `pass` | `fail` | `inconclusive` —— 只有 `pass` 撑得起 `done`。 */
+      result?: string;
+      /** 问的谁：`world_model` / `registry:<能力>` / `declared:<能力>` / `-`。 */
+      method?: string;
+      evidence?: unknown;
+      expected?: string;
+      observed?: string;
+      reason?: string;
+      created_at?: string;
+    }>;
+  };
   /** 控制面读它的时刻（代理加的）。 */
   fetchedAt?: string;
 };

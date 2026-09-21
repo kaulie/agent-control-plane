@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
-import { planSteps, statusClass, worldLine } from "../autonomy";
+import { statusClass, worldLine } from "../autonomy";
+import PlanSection from "./ExecutorPlan";
 import TaskIdsBar from "./TaskIdsBar";
 import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
 
@@ -62,7 +63,6 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps)
     row?.lastUserInputAt ||
     "";
   const world = worldLine(detail);
-  const steps = planSteps(detail);
   const turns = row?.turns;
   const source = meta?.url
     ? `autonomy ${meta.url}${meta.version ? ` · v${meta.version}` : ""}`
@@ -100,6 +100,9 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps)
         ) : null}
       </div>
 
+      {/* 计划：正在规划 / 最新计划 + 已完成 step + 当前 step 的进展 */}
+      <PlanSection detail={detail} status={status} />
+
       <div className="auto-detail">
         {error ? <div className="auto-banner bad">读执行方失败：{error}</div> : null}
         {detail?.error ? (
@@ -118,21 +121,6 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps)
           <div className="auto-detail-row">
             <span>这条任务的世界</span>
             <span>{world}</span>
-          </div>
-        ) : null}
-        {steps.length > 0 ? (
-          <div className="auto-detail-row">
-            <span>计划步骤</span>
-            <span>
-              {steps.map((s) => (
-                <span
-                  key={`${s.planId ?? 0}-${s.step}`}
-                  className={`auto-step ${statusClass(s.status)}`}
-                >
-                  {s.capability}:{s.status}
-                </span>
-              ))}
-            </span>
           </div>
         ) : null}
         {detail ? (

@@ -111,9 +111,13 @@ export function mergeTaskRows(
 export function statusClass(status: string | undefined): string {
   const s = (status ?? "").toLowerCase();
   if (s === "running" || s === "pending") return "running";
-  if (s === "completed") return "ok";
+  // step 的状态别称（plan.steps[].status）：`ok` / `succeeded` / `failed` / `in_progress` …
+  if (s === "completed" || s === "ok" || s === "succeeded" || s === "success" || s === "done") {
+    return "ok";
+  }
+  if (s === "in_progress" || s === "in-progress" || s === "executing") return "running";
   if (s === "blocked" || s === "need_input" || s === "unverified") return "warn";
-  if (s === "error") return "bad";
+  if (s === "error" || s === "failed" || s === "failure") return "bad";
   if (s === "stopped") return "stopped";
   return "";
 }
@@ -137,25 +141,251 @@ export function worldLine(detail: AutonomyTaskDetail | null): string {
   return parts.join(" · ");
 }
 
-/** 计划里的所有步骤（摊平，便于一屏看完进展）；autonomy 还没给步骤时返回空数组。 */
-export function planSteps(
-  detail: AutonomyTaskDetail | null,
-): Array<{ planId?: number; step: number; capability: string; status: string }> {
-  const out: Array<{
-    planId?: number;
-    step: number;
-    capability: string;
-    status: string;
-  }> = [];
-  for (const plan of detail?.plans ?? []) {
-    (plan.steps ?? []).forEach((s, i) => {
-      out.push({
-        ...(plan.id != null ? { planId: plan.id } : {}),
-        step: i + 1,
-        capability: s.capability || "step",
-        status: s.status || "?",
-      });
-    });
+/** ------------------------------------------------------------------ *
+ * 计划（plan / steps）：主界面在跑任务时**最该看**的东西。
+ *
+ * 口径（照 autonomy 的接口原文，不自造字段）：
+ * - `plans[]` 是**逐轮**给的（一个 cycle 一条，`plan_id` 递增）：`decision_type: "plan"` = 这一轮的
+ *   执行计划（有 `steps`）；`"done"` 等 = 这一轮的**决定**（可能没有 steps，只有 `reason`）；
+ * - 最新那条 plan 经常是「决定」（收尾说明）→ 所以「最新计划」和「最新**带步骤**的计划」分开取；
+ * - 拿不到的（比如运行中 step 的局部进展）**不编、不占位**：只显示它真给的状态/耗时/产出/错误。
+ * ------------------------------------------------------------------ */
+
+/** step 原始 status → 归一化阶段（显示图标/配色用；原始文本照样显示）。 */
+export type StepPhase = "done" | "running" | "failed" | "pending";
+
+const DONE_STATUSES = new Set(["ok", "succeeded", "success", "done", "completed", "passed"]);
+const RUNNING_STATUSES = new Set([
+  "running",
+  "in_progress",
+  "in-progress",
+  "executing",
+  "active",
+  "started",
+  "queued",
+]);
+const FAILED_STATUSES = new Set([
+  "failed",
+  "failure",
+  "error",
+  "errored",
+  "cancelled",
+  "canceled",
+  "aborted",
+  "timeout",
+]);
+
+/** 执行方那边「还在跑」的任务状态（其余当已结束；空/未知按「还在跑」处理）。 */
+const ACTIVE_STATUSES = new Set([
+  "running",
+  "pending",
+  "queued",
+  "planning",
+  "starting",
+  "waiting",
+  "",
+]);
+
+/** step 的阶段（未知 status → `pending`，但界面上永远显示原始文本）。 */
+export function stepPhase(status: string | undefined): StepPhase {
+  const s = (status ?? "").trim().toLowerCase();
+  if (DONE_STATUSES.has(s)) return "done";
+  if (RUNNING_STATUSES.has(s)) return "running";
+  if (FAILED_STATUSES.has(s)) return "failed";
+  return "pending";
+}
+
+/** 计划里的一步（只留界面要用的字段，全部来自接口原文）。 */
+export interface PlanStepView {
+  key: string;
+  idx: number;
+  name: string;
+  capability: string;
+  status: string;
+  phase: StepPhase;
+  durationMs?: number;
+  error?: string;
+  /** 成功产出摘要（优先 `output.summary`，否则拼标量字段）。 */
+  outputSummary?: string;
+  /** 这一步打算达到的效果（`expected_effect`，JSON 字符串会摊成 `k=v`）。 */
+  expectedEffect?: string;
+}
+
+/** 一轮计划（plan_id / cycle / 决定 / 步骤）。 */
+export interface PlanView {
+  key: string;
+  planId?: number;
+  cycle?: number;
+  decisionType?: string;
+  reason?: string;
+  /** 接口里的 `step_count`（规划了几步）。 */
+  stepCount?: number;
+  /** 接口里的 `executed`（执行了几步）。 */
+  executed?: number;
+  steps: PlanStepView[];
+}
+
+/** 显示成一行纯文本（对象/数组不硬塞进 UI）。 */
+function plainText(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
+}
+
+/** 产出摘要：`{ summary, pr_url }` → summary；没有 summary 就拼标量字段。 */
+function summarizeOutput(output: unknown): string {
+  if (output == null) return "";
+  const direct = plainText(output);
+  if (direct) return direct;
+  if (typeof output !== "object") return "";
+  const obj = output as Record<string, unknown>;
+  const summary = plainText(obj.summary);
+  if (summary) return summary;
+  return Object.entries(obj)
+    .map(([k, v]) => {
+      const t = plainText(v);
+      return t ? `${k}: ${t}` : "";
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** `expected_effect`：JSON 字符串 → `creates=…`；不是 JSON 就原样。 */
+function summarizeEffect(effect: unknown): string {
+  const raw = plainText(effect);
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const pairs = Object.entries(parsed as Record<string, unknown>)
+        .map(([k, v]) => {
+          const t = plainText(v);
+          return t ? `${k}=${t}` : "";
+        })
+        .filter(Boolean);
+      if (pairs.length > 0) return pairs.join(" · ");
+    }
+  } catch {
+    /* 不是 JSON → 原样显示 */
   }
-  return out;
+  return raw;
+}
+
+type RawPlan = NonNullable<AutonomyTaskDetail["plans"]>[number];
+type RawStep = NonNullable<RawPlan["steps"]>[number];
+
+function toStepView(planKey: string, step: RawStep, i: number): PlanStepView {
+  const status = plainText(step.status);
+  const duration = typeof step.duration_ms === "number" ? step.duration_ms : undefined;
+  const error = plainText(step.error);
+  const outputSummary = summarizeOutput(step.output);
+  const expectedEffect = summarizeEffect(step.expected_effect);
+  return {
+    key: `${planKey}-s${step.idx ?? i + 1}`,
+    idx: typeof step.idx === "number" ? step.idx : i + 1,
+    name: plainText(step.name),
+    capability: plainText(step.capability),
+    status,
+    phase: stepPhase(status),
+    ...(duration != null ? { durationMs: duration } : {}),
+    ...(error ? { error } : {}),
+    ...(outputSummary ? { outputSummary } : {}),
+    ...(expectedEffect ? { expectedEffect } : {}),
+  };
+}
+
+function toPlanView(plan: RawPlan, i: number): PlanView {
+  // 老写法（id）兼容；接口给的是 plan_id。
+  const planId = typeof plan.plan_id === "number" ? plan.plan_id : plan.id;
+  const key = `p${planId ?? `-${i}`}`;
+  const steps = (plan.steps ?? []).map((s, si) => toStepView(key, s, si));
+  const decisionType = plainText(plan.decision_type);
+  const reason = plainText(plan.reason);
+  const stepCount = typeof plan.step_count === "number" ? plan.step_count : undefined;
+  const executed = typeof plan.executed === "number" ? plan.executed : undefined;
+  return {
+    key,
+    ...(planId != null ? { planId } : {}),
+    ...(typeof plan.cycle === "number" ? { cycle: plan.cycle } : {}),
+    ...(decisionType ? { decisionType } : {}),
+    ...(reason ? { reason } : {}),
+    ...(stepCount != null ? { stepCount } : {}),
+    ...(executed != null ? { executed } : {}),
+    steps,
+  };
+}
+
+/** 逐轮计划（按 `plan_id`/`cycle` 升序；接口本来就是升序，这里再兜一次）。 */
+export function planViews(detail: AutonomyTaskDetail | null): PlanView[] {
+  const plans = (detail?.plans ?? []).map(toPlanView);
+  return plans
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => (a.p.planId ?? a.p.cycle ?? a.i) - (b.p.planId ?? b.p.cycle ?? b.i))
+    .map((x) => x.p);
+}
+
+/** 最新一轮计划（**可能就是「决定」**、没有 steps）。 */
+export function latestPlan(detail: AutonomyTaskDetail | null): PlanView | undefined {
+  return planViews(detail).at(-1);
+}
+
+/** 最新一轮**带步骤**的计划（跑的时候就是它）。 */
+export function latestSteppedPlan(detail: AutonomyTaskDetail | null): PlanView | undefined {
+  return planViews(detail)
+    .filter((p) => p.steps.length > 0)
+    .at(-1);
+}
+
+/** 这一步的进展统计：已完成 / 总步数（总数优先用接口的 `step_count`）。 */
+export function stepProgress(plan: PlanView | undefined): {
+  done: number;
+  failed: number;
+  total: number;
+} {
+  const steps = plan?.steps ?? [];
+  const done = steps.filter((s) => s.phase === "done").length;
+  const failed = steps.filter((s) => s.phase === "failed").length;
+  const total = plan?.stepCount ?? steps.length;
+  return { done, failed, total: Math.max(total, steps.length) };
+}
+
+/**
+ * 「当前 step」：正在跑的 → 失败的 → 下一个待执行的（都完成 → undefined）。
+ * 只在这条 plan 就是在执行的那条时有意义（调用方自己判断）。
+ */
+export function currentStep(plan: PlanView | undefined): PlanStepView | undefined {
+  const steps = plan?.steps ?? [];
+  return (
+    steps.find((s) => s.phase === "running") ??
+    steps.find((s) => s.phase === "failed") ??
+    steps.find((s) => s.phase === "pending")
+  );
+}
+
+/** step 的名字（`land（pull_request.review）`）。 */
+export function stepLabel(step: PlanStepView | undefined): string {
+  if (!step) return "";
+  const name = step.name || step.capability;
+  if (step.name && step.capability) return `${name}（${step.capability}）`;
+  return name;
+}
+
+export type PlanPhase = "loading" | "planning" | "planned" | "none";
+
+/**
+ * 主界面该显示哪种计划态：
+ * - `loading`：还没读到（首帧）—— 不显示、也不闪「正在规划」；
+ * - `planning`：还没形成 plan、任务仍在跑 → **正在规划**；
+ * - `planned`：有 plan → 显示最新 plan + steps；
+ * - `none`：已结束且从没给过 plan（照实说「没有计划」，不谎称还在规划）。
+ */
+export function planPhase(opts: {
+  loaded: boolean;
+  plans: PlanView[];
+  status: string | undefined;
+}): PlanPhase {
+  if (!opts.loaded) return "loading";
+  if (opts.plans.length > 0) return "planned";
+  const s = (opts.status ?? "").trim().toLowerCase();
+  return ACTIVE_STATUSES.has(s) ? "planning" : "none";
 }

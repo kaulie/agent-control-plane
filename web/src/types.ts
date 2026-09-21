@@ -65,9 +65,7 @@ export type AppView =
   | "usage-stats"
   | "agent-runtime"
   | "agent-board"
-  | "agent-timeline"
-  /** 「交给 autonomy」执行的任务（数据源是 autonomy，控制面只代理）。 */
-  | "autonomy";
+  | "agent-timeline";
 
 export interface ConcurrencySample {
   t: string;
@@ -253,6 +251,29 @@ export interface Task {
   /** 从哪个 task fork 而来（上下文将满时分流）。 */
   forkedFrom?: string;
 }
+
+/**
+ * task 的 agent **创建路径**：这条任务的 agent 是谁创建的（唯一的区别就在这里）。
+ *
+ * - `control-plane`：控制面在本地 agent 工作区创建（现状：任务首跑）；
+ * - `autonomy`：由 autonomy 的 runtime 创建并执行（控制面只代理它的状态/进展，不落库）。
+ */
+export type AgentPath = "control-plane" | "autonomy";
+
+/**
+ * 侧栏 Tasks 列表的一行：本地任务（Task），或「agent 由 autonomy 创建」的任务
+ * （后者由 `./autonomy.ts` 适配出来，只做展示、不落库）。任务仍然只有一套 —— 这里不是两个列表。
+ */
+export type TaskListRow = Omit<Task, "status" | "taskType"> & {
+  /** 状态原文（本地是 active/completed/error；autonomy 侧是它的七态）。 */
+  status: string;
+  /** 类型分类：只有我们创建的任务才有；autonomy 侧没有 → 列表不显示类型徽标。 */
+  taskType?: TaskType;
+  /** 这条 task 的 agent 是谁创建的。 */
+  agentPath: AgentPath;
+  /** 轮次：autonomy 侧由它自己记（我们这边没有它的 runs）；本地任务不显示这一格。 */
+  turns?: number;
+};
 
 /**
  * 看板的行范围：`current` = 每个 task 当前那个 agent；`all` = 所有 agent 实例

@@ -1,4 +1,5 @@
-import type { Project, Task } from "../types";
+import type { Project, TaskListRow } from "../types";
+import { agentPathLabel } from "../agent-path";
 import { formatDateTime } from "../format";
 import { taskTypeLabel, taskTypeOption } from "../task-types";
 import { taskGoalLabel, taskGoalOption } from "../task-goals";
@@ -10,7 +11,8 @@ interface Props {
   onCreateProject: () => void;
   onRenameProject: () => void;
   onOpenProjectSettings: () => void;
-  tasks: Task[];
+  /** 本地任务 + agent 由 autonomy 创建的任务，合成的一个列表（见 `../autonomy.ts`）。 */
+  tasks: TaskListRow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
@@ -105,12 +107,15 @@ export default function TaskList({
               onClick={() => onSelect(t.taskId)}
             >
               <div className="task-title">
-                <span
-                  className={`task-type-badge type-${t.taskType ?? "general"}`}
-                  title={`任务类型：${taskTypeLabel(t.taskType)}（仅作分类，不改变 agent 行为）`}
-                >
-                  {taskTypeOption(t.taskType).short}
-                </span>
+                {/* 类型/目标是**我们**的分类，agent 由 autonomy 创建的任务没有 → 不显示（不是缺字段）。 */}
+                {t.agentPath === "autonomy" ? null : (
+                  <span
+                    className={`task-type-badge type-${t.taskType ?? "general"}`}
+                    title={`任务类型：${taskTypeLabel(t.taskType)}（仅作分类，不改变 agent 行为）`}
+                  >
+                    {taskTypeOption(t.taskType).short}
+                  </span>
+                )}
                 {/* 目标会改变 agent 的交付动作：列表上也标出来（老任务没有目标 → 不显示）。 */}
                 {t.goal ? (
                   <span
@@ -125,9 +130,11 @@ export default function TaskList({
                 </span>
               </div>
               <div className="task-meta">
-                #{t.taskId.slice(-6)} · {t.provider}
-                {t.model ? `/${t.model}` : ""} · {t.status} ·{" "}
-                {formatDateTime(t.lastUserInputAt ?? t.createdAt)}
+                #{t.taskId.slice(-6)} · {agentPathLabel(t.agentPath)}
+                {/* provider/model：autonomy 侧拿不到就不显示这一段（留空，不写占位）。 */}
+                {t.provider ? ` · ${t.provider}${t.model ? `/${t.model}` : ""}` : ""}
+                {" · "}
+                {t.status} · {formatDateTime(t.lastUserInputAt ?? t.createdAt)}
               </div>
             </button>
           ))}

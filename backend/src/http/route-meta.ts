@@ -134,7 +134,7 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
       "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。",
   },
   "GET /api/autonomy/tasks": {
-    summary: "autonomy 任务列表（只代理；可按 projectId 过滤）",
+    summary: "autonomy 侧的任务列表（只代理；控制面侧栏会把它并进同一个 Tasks 列表）",
     tags: ["autonomy"],
     description:
       "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面不落库、不掺进 /api/tasks。",
@@ -146,7 +146,7 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
       "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
   },
   "POST /api/autonomy/tasks": {
-    summary: "把一条任务指令交给 autonomy（新入口；描述必填，控制面不落库）",
+    summary: "创建一条 agent 由 autonomy 创建的任务（描述必填；控制面不落库、只代理）",
     tags: ["autonomy"],
     description:
       "转发 autonomy 的 `POST /api/tasks`（body: description + projectId → context_ref.project）。" +

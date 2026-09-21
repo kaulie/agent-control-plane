@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { Task } from "../types";
+import AgentPathChip from "./AgentPathChip";
+import type { AgentPath, Task } from "../types";
 
 /**
  * 一条基础信息（方便测试用）：
@@ -71,11 +72,19 @@ export function taskIdRows(
 }
 
 interface Props {
-  task: Task;
+  /**
+   * 只要那三个 id：本地任务传整个 `Task` 即可；agent 由 autonomy 创建的任务
+   * 只有 id 可从它的接口拿到，就传 `{ taskId, projectId, agentId }`（别的字段它没有）。
+   */
+  task: Pick<Task, "taskId" | "projectId" | "agentId">;
   /** 这个 task 所属项目的组织 id（= `project.department.departmentId`）。 */
   orgId?: string;
   /** 组织名快照，仅为了让悬停提示更好读。 */
   orgName?: string;
+  /** 这条 task 的 agent 是谁创建的（老任务 = 控制面；新入口 = autonomy）。 */
+  agentPath?: AgentPath;
+  /** autonomy 侧的数据源（只写进悬停；拿不到就不传 —— 留空不显示）。 */
+  agentPathSource?: string;
 }
 
 const COPIED_MS = 1200;
@@ -98,7 +107,13 @@ async function copyText(text: string): Promise<boolean> {
  * 目的很单纯：**方便测试**——不用去猜 / 去翻接口，页面上直接能看到 taskId、
  * projectId、orgId（组织 id），点一下即可复制。纯展示，不触发任何写操作。
  */
-export default function TaskIdsBar({ task, orgId, orgName }: Props) {
+export default function TaskIdsBar({
+  task,
+  orgId,
+  orgName,
+  agentPath,
+  agentPathSource,
+}: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
 
@@ -147,6 +162,13 @@ export default function TaskIdsBar({ task, orgId, orgName }: Props) {
           </button>
         ),
       )}
+      {/* agent 创建路径和 id 放在同一行 chip 里：两条路径对称，才是「字段」而不是特例标记。 */}
+      {agentPath ? (
+        <AgentPathChip
+          path={agentPath}
+          {...(agentPathSource ? { source: agentPathSource } : {})}
+        />
+      ) : null}
     </div>
   );
 }

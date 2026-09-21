@@ -9,6 +9,7 @@ import type {
   Project,
   Task,
   TaskDetail,
+  TaskListRow,
   TaskGoal,
   TaskType,
 } from "./types";
@@ -21,7 +22,12 @@ import ForkDialog, { type ForkChoice } from "./components/ForkDialog";
 import { contextView, forkAckKey, needsForkPrompt, type ContextView } from "./context-format";
 import UsageStatsPage from "./components/UsageStatsPage";
 import AgentBoardPage from "./components/AgentBoardPage";
-import AutonomyPage from "./components/AutonomyPage";
+import AutonomyTaskPanel from "./components/AutonomyTaskPanel";
+import {
+  autonomyTaskToRow,
+  localTaskToRow,
+  mergeTaskRows,
+} from "./autonomy";
 import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
 import CreateTaskDialog from "./components/CreateTaskDialog";
@@ -143,8 +149,13 @@ export default function App() {
   const [showCreateTask, setShowCreateTask] = useState(false);
   /** autonomy 的可用性 / 版本 / LLM 后端 + 入口开关（`TASK_ENTRY`）。 */
   const [autonomyMeta, setAutonomyMeta] = useState<AutonomyMeta | null>(null);
-  /** 刚交给 autonomy 的那条：跳过去时直接展开。 */
-  const [autonomyTaskFocus, setAutonomyTaskFocus] = useState("");
+  /**
+   * agent 由 autonomy 创建的任务，适配成**同一个**列表里的行（不落库，数据来自 `/api/autonomy/*`）。
+   * 它和我们自己的任务一起显示；区别只有 `agentPath`。
+   */
+  const [autonomyRows, setAutonomyRows] = useState<TaskListRow[]>([]);
+  /** 刚建的那条：列表还没刷到时也要能选中并展开。 */
+  const [autonomyFocusId, setAutonomyFocusId] = useState("");
   /** 项目相关的弹框（新建 / 重命名 / Git 地址），全部居中显示。 */
   const [projectDialog, setProjectDialog] = useState<ProjectDialogMode | null>(
     null,
@@ -626,28 +637,57 @@ export default function App() {
     [refreshTasks, selectTask, selectedProjectId],
   );
 
+  const AUTONOMY_REFRESH_MS = 5000;
+
   /**
-   * 探一次 autonomy（在新入口能不能点 / 数据源版本）：打不开对话框时也探一次，
-   * 这样「交给 autonomy」按钮的置灰是有依据的。读接口 best-effort，不会抛。
+   * 拉一次 autonomy：自述（可用性 / 版本）+ 当前项目里 agent 由它创建的任务。
+   * 两个都是 best-effort 的读接口（不会抛）；失败就当没有这些行，界面其它部分照常。
+   */
+  const loadAutonomy = useCallback(async () => {
+    try {
+      const [meta, list] = await Promise.all([
+        api.autonomyMeta(),
+        api.autonomyTasks(selectedProjectId ?? undefined),
+      ]);
+      setAutonomyMeta(meta);
+      setAutonomyRows(
+        (list.available ? list.tasks : []).map((task) =>
+          autonomyTaskToRow(task, {
+            ...(meta.llmBackend ? { llmBackend: meta.llmBackend } : {}),
+          }),
+        ),
+      );
+    } catch {
+      setAutonomyRows([]);
+    }
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    void loadAutonomy();
+  }, [loadAutonomy]);
+
+  /**
+   * 打不开对话框时也探一次（「交给 autonomy」按钮的置灰要有依据）。
+   * 顺带刷新一遍列表：建之前看到的可用性 / 行都是最新的。
    */
   useEffect(() => {
-    let cancelled = false;
-    void api
-      .autonomyMeta()
-      .then((m) => {
-        if (!cancelled) setAutonomyMeta(m);
-      })
-      .catch(() => {
-        if (!cancelled) setAutonomyMeta(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [showCreateTask]);
+    if (!showCreateTask) return;
+    void loadAutonomy();
+  }, [showCreateTask, loadAutonomy]);
+
+  /**
+   * 有 autonomy 执行的任务时轻量轮询（5s）：状态 / 轮次能跟上，省得手动刷。
+   * loadAutonomy 只在 selectedProjectId 变化时重建，所以同一个项目里不会反复重置计时器。
+   */
+  useEffect(() => {
+    if (!autonomyMeta?.available || autonomyRows.length === 0) return;
+    const timer = window.setInterval(() => void loadAutonomy(), AUTONOMY_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [autonomyMeta?.available, autonomyRows.length, loadAutonomy]);
 
   /**
    * 「交给 autonomy」新建：只把描述 + 当前项目交给控制面代理（`POST /api/autonomy/tasks`），
-   * 控制面不落库；成功后直接跳到「Autonomy 任务」页并展开这条（失败则把原文抛给对话框显示）。
+   * 控制面不落库；成功后**在同一个列表里**选中这条（失败则把原文抛给对话框显示）。
    */
   const createAutonomyTask = useCallback(
     async (input: { description: string }) => {
@@ -656,10 +696,57 @@ export default function App() {
         description: input.description,
         projectId: selectedProjectId,
       });
-      setAutonomyTaskFocus(accepted.taskId);
-      setView("autonomy");
+      setAutonomyFocusId(accepted.taskId);
+      setSelectedId(accepted.taskId);
+      setDetail(null);
+      setEvents([]);
+      await loadAutonomy();
     },
-    [selectedProjectId],
+    [selectedProjectId, loadAutonomy],
+  );
+
+  /** 侧栏列表 = 本地任务 + agent 由 autonomy 创建的任务（同一套行模型）。 */
+  const taskRows = useMemo(
+    () => mergeTaskRows(tasks.map(localTaskToRow), autonomyRows),
+    [tasks, autonomyRows],
+  );
+
+  /** agent 由 autonomy 创建的那些 task id（点行时决定去详情哪一路）。 */
+  const autonomyIds = useMemo(
+    () => new Set(autonomyRows.map((row) => row.taskId)),
+    [autonomyRows],
+  );
+
+  /** 选中的这行是不是「agent 由 autonomy 创建」。 */
+  const autonomySelection =
+    selectedId != null &&
+    (autonomyIds.has(selectedId) || selectedId === autonomyFocusId);
+
+  const selectedRow = useMemo(
+    () => taskRows.find((row) => row.taskId === selectedId),
+    [taskRows, selectedId],
+  );
+
+  /** 选中那行所属的项目（组织 id 从我们自己的项目库取，和本地详情同一口径）。 */
+  const selectedRowProject = projects.find(
+    (project) => project.projectId === selectedRow?.projectId,
+  );
+
+  /**
+   * 点列表行：agent 由 autonomy 创建 → 主区走代理详情（没有本地事件流）；
+   * 其余和以前一模一样（本地详情 + 事件流）。
+   */
+  const selectRow = useCallback(
+    (taskId: string) => {
+      if (autonomyIds.has(taskId) || taskId === autonomyFocusId) {
+        setSelectedId(taskId);
+        setDetail(null);
+        setEvents([]);
+        return;
+      }
+      void selectTask(taskId);
+    },
+    [autonomyIds, autonomyFocusId, selectTask],
   );
 
   const createProject = useCallback(
@@ -989,14 +1076,6 @@ export default function App() {
           <button
             type="button"
             className="icon-btn header-settings"
-            title="Autonomy 任务（交给 autonomy 执行的任务；数据源是 autonomy 本身）"
-            onClick={() => setView("autonomy")}
-          >
-            🛰
-          </button>
-          <button
-            type="button"
-            className="icon-btn header-settings"
             title="全局设置"
             onClick={() => setView("global-settings")}
           >
@@ -1050,17 +1129,6 @@ export default function App() {
           />
         ) : view === "agent-runtime" ? (
           <AgentRuntimePage onBack={() => setView("chat")} />
-        ) : view === "autonomy" ? (
-          <AutonomyPage
-            projectId={selectedProjectId ?? undefined}
-            projectName={
-              projects.find((p) => p.projectId === selectedProjectId)?.name ??
-              selectedProjectId ??
-              undefined
-            }
-            highlightTaskId={autonomyTaskFocus}
-            onBack={() => setView("chat")}
-          />
         ) : view === "agent-board" ? (
           <AgentBoardPage
             onOpenTask={(taskId, projectId) =>
@@ -1089,18 +1157,32 @@ export default function App() {
           onCreateProject={() => setProjectDialog("create")}
           onRenameProject={() => setProjectDialog("rename")}
           onOpenProjectSettings={() => setView("project-settings")}
-          tasks={tasks}
+          tasks={taskRows}
           selectedId={selectedId}
-          onSelect={selectTask}
+          onSelect={selectRow}
           onCreate={() => void openCreateTask()}
         />
         <main className="main">
-          {selectedId && detail ? (
+          {autonomySelection && selectedId ? (
+            /* agent 由 autonomy 创建：同一个主区、同一个 TaskIdsBar，只是数据走代理。 */
+            <AutonomyTaskPanel
+              taskId={selectedId}
+              {...(selectedRow ? { row: selectedRow } : {})}
+              meta={autonomyMeta}
+              {...(selectedRowProject?.department?.departmentId
+                ? { orgId: selectedRowProject.department.departmentId }
+                : {})}
+              {...(selectedRowProject?.department?.departmentName
+                ? { orgName: selectedRowProject.department.departmentName }
+                : {})}
+            />
+          ) : selectedId && detail ? (
             <>
               <TaskIdsBar
                 task={detail.task}
                 orgId={detailProject?.department?.departmentId}
                 orgName={detailProject?.department?.departmentName}
+                agentPath="control-plane"
               />
               <AgentRoundsBar
                 runs={detail.runs}

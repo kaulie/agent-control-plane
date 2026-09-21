@@ -99,16 +99,66 @@ assert.deepEqual(EXECUTOR_PHASE_LABEL, {
   assert.equal(phaseOf(stopped), "blocked");
   assert.match(executorPhaseView(stopped).hint, /执行方状态 stopped/);
 
+  // `need` 是接口上的 JSON 字符串（真实形态）→ 优先显示「它在等什么」，比 reason 具体
   const needInput = {
     task_id: "t",
     status: "running",
-    plans: [{ plan_id: 1, cycle: 1, decision_type: "need_input", reason: "要先确认用哪个仓库" }],
+    plans: [
+      {
+        plan_id: 1,
+        cycle: 1,
+        decision_type: "need_input",
+        reason: "Cycle 1 executed the planned steps…",
+        need: JSON.stringify({
+          type: "approval",
+          description: "等人 review 并合入 PR #117",
+        }),
+      },
+    ],
   };
   const view = executorPhaseView(needInput);
   assert.equal(view.phase, "blocked");
   assert.equal(view.label, "阻塞");
   assert.match(view.hint, /等外部 \/ 等输入（need_input）/);
-  assert.match(view.hint, /要先确认用哪个仓库/);
+  assert.match(view.hint, /等人 review 并合入 PR #117/);
+
+  // 退路：need 拿不到 / 不是 JSON → 用 reason；need 是对象 → 直接读 description
+  const needObj = {
+    task_id: "t",
+    status: "running",
+    plans: [
+      { plan_id: 1, cycle: 1, decision_type: "blocked", reason: "r", need: { description: "等一次人工放行" } },
+    ],
+  };
+  assert.match(executorPhaseView(needObj).hint, /等一次人工放行/);
+  const needFallback = {
+    task_id: "t",
+    status: "running",
+    plans: [{ plan_id: 1, cycle: 1, decision_type: "need_input", reason: "要先确认用哪个仓库" }],
+  };
+  assert.match(executorPhaseView(needFallback).hint, /要先确认用哪个仓库/);
+
+  // 真实形态：**状态本身就是 need_input**，而「在等什么」在 need 里（比 reason 具体）
+  const waitingStatus = {
+    task_id: "t",
+    status: "need_input",
+    plans: [
+      {
+        plan_id: 1,
+        cycle: 1,
+        decision_type: "need_input",
+        reason: "Cycle 1 executed the planned steps…",
+        need: JSON.stringify({
+          type: "approval",
+          description: "A human must review, approve and merge the open pull request(s)",
+        }),
+      },
+    ],
+  };
+  const waitingView = executorPhaseView(waitingStatus);
+  assert.equal(waitingView.phase, "blocked");
+  assert.match(waitingView.hint, /执行方状态 need_input：A human must review, approve and merge/);
+  assert.ok(!waitingView.hint.includes("Cycle 1 executed"), "need 有时不要退化成 reason");
 
   // unverified：自称完成、引擎没验过 → 阻塞，不能当完成
   const unverified = {

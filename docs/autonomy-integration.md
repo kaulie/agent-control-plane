@@ -302,6 +302,10 @@ execution_step ──(execution_step_interaction.reason_turn_id)──▶ reason
 | **规划中** | 还没有任何**带步骤**的计划（`plans` 为空，或只有「决定」没有 steps）→ 这一轮还在规划 | `执行方还没给出这一轮的计划（拿到就显示在这里）` / `指令已受理，等执行方开始规划` |
 | **执行中** | 已经有带步骤的计划在推进；上一轮计划执行完、最新一轮是「决定」时也算（它马上给下一步） | `最新计划 3 步：2 步已完成 · 第 3 步 review（pull_request.review）还没执行（可能在跑，也可能上次运行被中断）` |
 
+「在等什么」优先取 `need`：状态或最新决定是 `need_input` / `blocked` 时，控制面读 plan 的 **`need`**
+（接口上可能是 JSON **字符串**，例：`{"type":"approval","description":"A human must review, approve and merge …"}`），
+拿不到才退回 `reason` —— 实测 `task-2c438baf5499b592` 就是「等人工 review/合 PR」这一类。
+
 两条**硬口径**（都来自实测，见 A9.2）：
 
 1. plan 里 `status=pending` 的步骤**不等于「正在跑」**（执行行是**跑完才写**的）→ 一律写
@@ -418,6 +422,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.7 | 2026-09-21 | 四态条的「等什么」口径：`need_input` / `blocked` 时读 plan 的 **`need`**（接口上是 JSON 字符串，取 `description`；拿不到退回 `reason`）——`task-2c438baf5499b592` 实测显示「在等人工 review/合 PR」而不是一条泛泛的 reason |
 | v2.6 | 2026-09-21 | 新增 **A10 主界面四态（规划中 / 执行中 / 阻塞 / 已完成）**：autonomy 的状态字汇由控制面**展示层**翻成四个词（`web/src/autonomy.ts` `executorPhaseView` + `ExecutorPhaseBar`），只依据接口原字段、不改它的接口；硬口径：`pending` 的步骤写「还没执行」**不写进行中**、`unverified` 算**阻塞**不算完成；原始状态留悬停；四态条挂在 `ExecutorTaskBody` → 两种入口共用；新增 `web/scripts/test-executor-status.mjs`（已进 `npm test`，47 个脚本） |
 | v2.5 | 2026-09-21 | 新增 **A9.2 `pending` 是什么**：`steps[].status=pending` 是 autonomy 的**默认值**（计划有、`execution_step` 无）；而 step 行/日志都在 `cap.Run()` **返回后**才写 → 执行中被打断＝永远 pending。实测：plan 14 的 `deployment.monitor{watch:true}` 跟着的正是**部署 autonomy 自己**那次流水线，15:41:13/14 自重启把观察者杀掉；plan 10（14:11）同模式。被观察的部署其实成功，pending ≠ 失败，且重启不补跑旧 step |
 | v2.4 | 2026-09-21 | 新增 **A9.1 谁干的活**：`execution_step.agent_id` 是**委托方**（planner），不是 worker；worker 每次委托都**新建**（`Runtime.AcquireAgent` 首行 `agents.NewAgent()`，无复用分支；复用只针对 planner）——附 `execution_step_interaction.reason_turn_id → reason_turns.agent_id` 的映射链与三批指令 → 10003/10007/10008 实测 |

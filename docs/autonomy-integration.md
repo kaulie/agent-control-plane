@@ -231,6 +231,34 @@ SELECT count(*) FROM llm_messages m WHERE m.task_id = 'task-…'
    AND NOT EXISTS (SELECT 1 FROM reason_turns r WHERE r.id = m.turn_id);
 ```
 
+### A9.1 谁干的活：`execution_step.agent_id` 是**委托方**，worker **每次委托都新建**
+
+展示 / 统计「这条 task 经过哪些 agent」时，**不要**用 `execution_step.agent_id` —— 它记的是**发起这一步的 planner**
+（实测这条 task 的 4 个 `code_edit` step 全是 `10002`）。真正干活的 worker 要顺着这条链找：
+
+```
+execution_step ──(execution_step_interaction.reason_turn_id)──▶ reason_turns.agent_id   ← worker
+              └── agent_messages(kind='delegation', sender_id='agent-<委托方>')         ← 同一件事的对话行
+```
+
+**worker 不复用**：`code_edit` 调 `runtime.AcquireAgent({Purpose, Backend, TaskID})`（**不传 workspace**，worker 用
+自己的沙箱），而 `Runtime.AcquireAgent` 的第一行就是 `agents.NewAgent()` —— **每次委托新建一只**（`Role=worker`、
+`Lifecycle=persistent`、`CurrentTask=` 委托方的 task id）。没有任何「找同 task 的空闲 worker 复用」的分支；
+`agent_resume.go` 里的复用只针对 **planner**（`ForTask` → `Adopt`(`tasks.agent_id`) → `Create`），
+所以 **planner 跨指令一直是同一只、worker 是一次委托一只（留着、可 resume，但不被下一次委托挑走）**。
+
+实测（`task-2c438baf5499b592`：三批指令 → 三只 worker，planner 始终 `10002`）：
+
+| 指令 | planner cycle | `code_edit` 步骤 | worker（`reason_turns.agent_id`） |
+|---|---|---|---|
+| 10:38「描述下你知道的上下文」 | 1→4 | step 1 `report` ok | **10003**（turn 4） |
+| 13:57「挪数据库相关代码」 | 1→3 | step 5 `refactor` ok | **10007**（turn 16） |
+| 15:23「改 pullrequest capability」 | 1→4 | step 8 `report` **failed 0ms**（World Model asset 缺失 → 没建 agent）→ step 9 ok | **10008**（turn 21） |
+
+> 所以「最新一轮用的 agent 和上一轮不一样」是**设计如此**（One Owner, Many Specialists：planner 只按 capability
+> 派活，背后有没有 worker、用哪只由 runtime 决定），不是串了别的任务 —— 三只 worker 的 `agents.current_task_id`
+> 都写着这条 task 的 id。
+
 ## 3. 控制面提供给 autonomy 的（也请一起复查）
 
 | 接口 | 实际返回 | 备注 |
@@ -335,6 +363,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.4 | 2026-09-21 | 新增 **A9.1 谁干的活**：`execution_step.agent_id` 是**委托方**（planner），不是 worker；worker 每次委托都**新建**（`Runtime.AcquireAgent` 首行 `agents.NewAgent()`，无复用分支；复用只针对 planner）——附 `execution_step_interaction.reason_turn_id → reason_turns.agent_id` 的映射链与三批指令 → 10003/10007/10008 实测 |
 | v2.3 | 2026-09-21 | 新增 **A9 数据落点与粒度**：线上 autonomy 库是 **PostgreSQL**（那份 `data/autonomy.db` SQLite 已是旧库，对着它查会得到「这条 task 没数据」的假象）；`agent_messages`（任务级对话）/ `reason_turns`（每次 LLM 调用）/ `llm_messages`（每条消息）/ `llm_events`（流式事件，本部署未落）**粒度不同、行数天然不等**（`llm_messages.turn_id` ↔ `reason_turns.id` 是 **N:1**，实测 41 : 5），附「真·错配」判据与只读自查 SQL |
 | v1 | 2026-09-20 | 初稿：A1–A8 接口需求 + 控制面提供的接口 + 5 条阻塞级问题；对 `:4300` 实测标注 |
 | v1.1 | 2026-09-21 | **仓库来源已确认**：由 autonomy **自行推导「项目 → 仓库」**（project → department.departmentId → 服务中心 组织服务清单），控制面无需新增接口；⚠️ 阻塞项关闭，阻塞级问题 5 → 4 条 |

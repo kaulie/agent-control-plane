@@ -530,6 +530,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.11 | 2026-09-21 | autonomy 任务状态轮询 **5s → 10s**（列表 `App.tsx` 与详情 `AutonomyTaskPanel.tsx` 共用 `AUTONOMY_TASK_REFRESH_MS`，不再各写一个数）。10s 的来由：状态是给人看的、一轮决策动辄几分钟，5s 只是更频繁地读到同一个值；手动动作（投递 / 重试 / 切任务）仍走**立刻重读**，不等计时到点 |
 | v2.10 | 2026-09-21 | 新增「**验证**」section（A10.3）：把引擎那一侧的判定单独铺开 —— cycle 1 钉住的契约（判据原文 + 证据槽 + 期望）与每次判定（结果 / 问的谁 / 期望 vs 实际 / reason）。三种「没有」分开说、只有全 pass 才算数、判据原文照抄。数据来自 autonomy #139 的 `verification` 字段；四态条的 unverified 提示现在指到这一节 |
 | v2.9 | 2026-09-21 | 阻塞面板的选项交互改成**单选 + 确认**：点一个选项（高亮选中）→ 按 **【确认】** 就把它的**原文**重新提交给 autonomy；**用户不用输入编号**（编号只是界面生成，既不投递也不让人抄）；投递复用输入框那条通道（`web/src/executorReply.ts` 的 `submitExecutorReply`，同一份回执；没挂通道就明说没投）。上一版的「点一下填进输入框」与 `executorPrefill` 一并移除；测试同步（单选/确认禁用态/不需要编号/通道空串不发且失败原文回传） |
 | v2.8 | 2026-09-21 | 新增 **A10.1 阻塞态交互口径**（`ExecutorBlockedPanel`）：分类+依据 / `need.description` 全文（它没填就退 `reason` 并**标明来源**）/ **只认 `need.options` 的结构化选项**（点一下填进输入框、不自动投递）+ 自由输入永远在；**删掉自造话术**、不猜散文枚举、时间只报「本页观察」；另加 **A10.2**：建议 autonomy 给 `need` 加 `options`（**不强制必填**，附理由与兼容说明）。**口径归并**：四态文案只留一套（`task-status.ts` 取 `autonomy.ts` 的 `EXECUTOR_PHASE_LABEL`），详情页重复的状态徽标删除（侧栏列表徽标保留）；新增 `web/scripts/test-executor-blocked-ui.mjs`（已进 `npm test`）。**不做**：停止任务按钮（A7 未代理，属 M2） |

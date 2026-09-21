@@ -179,4 +179,18 @@ assert.equal(executorPhaseView(blockedDetail).label, "阻塞");
 assert.equal(taskPhaseLabel("completed"), "已完成");
 assert.equal(executorPhaseView({ task_id: "t", status: "completed", plans: [] }).label, "已完成");
 
+// ---- 6) 轮询间隔只有一个来源，且是 10s（列表与详情共用） --------------------------
+const { AUTONOMY_TASK_REFRESH_MS } = await import("../src/autonomy.ts");
+assert.equal(AUTONOMY_TASK_REFRESH_MS, 10_000, "autonomy 任务状态轮询 = 10s");
+// 两处轮询都必须用这个常量：写死一个数就又会各说各话（5s / 10s 并存过）
+const { readFileSync } = await import("node:fs");
+for (const file of ["web/src/App.tsx", "web/src/components/AutonomyTaskPanel.tsx"]) {
+  const src = readFileSync(file, "utf8");
+  assert.ok(
+    src.includes("AUTONOMY_TASK_REFRESH_MS"),
+    `${file} 的轮询必须用 AUTONOMY_TASK_REFRESH_MS（不许写死间隔）`,
+  );
+  assert.ok(!/setInterval\([^)]*5000/.test(src), `${file} 里不该再有写死的 5000ms`);
+}
+
 console.log("✅ autonomy task-status UI OK");

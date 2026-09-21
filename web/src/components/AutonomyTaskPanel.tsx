@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
-import { statusClass, worldLine } from "../autonomy";
+import { AUTONOMY_TASK_REFRESH_MS, statusClass, worldLine } from "../autonomy";
 import PlanSection from "./ExecutorPlan";
 import VerificationSection from "./ExecutorVerification";
 import ExecutorChat from "./ExecutorChat";
@@ -30,12 +30,9 @@ interface BodyProps {
   row?: TaskListRow;
   /** autonomy 自述（地址 / 版本）——只写进 chip 的悬停。 */
   meta?: AutonomyMeta | null;
-  /** 变一下就立刻重读一次（投递了新指令时用；平时靠 5s 轮询）。 */
+  /** 变一下就立刻重读一次（投递了新指令时用；平时靠 `AUTONOMY_TASK_REFRESH_MS` 轮询）。 */
   reloadSignal?: number;
 }
-
-/** 详情轮询间隔（状态/进展会变；payload 很小）。 */
-const REFRESH_MS = 5000;
 
 export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal = 0 }: BodyProps) {
   const [detail, setDetail] = useState<AutonomyTaskDetail | null>(null);
@@ -58,7 +55,7 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
   }, [load, reloadSignal]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void load(), REFRESH_MS);
+    const timer = window.setInterval(() => void load(), AUTONOMY_TASK_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [load]);
 

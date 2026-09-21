@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { blockedView } from "../autonomy";
-import { requestExecutorPrefill } from "../executorPrefill";
+import { submitExecutorReply, type ReplyOutcome } from "../executorReply";
 import type { AutonomyTaskDetail } from "../types";
 
 /**
@@ -10,9 +10,9 @@ import type { AutonomyTaskDetail } from "../types";
  * 1. **谁在挡** + **依据**：分类来自它自己的 `status` / `need.type`，并把是靠哪个字段判出来的写出来；
  * 2. **它在等什么**：`need.description` 全文照抄；它这次没填 `need` 就退到 `reason`，
  *    并在标题里**标明**这段来自 reason（不让人以为它一定说了 need）；
- * 3. **它给的选项**：只有 `need.options` 里**结构化**给了才列（1..N，点一下**填进下面的输入框**，
- *    不直接投递）；它没给就不出现这一块；
- * 4. **自由输入永远在**：没有合适的就直接在输入框写自己的意见。
+ * 3. **它给的选项**：只有 `need.options` 里**结构化**给了才列（1..N）——**点一个选中，按【确认】
+ *    就投递给执行方**（编号是界面的事，用户不用输入）；它没给就不出现这一块；
+ * 4. **自由输入永远在**：没有合适的就直接在输入框写自己的意见（走同一个通道）。
  *
  * 看不到时间就说看不到：autonomy 的 payload 没有「何时开始阻塞」，所以只显示
  * 「本页看到这个状态已 N 分钟」（页面自己的观察，明确标注）。
@@ -37,6 +37,15 @@ export default function ExecutorBlockedPanel({ detail }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
+  // 选项是**单选**：点中 → 按【确认】才投递（用户不用输入编号）
+  const [selected, setSelected] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [outcome, setOutcome] = useState<ReplyOutcome | null>(null);
+  const optionsKey = (view?.options ?? []).join(" | ");
+  useEffect(() => {
+    setSelected(null);
+    setOutcome(null);
+  }, [optionsKey]);
 
   // 换了任务 / 状态 / 分类 / 问法就重新计时（观察的是「这一段阻塞」持续了多久）
   const key = `${detail?.task_id ?? ""}|${detail?.status ?? ""}|${view?.kind ?? ""}|${(view?.ask ?? "").slice(0, 24)}`;
@@ -51,6 +60,17 @@ export default function ExecutorBlockedPanel({ detail }: Props) {
   }, []);
 
   if (!view) return null;
+
+  const confirm = async (): Promise<void> => {
+    if (selected === null) return;
+    const choice = view.options[selected];
+    if (!choice) return;
+    setSubmitting(true);
+    setOutcome(null);
+    const result = await submitExecutorReply(choice);
+    setOutcome(result);
+    setSubmitting(false);
+  };
 
   const copy = async (): Promise<void> => {
     try {
@@ -94,16 +114,19 @@ export default function ExecutorBlockedPanel({ detail }: Props) {
 
       {view.options.length > 0 ? (
         <div className="blocked-choices">
-          <div className="blocked-ask-label">它给的选项（点一个 → 填进下面的输入框，可改）</div>
-          <ul className="blocked-options">
+          <div className="blocked-ask-label">它给的选项：点一个，然后按【确认】发回去</div>
+          <ul className="blocked-options" role="radiogroup" aria-label="它给的选项">
             {view.options.map((option, i) => (
               <li key={option}>
                 <button
                   type="button"
-                  className="blocked-option"
-                  data-prefill={option}
-                  title={`填进输入框：${option}`}
-                  onClick={() => requestExecutorPrefill(option)}
+                  role="radio"
+                  aria-checked={selected === i}
+                  className={`blocked-option${selected === i ? " is-selected" : ""}`}
+                  onClick={() => {
+                    setSelected(i);
+                    setOutcome(null);
+                  }}
                 >
                   <span className="blocked-option-idx">{i + 1}.</span>
                   <span className="blocked-option-text">{option}</span>
@@ -111,12 +134,31 @@ export default function ExecutorBlockedPanel({ detail }: Props) {
               </li>
             ))}
           </ul>
+          <div className="blocked-confirm-row">
+            <button
+              type="button"
+              className="blocked-confirm"
+              disabled={selected === null || submitting}
+              onClick={() => void confirm()}
+            >
+              {submitting ? "提交中…" : "确认"}
+            </button>
+            <span className={`blocked-confirm-hint${outcome && !outcome.ok ? " is-bad" : ""}`}>
+              {outcome
+                ? outcome.ok
+                  ? `已发给执行方${outcome.receipt ? ` · ${outcome.receipt}` : ""}`
+                  : `没有投递：${outcome.error}`
+                : selected === null
+                  ? "先点一个选项（不用输入编号）"
+                  : `将把「${view.options[selected]}」原文发过去`}
+            </span>
+          </div>
         </div>
       ) : null}
 
       <div className="blocked-else">
         {view.options.length > 0
-          ? "都不合适？直接写在下面的输入框里（你自己的意见）。"
+          ? "都不合适？也可以直接写在下面的输入框里（你自己的意见）。"
           : "它不是让你选：直接写在下面的输入框里（你自己的意见）。"}
       </div>
 

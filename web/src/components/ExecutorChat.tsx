@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { deliveryReceipt, executorBusy } from "../autonomy";
 import { formatDateTime } from "../format";
 import ChatInput, { type ChatPayload } from "./ChatInput";
-import { onExecutorPrefill } from "../executorPrefill";
+import { onExecutorReply, type ReplyOutcome } from "../executorReply";
 
 /**
  * 给**执行方**（autonomy）发消息 —— 「autonomy 创建的 agent 也要能 chat」。
@@ -48,40 +48,43 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busy = executorBusy(status);
-  // 阻塞面板的选项/预填通过这条总线把话塞进输入框（只填不发）
-  const [prefill, setPrefill] = useState({ text: "", nonce: 0 });
-  useEffect(
-    () => onExecutorPrefill((text) => setPrefill((prev) => ({ text, nonce: prev.nonce + 1 }))),
-    [],
-  );
-
-  const send = async (payload: ChatPayload): Promise<boolean> => {
+  /** 唯一的投递实现：手写输入与阻塞面板的【确认】都走它（回执只此一份）。 */
+  const deliver = async (text: string): Promise<ReplyOutcome> => {
     setError(null);
     setReceipt(null);
     try {
       // 执行方只收文字：不带 images / mode（后端也会拦带图的请求）。
       const res =
         via === "executor"
-          ? await api.sendMessageToExecutor(taskId, payload.text)
-          : await api.sendMessage(taskId, payload.text);
-      setReceipt(deliveryReceipt(res));
+          ? await api.sendMessageToExecutor(taskId, text)
+          : await api.sendMessage(taskId, text);
+      const line = deliveryReceipt(res);
+      setReceipt(line);
       setSent((prev) => [
         ...prev,
         {
-          text: payload.text,
+          text,
           at: new Date().toISOString(),
           ...(res.messageId != null ? { messageId: res.messageId } : {}),
           ...(typeof res.queueAhead === "number" ? { queueAhead: res.queueAhead } : {}),
         },
       ]);
       onDelivered?.();
-      return true;
+      return { ok: true, receipt: line };
     } catch (e) {
       // 400（带图 / 空）/ 404（执行方没有这条 task）/ 503（不可达）都按原文说清：没有投递。
-      setError(errorText(e));
-      return false;
+      const text2 = errorText(e);
+      setError(text2);
+      return { ok: false, error: text2 };
     }
   };
+
+  // 阻塞面板的【确认】复用这条通道；用 ref 保证面板拿到的是**当前**任务的投递函数
+  const deliverRef = useRef(deliver);
+  deliverRef.current = deliver;
+  useEffect(() => onExecutorReply((text) => deliverRef.current(text)), []);
+
+  const send = async (payload: ChatPayload): Promise<boolean> => (await deliver(payload.text)).ok;
 
   return (
     <div className="executor-chat">
@@ -129,7 +132,6 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
             ? "执行方工作中，消息将排到它后面…（只收文字）"
             : "发一条指令给执行方（autonomy）…（只收文字）"
         }
-        prefill={prefill}
       />
     </div>
   );

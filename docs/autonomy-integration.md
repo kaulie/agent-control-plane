@@ -408,7 +408,7 @@ project（context_ref.project）
 - `autonomy` 侧 `Need` 的结构：`src/decision.go` 只有 `type` + `description`；`recordPlan` 用 `jsonNeed(decision.Need)` 落库，
   `api_service.go` 把它当**字符串**返回（`plans[].need`）。
 
-### A10.2 建议 autonomy 给 `need` 加结构化 `options`（建议，不强制必填）
+### A10.2 建议 autonomy 给 `need` 加结构化 `options`（**已实现**：autonomy #137）
 
 现状：选项只能藏在 `description` 的散文里（上一条实测：枚举还与长解释混在同一段）。建议：
 
@@ -427,6 +427,39 @@ type Need struct {
 - **兼容**：`jsonNeed` 是 `json.Marshal(need)` + `omitempty` → 老 payload 一字不变；控制面已把它当 JSON 字符串解析、
   未知键忽略，**不需要版本协商**。
 - **控制面这边已经兼容**：有 `options` 就渲染 1..N（见 A10.1 ③），没有就只有自由输入。
+
+### A10.3 「验证」单独成一节：引擎那一侧的判定（已实现）
+
+`status=unverified` 只说结论（它自称完成、引擎没认），**依据**原先只挤在四态条那一行提示里。
+现在详情页多一节「验证（引擎判定）」（`web/src/components/ExecutorVerification.tsx`），数据来自 autonomy 的
+`GET /api/tasks/{task_id}` → `verification`（autonomy #139；控制面 `/api/tasks/{id}/executor` 与
+`/api/autonomy/tasks/{id}` 都是纯代理，原样带出）。
+
+| 字段 | 页面上是什么 |
+|---|---|
+| `contract[]`（cycle 1 钉住，之后不改写） | 每条判据一行：`name` + `requirement`（判据原文）+ 它绑的**证据槽**（`evidence.source`）+ `expect`，右边是这条判据**最近一次**判定的结果 |
+| `verdicts[]`（只追加；一条判据每轮 `done` 一行） | 「判定记录（N 次：pass / fail / inconclusive）」折叠块，最新在前：结果 + 判据名 + cycle + 问的谁（`method`）+ 期望 vs 实际 + 原文 `reason` |
+
+**口径（三条硬规矩）**：
+
+1. **三种「没有」分开说**（不合并成一句假话）：接口上没 `verification` 字段 = 引擎**从没判过**这条任务；
+   有字段但 `contract` 空 = 它自称过 `done` 却**没钉过完成契约**；有契约没判定 = 契约在、还没有哪一轮 `done` 被拿去过。
+2. **只有全 `pass` 才算数**：最近一轮里只要有一条不是 `pass`，这一节的结论就是「没过」，并**点名**哪条判据、
+   什么结果、为什么（`reason` 原文截断，悬停看全文）。**不从 `status` 猜**：状态字在四态条与状态条上已经有了。
+3. **判据原文照抄**：`requirement` / 证据槽 / `expect` 都从 `criterion` 原文里取（接口上是 JSON 字符串或对象都认）；
+   解析不出来就说「它没写 requirement」，**不替它编一条**。`result` 只认 `pass` / `fail` / `inconclusive` 三个词，
+   别的照原文放着（徽章按 inconclusive 显示）。
+
+**实测证据**（`task-2c438baf5499b592`，远端 PG：`completion_contract` 2 行 + `verification` 9 行）：
+
+- 契约：`C1`「A report documenting this task's known context information … is produced」（证据槽
+  `step:report.output.summary`，期望 `exists=true`）、`C2`「The refactor change is landed (merged) on the base branch
+  of the autonomy repository」（证据槽 `step:land.output.merged`，期望 `field=merged · equals=true`）；
+- 判定：`C1` / `C2` 多轮 `inconclusive`（`method=-` 表示没有权威来源能回答这个证据槽，`method=registry:…`
+  表示问了某个能力）→ 最近一轮没过，所以 `status=unverified`；页面上这一节就是那条结论的完整来处。
+
+> 部署依赖：autonomy 侧要先上 #139（`verification` 字段）。**没上之前这一节显示「引擎还没判过这条任务」**
+> —— 那是**如实**的（字段确实还没来），不是「判过、全过」。
 
 ## 5. 验收方式（他实现完，互通时逐条跑）
 
@@ -497,6 +530,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.10 | 2026-09-21 | 新增「**验证**」section（A10.3）：把引擎那一侧的判定单独铺开 —— cycle 1 钉住的契约（判据原文 + 证据槽 + 期望）与每次判定（结果 / 问的谁 / 期望 vs 实际 / reason）。三种「没有」分开说、只有全 pass 才算数、判据原文照抄。数据来自 autonomy #139 的 `verification` 字段；四态条的 unverified 提示现在指到这一节 |
 | v2.9 | 2026-09-21 | 阻塞面板的选项交互改成**单选 + 确认**：点一个选项（高亮选中）→ 按 **【确认】** 就把它的**原文**重新提交给 autonomy；**用户不用输入编号**（编号只是界面生成，既不投递也不让人抄）；投递复用输入框那条通道（`web/src/executorReply.ts` 的 `submitExecutorReply`，同一份回执；没挂通道就明说没投）。上一版的「点一下填进输入框」与 `executorPrefill` 一并移除；测试同步（单选/确认禁用态/不需要编号/通道空串不发且失败原文回传） |
 | v2.8 | 2026-09-21 | 新增 **A10.1 阻塞态交互口径**（`ExecutorBlockedPanel`）：分类+依据 / `need.description` 全文（它没填就退 `reason` 并**标明来源**）/ **只认 `need.options` 的结构化选项**（点一下填进输入框、不自动投递）+ 自由输入永远在；**删掉自造话术**、不猜散文枚举、时间只报「本页观察」；另加 **A10.2**：建议 autonomy 给 `need` 加 `options`（**不强制必填**，附理由与兼容说明）。**口径归并**：四态文案只留一套（`task-status.ts` 取 `autonomy.ts` 的 `EXECUTOR_PHASE_LABEL`），详情页重复的状态徽标删除（侧栏列表徽标保留）；新增 `web/scripts/test-executor-blocked-ui.mjs`（已进 `npm test`）。**不做**：停止任务按钮（A7 未代理，属 M2） |
 | v2.7 | 2026-09-21 | 四态条的「等什么」口径：`need_input` / `blocked` 时读 plan 的 **`need`**（接口上是 JSON 字符串，取 `description`；拿不到退回 `reason`）——`task-2c438baf5499b592` 实测显示「在等人工 review/合 PR」而不是一条泛泛的 reason |

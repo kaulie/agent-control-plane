@@ -3,6 +3,7 @@ import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
 import { statusClass, worldLine } from "../autonomy";
 import PlanSection from "./ExecutorPlan";
+import VerificationSection from "./ExecutorVerification";
 import ExecutorChat from "./ExecutorChat";
 import ExecutorPhaseBar from "./ExecutorPhaseBar";
 import ExecutorBlockedPanel from "./ExecutorBlockedPanel";
@@ -113,6 +114,9 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
 
       {/* 计划：正在规划 / 最新计划 + 已完成 step + 当前 step 的进展 */}
       <PlanSection detail={detail} status={status} />
+
+      {/* 验证：引擎自己那一侧的「做完了吗」—— status=unverified 的依据在这里 */}
+      <VerificationSection detail={detail} />
 
       <div className="auto-detail">
         {error ? <div className="auto-banner bad">读执行方失败：{error}</div> : null}

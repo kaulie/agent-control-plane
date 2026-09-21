@@ -548,7 +548,7 @@ export function executorPhaseView(detail: AutonomyTaskDetail | null): ExecutorPh
     return view(
       "blocked",
       `执行方自称已完成，但引擎验证没通过（unverified）${why ? `：${why}` : ""}` +
-        " —— 需要重试或人工确认",
+        " —— 需要重试或人工确认；为什么没认，见下面「验证」一节",
     );
   }
   // ② 阻塞（二）：停了 / 出错 / 被挡 / 等输入。
@@ -773,5 +773,234 @@ export function blockedView(
       `【阻塞 \u00b7 ${BLOCKED_KIND_LABEL[kind]}】${ask || reason}` +
       (options.length > 0 ? `（它给了 ${options.length} 个选项）` : "") +
       (links.length > 0 ? `（${links[0].url}）` : ""),
+  };
+}
+
+// ---- 验证（引擎自己那一侧的「做完了吗」）----------------------------------------
+//
+// `status=unverified` 只是一个状态字；它为什么没被认，答案在 autonomy 的
+// `verification` 里（cycle 1 钉住的完成契约 + 每一次判定，docs/verification.md）。
+// 这个 section 就是把那份事实铺开 —— 全部按它**真给的**说，缺哪样就说缺哪样：
+// 没钉过契约、没判过、判据原文没写 requirement，都不编一个出来。
+
+/** 一次判定的结果分类（只认 autonomy 的三个词，别的照原文放着）。 */
+export type VerdictTone = "pass" | "fail" | "inconclusive" | "other";
+
+/** 一条判定（界面要用的字段，全部来自接口原文）。 */
+export interface VerifyVerdictView {
+  key: string;
+  id?: number;
+  cycle?: number;
+  criterion: string;
+  /** 原始结果词（`pass` / `fail` / `inconclusive` / 别的）。 */
+  result: string;
+  tone: VerdictTone;
+  /** 问的谁（`-` = 没有权威来源，判不了）。 */
+  method: string;
+  /** 证据槽与它解析成了什么（原文 JSON 摊平后的样子）。 */
+  evidence: string;
+  expected: string;
+  observed: string;
+  reason: string;
+  createdAt?: string;
+}
+
+/** 契约里的一条判据 + 它最近一次判定。 */
+export interface VerifyCriterionView {
+  key: string;
+  idx?: number;
+  name: string;
+  /** 判据要求什么（它自己写的 `requirement`；没写就是空串）。 */
+  requirement: string;
+  /** 它绑的证据槽（`evidence.source` / `evidence.slot`）。 */
+  slot: string;
+  /** 期望（`expect` 摊成 `k=v`）。 */
+  expect: string;
+  /** 这条判据最近一次判定（没判过就没有）。 */
+  last?: VerifyVerdictView;
+  passes: number;
+  fails: number;
+  inconclusives: number;
+}
+
+export interface VerificationView {
+  /** 首帧还没读到 → 不画（免得先闪一句「没判过」再变）。 */
+  loaded: boolean;
+  /** 接口上**有没有** `verification` 这个字段：`false` = 引擎从没判过（不是判过全过）。 */
+  present: boolean;
+  contract: VerifyCriterionView[];
+  /** 判定记录，**最新的在前**（界面上先看最近一次）。 */
+  verdicts: VerifyVerdictView[];
+  counts: { total: number; pass: number; fail: number; inconclusive: number };
+  /** 最近一轮（cycle 最大那次）的判定。 */
+  latestRound: VerifyVerdictView[];
+  /** 一句话：现在到底算不算「做完」。 */
+  headline: string;
+  /** section 的整体色调：pass（最近一轮全过）/ fail / inconclusive / none（没判过）。 */
+  tone: VerdictTone | "none";
+}
+
+function verdictTone(result: string): VerdictTone {
+  const s = result.trim().toLowerCase();
+  if (s === "pass") return "pass";
+  if (s === "fail") return "fail";
+  if (s === "inconclusive") return "inconclusive";
+  return "other";
+}
+
+/** JSON 原文（可能是字符串也可能是对象）→ 对象；解不开就当空的。 */
+function jsonRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  const text = plainText(value);
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 对象里的一串标量摊成 `k=v / k2=v2`（值是对象或数组就只留键名，不假装能读懂）。 */
+function flatPairs(value: unknown): string {
+  const obj = jsonRecord(value);
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const text = plainText(v);
+    if (text) parts.push(`${k}=${text}`);
+    else if (Array.isArray(v)) parts.push(`${k}=[${v.length}]`);
+    else if (v && typeof v === "object") parts.push(`${k}={...}`);
+  }
+  return parts.join(" \u00b7 ");
+}
+
+function toVerdictView(v: Record<string, unknown>, i: number): VerifyVerdictView {
+  const result = plainText(v.result);
+  const id = typeof v.id === "number" ? v.id : undefined;
+  const cycle = typeof v.cycle === "number" ? v.cycle : undefined;
+  const created = plainText(v.created_at);
+  return {
+    key: `${id ?? i}`,
+    ...(id != null ? { id } : {}),
+    ...(cycle != null ? { cycle } : {}),
+    criterion: plainText(v.criterion),
+    result,
+    tone: verdictTone(result),
+    method: plainText(v.method),
+    evidence: flatPairs(v.evidence),
+    expected: plainText(v.expected),
+    observed: plainText(v.observed),
+    reason: plainText(v.reason),
+    ...(created ? { createdAt: created } : {}),
+  };
+}
+
+/**
+ * 引擎那一侧的验证：契约 + 判定 + 一句话结论。
+ *
+ * 三种「没有」必须分清，界面上的话也跟着分：
+ * - 接口上没这个字段（`present: false`）→ 引擎**从没判过**这条任务；
+ * - 有字段但 `contract` 空 → 它自称过 done，而**从来没钉过完成契约**，没判据可对照；
+ * - 有契约没判定 → 契约在，但还没有哪一轮 done 被拿去过（或判定的都还没落库）。
+ */
+export function verificationView(detail: AutonomyTaskDetail | null): VerificationView {
+  const raw = detail?.verification;
+  const loaded = detail !== null;
+  if (!loaded || !raw || typeof raw !== "object") {
+    return {
+      loaded,
+      present: false,
+      contract: [],
+      verdicts: [],
+      counts: { total: 0, pass: 0, fail: 0, inconclusive: 0 },
+      latestRound: [],
+      headline: loaded ? "引擎还没判过这条任务（接口上还没有验证记录）" : "",
+      tone: "none",
+    };
+  }
+
+  const verdicts = (Array.isArray(raw.verdicts) ? raw.verdicts : [])
+    .filter((v): v is Record<string, unknown> => !!v && typeof v === "object")
+    .map(toVerdictView);
+  const counts = {
+    total: verdicts.length,
+    pass: verdicts.filter((v) => v.tone === "pass").length,
+    fail: verdicts.filter((v) => v.tone === "fail").length,
+    inconclusive: verdicts.filter((v) => v.tone === "inconclusive").length,
+  };
+  const cycles = verdicts.map((v) => v.cycle ?? 0);
+  const latestCycle = cycles.length > 0 ? Math.max(...cycles) : 0;
+  const latestRound = verdicts.filter((v) => (v.cycle ?? 0) === latestCycle);
+
+  const contract = (Array.isArray(raw.contract) ? raw.contract : [])
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+    .map((c, i): VerifyCriterionView => {
+      const crit = jsonRecord(c.criterion);
+      const name = plainText(c.name) || plainText(crit.name);
+      const evidence = jsonRecord(crit.evidence);
+      const mine = verdicts.filter((v) => v.criterion === name);
+      const last = mine.at(-1);
+      return {
+        key: `${name || c.idx || i}`,
+        ...(typeof c.idx === "number" ? { idx: c.idx } : {}),
+        name,
+        requirement: plainText(crit.requirement),
+        slot: plainText(evidence.source) || plainText(evidence.slot),
+        expect: flatPairs(crit.expect),
+        ...(last ? { last } : {}),
+        passes: mine.filter((v) => v.tone === "pass").length,
+        fails: mine.filter((v) => v.tone === "fail").length,
+        inconclusives: mine.filter((v) => v.tone === "inconclusive").length,
+      };
+    });
+
+  // 一句话结论只从**判定**里得，不从 `status` 猜：状态字在四态条与状态条上已经有了。
+  // 判过而契约空是可能的（那一次 done 自己带了判据名）：这时要在结论里说清「没有钉住的契约」。
+  const noContract = contract.length === 0 ? "（没有钉住的完成契约，判据名来自那次 done 自己）" : "";
+  const bad = latestRound.filter((v) => v.tone !== "pass");
+  let headline: string;
+  let tone: VerdictTone | "none";
+  if (verdicts.length === 0) {
+    tone = "none";
+    headline =
+      contract.length > 0
+        ? `契约在（${contract.length} 条判据），但还没有哪一轮 done 被判定过`
+        : "没有钉住的完成契约，也没有判定：它自称做完也无从验证";
+  } else if (bad.length > 0) {
+    tone = bad.some((v) => v.tone === "fail") ? "fail" : "inconclusive";
+    // 同一轮里同一条判据可能判过不止一次（每次 done 判定一次）：结论行按判据去重，
+    // 免得同一句话念两遍（完整记录在下面的判定列表里，一条不少）。
+    const seen = new Set<string>();
+    const lines = bad
+      .filter((v) => {
+        const key = v.criterion || "?";
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((v) => `${v.criterion || "?"} ${v.result}${v.reason ? `（${oneLine(v.reason, 80)}）` : ""}`);
+    headline =
+      `最近一轮（cycle ${latestCycle}）没过：` +
+      lines.join("；") +
+      " \u2014 只有全 pass 才算数，这条任务不算「做完」的来处就在这里" +
+      noContract;
+  } else {
+    tone = "pass";
+    headline = `最近一轮（cycle ${latestCycle}）判定全过（${latestRound.length} 条判据）${noContract}`;
+  }
+
+  return {
+    loaded,
+    present: true,
+    contract,
+    verdicts: [...verdicts].reverse(),
+    counts,
+    latestRound,
+    headline,
+    tone,
   };
 }

@@ -972,13 +972,20 @@ export function verificationView(detail: AutonomyTaskDetail | null): Verificatio
         : "没有钉住的完成契约，也没有判定：它自称做完也无从验证";
   } else if (bad.length > 0) {
     tone = bad.some((v) => v.tone === "fail") ? "fail" : "inconclusive";
+    // 同一轮里同一条判据可能判过不止一次（每次 done 判定一次）：结论行按判据去重，
+    // 免得同一句话念两遍（完整记录在下面的判定列表里，一条不少）。
+    const seen = new Set<string>();
+    const lines = bad
+      .filter((v) => {
+        const key = v.criterion || "?";
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((v) => `${v.criterion || "?"} ${v.result}${v.reason ? `（${oneLine(v.reason, 80)}）` : ""}`);
     headline =
       `最近一轮（cycle ${latestCycle}）没过：` +
-      bad
-        .map(
-          (v) => `${v.criterion || "?"} ${v.result}${v.reason ? `（${oneLine(v.reason, 80)}）` : ""}`,
-        )
-        .join("；") +
+      lines.join("；") +
       " \u2014 只有全 pass 才算数，这条任务不算「做完」的来处就在这里" +
       noContract;
   } else {

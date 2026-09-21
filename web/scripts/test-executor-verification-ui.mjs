@@ -163,6 +163,21 @@ assert.ok(text(markup).includes("no step named land ran"), "reason 原文在页�
 const emptyMarkup = html({ status: "running", plans: [] });
 assert.ok(text(emptyMarkup).includes("引擎还没判过这条任务"), "没判过就说没判过（不写「全过」）");
 
+// 同一轮里同一条判据判过两次：结论行只说一次（完整记录仍在判定列表里）
+const twice = verificationView({
+  verification: {
+    contract: [],
+    verdicts: [
+      verdict(1, 5, "C1", "inconclusive", { reason: "no reader" }),
+      verdict(2, 5, "C1", "inconclusive", { reason: "no reader" }),
+      verdict(3, 5, "C2", "pass"),
+    ],
+  },
+});
+assert.equal(twice.counts.total, 3, "判定列表一条不少");
+assert.equal(twice.headline.match(/C1 inconclusive/g)?.length, 1, "结论行按判据去重");
+assert.ok(!twice.headline.includes("C2"), "过的那条不进「没过」清单");
+
 console.log("✅ verification section OK");
 
 assert.equal(objView.contract[0].requirement, "R");

@@ -250,6 +250,16 @@ export interface Task {
   lastUserInputAt?: string;
   /** 从哪个 task fork 而来（上下文将满时分流）。 */
   forkedFrom?: string;
+  /**
+   * 这条 task 的 **agent 创建路径**（由后端落库）：`control-plane`（默认，控制面本地创建）/
+   * `autonomy`（**执行**交给 autonomy：任务仍是我们建的，agent 由它的 runtime 创建）。
+   * 老任务没有这个字段 → 当 `control-plane`。
+   */
+  agentPath?: AgentPath;
+  /** 执行方（autonomy）那侧的 task id；`agentPath=autonomy` 时才有。 */
+  executorTaskId?: string;
+  /** 执行方那侧的 agent id（详情里的 Agent chip 用它）。 */
+  executorAgentId?: string;
 }
 
 /**

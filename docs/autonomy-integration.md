@@ -2,15 +2,17 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **v1.5 — 待 autonomy 方复查**（第 4 节只剩 1 条：A6.1 的事件模型要求；未知 project=硬失败、列表过滤、游标单调/永久保留与**游标作用域（A6.2：两边各自独立、不对齐编号）**均已确认） |
+| 状态 | **v2.0 — 待 autonomy 方复查**（第 4 节只剩 1 条：A6.1 的事件模型要求；未知 project=硬失败、列表过滤、游标单调/永久保留与**游标作用域（A6.2：两边各自独立、不对齐编号）**均已确认） |
 | 双方 | 调用方：web-cursor 控制面（agent-control-plane，`:4211`）· 被调方：autonomy runtime（`:4300`） |
 | 事实来源 | autonomy `docs/http-api.md` + 对运行中的 `http://127.0.0.1:4300` 实测（下文标「实测」）；控制面实测 `http://127.0.0.1:4211` |
-| 目的 | 新建任务时多一条**agent 创建路径**：①由**控制面**创建（现状，本地工作区跑）②由 **autonomy** 创建（它的 runtime 跑）。任务仍是 web-cursor 的任务（同一个列表、同一个详情），区别只在 `agentPath`；两边只通过 autonomy 的 task id 关联 |
+| 目的 | 新建任务时多一条**agent 创建路径**：①由**控制面**创建（现状，本地工作区跑）②由 **autonomy** 创建（它的 runtime 跑）。**任务始终由控制面创建并落库**（谁建的就是谁建的），`agentPath` 只决定 agent 由谁创建；autonomy 执行时我们存下执行方那侧的 `task_id` / `agent_id` 作为两边的对应关系 |
 
 ## 0. 背景与边界（先说清，避免重复设计）
 
 - **两个入口互不影响**：老入口（`POST /api/tasks`，控制面网关 + 本机 agent）**一行不改**，行为与今天逐字节一致。新入口只是多一条路径。
-- **控制面不落库**：新入口**不写** task 行、不存 autonomy 的 task id、不进看板 / 用量 / 统计。任务与对话数据**唯一真源是 autonomy**。
+- **任务由控制面创建并落库**：走新入口时，控制面先建**自己的** task 行（我们的 task id、项目、类型/目标、description），再把「执行」交给 autonomy（`POST /api/tasks`）。因此任务是一等公民：出现在我们自己的任务列表 / 详情里（`agentPath=autonomy`），失败也留痕。
+- **执行数据仍在 autonomy**：它的 runs / 事件 / 对话是那边的真源，**不镜像进我们的库**（不进看板 / 用量 / 统计）；我们只额外存两个 id（`executor_task_id` / `executor_agent_id`）做对应，状态与进展按需代理读取。
+- **交接失败不假装成功**：任务已建 → autonomy 拒绝（4xx）或不可达（503）时，任务**保留**、状态标 `error`、原文写进时间线（`executor_failed`），并把它一起返回给前端。**绝不**回落成本机 agent 执行。
 - **但界面上是同一个列表**：`agentPath = autonomy` 的任务会并进侧栏那个 Tasks 列表（展示层适配，数据实时来自代理），详情也渲染在同一个主区外壳里 —— 用户看到的是一套任务，只有「agent 由谁创建」这一处不同。**「不落库」是数据层约束，不是「单独开一个页面」的理由**；反过来，界面上合并也**不**意味着控制面存了这些行（见第 5 节测试：每次代理调用都断言库里计数不变）。
 - **拿不到就留空**：autonomy 接口暂时给不了的字段（provider、组织、仓库、计划步骤、时间线 / 对话消息、用量…）在界面上**不渲染、不写占位**；等它的接口补齐（M2）再往同一个位置加，版式不变。
 - **控制面只做代理**：前端 → 控制面（`/api/autonomy/*`）→ autonomy（`/api/*`）。控制面不改写、不缓存业务状态（仅短暂可用性缓存）。
@@ -20,12 +22,16 @@
 ## 1. 端到端数据流
 
 ```
-创建：前端（创建对话框选「由 autonomy 创建 agent」）→ POST 控制面 /api/autonomy/tasks
+创建：前端（创建对话框选「由 autonomy 创建 agent」）→ POST 控制面 /api/tasks { description, projectId, agentPath: "autonomy" }
+      → 控制面**先落库**（我们的 task id；provider=autonomy；不建本地工作区、不预分配本地 agent）
       → POST autonomy /api/tasks { description, context_ref: { project } }
-      → 202 { task_id, agent_id, status, message_id, queued }  → 前端展示 task_id / agent_id
+      → 202 { task_id, agent_id, status, message_id, queued }
+      → 记到我们的行上：executor_task_id / executor_agent_id（时间线留一条 `executor_attached`）
+      → 201 返回**我们的** task（前端当普通任务展示）
+      失败：4xx/503 + 原文；任务保留并标 error（时间线 `executor_failed`）
 
-查看：前端 → GET 控制面 /api/autonomy/tasks            → autonomy GET /api/tasks（列表）
-     前端 → GET 控制面 /api/autonomy/tasks/{id}       → autonomy GET /api/tasks/{id}（状态 + plans/steps + project）
+查看：前端 → GET 控制面 /api/tasks/{我们的 id}/executor → autonomy GET /api/tasks/{executor_task_id}（状态 + plans/steps + project）
+     前端 → GET 控制面 /api/autonomy/tasks            → autonomy GET /api/tasks（列表；对账 + 显示执行方状态）
      前端 → GET 控制面 /api/autonomy/tasks/{id}/agents/{aid}/events?last_synced_message_seq=N（M2，时间线）
 
 世界解析（autonomy 读控制面）：autonomy context_ref{project} → GET 控制面 /api/projects（+ 仓库，见第 3 节⚠️）
@@ -246,7 +252,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 | `GET /api/autonomy/tasks` | `GET /api/tasks` | 同上，透传 |
 | `GET /api/autonomy/tasks/{id}` | `GET /api/tasks/{id}` | 404 原样透传 |
 
-> 「**数据库无新增行**」是这次设计的硬约束：新入口不落库（不写 task/run/event），所以测试会显式断言控制面 SQLite 计数不变。
+> **落库口径（v2）**：新入口**要**写我们的 `tasks` 行（任务是谁建的）、交接结果写 `agent_path` / `executor_task_id` / `executor_agent_id`，并写一条审计事件（`executor_attached` / `executor_failed`）；**不写** run / 不产生本地事件流。测试同时断言：**读接口**（`/api/autonomy/*`、`/executor`）一次都不写库。
 
 ## 6. 范围与后续
 
@@ -254,7 +260,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 - **M1 的展示口径**：任务仍只有一套 —— `agentPath = autonomy` 的行并进同一个侧栏列表、详情渲染在同一个主区（同一套 chip / 版式，只是数据来自代理）；**没有独立页面 / 入口**，也没有「autonomy 任务」这个类别。该路径暂时拿不到的字段一律留空不显示。
 - **M2（下一份）**：时间线（A6 映射）、继续对话（A2④）、停止（A7）。
 - **M3（可选）**：广播（A8）、把 evaluation 侧的对比页串起来。
-- **不做**：控制面落库（写 task/run/event）、把 autonomy 任务混进看板 / 用量统计、双建「对照任务」（已明确砍掉）。<br>（注意区分：**界面上合并显示**是 M1 的做法；这里不做的「不做」指的是**数据层**落库。）
+- **不做**：把 autonomy 的 runs / 事件 / 对话镜像进我们的库（看板 / 用量 / 统计仍只统计本机跑的）、双向同步、双建「对照任务」（已明确砍掉）。<br>（v2 起：**任务行**是我们建的，所以「落库」指的是我们的 task 行；执行数据仍在它那边。）
 
 ## 7. 切换与下线（未来）：兼容只是过渡态
 
@@ -276,5 +282,6 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 | v1.2 | 2026-09-21 | **列表已确认**：`GET /api/tasks` 支持按 `project_id` 过滤，每行带 `project_id` / `agent_id` / `updated_at`（A3 ✅）；阻塞级问题 4 → 3 条 |
 | v1.3 | 2026-09-21 | 三个答复落纸：**未知 project → 硬失败**（A2 ✅）· **`message_seq` 跨重启单调 + 历史永久保留**（A6 ✅）· 新增 **A6.1 事件模型要求**（要与我们现有时间线一致所需的 `role` 枚举 / 工具入参结果 / 每轮终态 / `cycle`，含降级代价）→ 第 4 节 3 条收敛为 1 条 |
 | v1.4 | 2026-09-21 | 新增 **A6.2 游标作用域**：控制面 `events.seq` 是单库全局 `AUTOINCREMENT`（按 task 稀疏、与其它 task 交错，实测 min=1/max=509266/105 tasks），autonomy `message_seq` 是它库内的全局单调 id；**两边各自独立、不共用不比较，因此不需要对齐编号空间**（并写明若将来合并展示要用 `(source, seq)` 复合键；需要的保证只有：全局单调 / 跨重启单调 / 永久保留） |
+| v2.0 | 2026-09-21 | **任务归属定稿**：任务始终由**控制面创建并落库**（`POST /api/tasks` + `agentPath`），autonomy 只负责**执行**（agent 由它创建）；我们存 `executor_task_id` / `executor_agent_id` 做对应，新增 `GET /api/tasks/{id}/executor` 按我们的 taskId 读执行方状态，`POST /api/autonomy/tasks` 下线（创建入口统一）。交接失败 → 任务保留 + `error` + 原文（`executor_failed`），绝不回落本机执行。第 0 节「不落库」改为「执行数据不镜像」 |
 | v1.6 | 2026-09-21 | **展示口径定稿**：任务只有一套（都是 web-cursor 的任务），区别只在 **agent 创建路径**（`agentPath`：`control-plane` / `autonomy`）→ 同一个侧栏列表、同一个详情外壳、**没有独立页面**；接口暂时拿不到的字段一律**留空不显示**（等 M2 补齐）。第 0 节「不落库」明确为**数据层**约束（界面上合并 ≠ 控制面存了这些行） |
 | v1.5 | 2026-09-21 | 新增 **第 7 节「切换与下线（未来）」**：旧入口最终会下线 → **兼容只是过渡态**，双方都不为兼容做基建（不对齐编号、不双向同步、不镜像任务）；控制面侧只需两件事：入口做成开关（`TASK_ENTRY`：`both` / `autonomy` / `gateway`）+ 旧任务保持只读可用。原第 7 节变更记录顺延为第 8 节 |

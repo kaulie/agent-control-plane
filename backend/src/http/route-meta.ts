@@ -134,10 +134,10 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
       "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。",
   },
   "GET /api/autonomy/tasks": {
-    summary: "autonomy 侧的任务列表（只代理；控制面侧栏会把它并进同一个 Tasks 列表）",
+    summary: "autonomy 侧的任务列表（只代理；用于对账 / 显示执行方状态）",
     tags: ["autonomy"],
     description:
-      "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面不落库、不掺进 /api/tasks。",
+      "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面用它给 `agentPath=autonomy` 的任务显示执行方状态，也用来把「没在我们这边建过」的行显示出来（对账）。",
   },
   "GET /api/autonomy/tasks/{taskId}": {
     summary: "autonomy 任务详情 / 进展（只代理；404 原样透传）",
@@ -145,26 +145,30 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     description:
       "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
   },
-  "POST /api/autonomy/tasks": {
-    summary: "创建一条 agent 由 autonomy 创建的任务（描述必填；控制面不落库、只代理）",
-    tags: ["autonomy"],
-    description:
-      "转发 autonomy 的 `POST /api/tasks`（body: description + projectId → context_ref.project）。" +
-      "autonomy 明确拒绝（4xx）原文带出；连不上 / 超时 → 503，**不**回落成本机 agent 执行。",
-    responses: {
-      202: { description: "autonomy 已受理（task_id / agent_id / queued）" },
-      400: { description: "描述缺失或 autonomy 拒绝（原文在 error 里）" },
-      503: { description: "autonomy 不可达 / 超时" },
-    },
-  },
   "GET /api/tasks": {
     summary: "任务列表（带 stats，可按 projectId 过滤）",
     tags: ["tasks"],
   },
   "POST /api/tasks": {
-    summary: "新建任务（描述必填；创建后自动投递需求并开跑）",
+    summary:
+      "新建任务（描述必填；默认创建后自动投递需求并开跑；`agentPath=autonomy` 时改为交给 autonomy 执行）",
     tags: ["tasks"],
-    responses: { 201: { description: "创建成功，返回任务" } },
+    description:
+      "任务始终由控制面创建/落库（谁建的就是谁建的）。`agentPath`（`control-plane` 默认 / `autonomy`）" +
+      "只决定** agent 由谁创建**：后者把执行交给 autonomy（agent 由它的 runtime 创建），交接结果记在" +
+      "`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。",
+    responses: {
+      201: { description: "创建成功，返回任务" },
+      400: { description: "参数非法 / autonomy 明确拒绝（原文在 error 里）" },
+      503: { description: "`agentPath=autonomy` 但 autonomy 不可达 / 超时（任务已创建并标 error）" },
+    },
+  },
+  "GET /api/tasks/{taskId}/executor": {
+    summary: "执行方（autonomy）的状态 / 进展（按我们的 taskId 读，只代理）",
+    tags: ["tasks"],
+    description:
+      "只对 `agentPath=autonomy` 的任务有意义：代理 autonomy 的 `GET /api/tasks/{它的 id}`。" +
+      "没有交接记录 → 404；不可达 → 503。",
   },
   "GET /api/tasks/{taskId}": {
     summary: "任务详情（task + project + runs + stats + context）",

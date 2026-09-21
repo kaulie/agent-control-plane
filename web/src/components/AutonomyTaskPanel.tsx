@@ -3,55 +3,48 @@ import { api, errorText } from "../api";
 import { formatDateTime } from "../format";
 import { planSteps, statusClass, worldLine } from "../autonomy";
 import TaskIdsBar from "./TaskIdsBar";
-import type {
-  AutonomyMeta,
-  AutonomyTaskDetail,
-  TaskListRow,
-} from "../types";
+import type { AutonomyMeta, AutonomyTaskDetail, TaskListRow } from "../types";
 
 /**
- * agent 创建路径 = `autonomy` 的任务详情。
+ * 「agent 由 autonomy 创建」那部分数据的展示件（和老任务共用同一套版式）。
  *
- * 和老任务**同一个外壳**：渲染在同一个 `<main className="main">` 里，顶部还是同一个 `TaskIdsBar`
- * （Task / Project / Org / Agent + Agent 创建路径），下面是状态与正文。
+ * 只画 autonomy 接口**真给了**的东西：状态 / 轮次 / 描述 / 项目·组织 / error / plans·steps /
+ * 原始响应折叠。它暂时给不了的（时间线 / 对话消息、token 用量、上下文占用、继续对话 / 停止）
+ * **留空不显示** —— 不置灰、不写占位；等它的接口补齐（M2）再往这里加，版式不用改。
  *
- * 只画 autonomy 接口**真给了**的东西：它暂时给不了的（时间线 / 对话消息、token 用量、上下文占用、
- * 停止 / 继续对话）就**留空不显示** —— 不置灰、不写占位；等它的接口补齐（M2：事件 / 消息）再往
- * 这里加，版式不用改（见 docs/autonomy-integration.md）。
+ * 两种来源：
+ * - `via="task"`：这条任务是我们建的（`agentPath=autonomy`），按**我们的 taskId** 读
+ *   `GET /api/tasks/{id}/executor`（控制面代理）；
+ * - `via="executor"`：只在 autonomy 那边存在、我们没建过的行（对账 / 历史），按它的 id 读
+ *   `GET /api/autonomy/tasks/{id}`。
  */
-interface Props {
+interface BodyProps {
   taskId: string;
-  /** 列表里那一行：描述 / 轮次 / agent id 先用它，免得首帧空窗。 */
+  via?: "task" | "executor";
+  /** 列表里那一行：描述 / 轮次先用它，免得首帧空窗。 */
   row?: TaskListRow;
-  /** autonomy 自述（地址 / 版本）——只写进 chip 的悬停，**不占版面**。 */
+  /** autonomy 自述（地址 / 版本）——只写进 chip 的悬停。 */
   meta?: AutonomyMeta | null;
-  /** 这条 task 所属项目的组织（我们从自己的项目库里取，autonomy 也可能给一份）。 */
-  orgId?: string;
-  orgName?: string;
 }
 
 /** 详情轮询间隔（状态/进展会变；payload 很小）。 */
 const REFRESH_MS = 5000;
 
-export default function AutonomyTaskPanel({
-  taskId,
-  row,
-  meta,
-  orgId,
-  orgName,
-}: Props) {
+export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps) {
   const [detail, setDetail] = useState<AutonomyTaskDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      setDetail(await api.autonomyTask(taskId));
+      setDetail(
+        via === "task" ? await api.taskExecutor(taskId) : await api.autonomyTask(taskId),
+      );
       setError(null);
     } catch (e) {
       setDetail(null);
       setError(errorText(e));
     }
-  }, [taskId]);
+  }, [taskId, via]);
 
   useEffect(() => {
     void load();
@@ -70,26 +63,14 @@ export default function AutonomyTaskPanel({
     "";
   const world = worldLine(detail);
   const steps = planSteps(detail);
+  const turns = row?.turns;
   const source = meta?.url
     ? `autonomy ${meta.url}${meta.version ? ` · v${meta.version}` : ""}`
     : undefined;
-  const turns = row?.turns;
 
   return (
     <>
-      <TaskIdsBar
-        task={{
-          taskId,
-          projectId: row?.projectId || detail?.project?.id || "",
-          agentId: row?.agentId ?? "",
-        }}
-        {...(orgId ? { orgId } : {})}
-        {...(orgName ? { orgName } : {})}
-        agentPath="autonomy"
-        {...(source ? { agentPathSource: source } : {})}
-      />
-
-      <div className="task-ids task-status-bar" role="group" aria-label="任务状态">
+      <div className="task-ids task-status-bar" role="group" aria-label="执行方状态">
         {status ? (
           <span className={`auto-status ${statusClass(status)}`}>{status}</span>
         ) : null}
@@ -99,16 +80,28 @@ export default function AutonomyTaskPanel({
             <code className="task-id-value">{turns}</code>
           </span>
         ) : null}
+        {row?.executorAgentId ? (
+          <span className="task-id-chip is-static" title="执行方（autonomy）那侧的 agent id">
+            <span className="task-id-label">执行 agent</span>
+            <code className="task-id-value">{row.executorAgentId}</code>
+          </span>
+        ) : null}
         {updatedAt ? (
-          <span className="task-id-chip is-static" title="autonomy 侧最后更新时间">
+          <span className="task-id-chip is-static" title="执行方侧最后更新时间">
             <span className="task-id-label">更新于</span>
             <code className="task-id-value">{formatDateTime(updatedAt)}</code>
+          </span>
+        ) : null}
+        {source ? (
+          <span className="task-id-chip is-static" title="这两个字段的来处（控制面只代理）">
+            <span className="task-id-label">数据源</span>
+            <code className="task-id-value">{source}</code>
           </span>
         ) : null}
       </div>
 
       <div className="auto-detail">
-        {error ? <div className="auto-banner bad">读 autonomy 失败：{error}</div> : null}
+        {error ? <div className="auto-banner bad">读执行方失败：{error}</div> : null}
         {detail?.error ? (
           <div className="auto-detail-row">
             <span>error</span>
@@ -149,6 +142,34 @@ export default function AutonomyTaskPanel({
           </details>
         ) : null}
       </div>
+    </>
+  );
+}
+
+interface Props extends BodyProps {
+  /** 这条 task 所属项目的组织（从我们自己的项目库取，和本地详情同一口径）。 */
+  orgId?: string;
+  orgName?: string;
+}
+
+/**
+ * 只在 autonomy 那边存在、我们没建过的任务：与老任务同一个主区外壳（同一个 `TaskIdsBar`）。
+ * 我们建的任务（`agentPath=autonomy`）走自己的任务详情，只把 `ExecutorTaskBody` 嵌进去。
+ */
+export default function AutonomyTaskPanel({ taskId, row, orgId, orgName, meta }: Props) {
+  return (
+    <>
+      <TaskIdsBar
+        task={{
+          taskId,
+          projectId: row?.projectId ?? "",
+          agentId: row?.executorAgentId ?? row?.agentId ?? "",
+        }}
+        {...(orgId ? { orgId } : {})}
+        {...(orgName ? { orgName } : {})}
+        agentPath="autonomy"
+      />
+      <ExecutorTaskBody taskId={taskId} via="executor" {...(row ? { row } : {})} {...(meta ? { meta } : {})} />
     </>
   );
 }

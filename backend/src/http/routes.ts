@@ -5,6 +5,7 @@ import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
 import type { BillingRuleInput } from "../billing/index.js";
 import type { TaskEntry } from "../config.js";
+import { AGENT_PATHS, isAgentPath, normalizeAgentPath } from "../agent-path.js";
 import type {
   AutonomyCreateResult,
   AutonomyStatus,
@@ -292,47 +293,6 @@ export async function registerRoutes(
     },
   );
 
-  app.post<{ Body: { description?: string; projectId?: string } }>(
-    "/api/autonomy/tasks",
-    async (req, reply) => {
-      if (!autonomy) {
-        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
-      }
-      const description = req.body?.description?.trim() ?? "";
-      if (!description) {
-        return reply.code(400).send({ error: "description is required (任务描述必填)" });
-      }
-      if (description.length > MAX_TASK_DESCRIPTION_CHARS) {
-        return reply.code(400).send({
-          error: `description too long (max ${MAX_TASK_DESCRIPTION_CHARS} chars)`,
-        });
-      }
-      const projectId = req.body?.projectId?.trim();
-      const result = await autonomy.createTask({
-        description,
-        ...(projectId ? { projectId } : {}),
-      });
-      if (!result.ok) {
-        // 4xx = autonomy 明确拒绝（原样带出）；其余（连不上 / 超时）→ 503。
-        const status =
-          result.httpStatus != null && result.httpStatus >= 400 && result.httpStatus < 500
-            ? result.httpStatus
-            : 503;
-        return reply.code(status).send({ error: result.error });
-      }
-      reply.code(202);
-      return {
-        taskId: result.taskId,
-        ...(result.agentId != null ? { agentId: result.agentId } : {}),
-        ...(result.status ? { status: result.status } : {}),
-        ...(result.messageId != null ? { messageId: result.messageId } : {}),
-        ...(result.queued != null ? { queued: result.queued } : {}),
-        url: autonomy.url,
-        entry: taskEntry,
-      };
-    },
-  );
-
   // ---- settings ----
 
   app.get("/api/settings/global", async () => gateway.getGlobalSettings());
@@ -608,6 +568,11 @@ export async function registerRoutes(
        * `deploy` 合入主分支并部署上线。缺省 `merge`。
        */
       goal?: string;
+      /**
+       * agent 创建路径：`control-plane`（缺省，控制面本地创建 agent 并执行）/
+       * `autonomy`（**执行**交给 autonomy：任务仍在我们库里创建，agent 由它的 runtime 创建）。
+       */
+      agentPath?: string;
     };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
@@ -635,6 +600,13 @@ export async function registerRoutes(
         error: `unknown goal "${body.goal}". Supported: ${TASK_GOAL_IDS.join(", ")}`,
       });
     }
+    // agent 创建路径只有这两个值；写错就报错，别静默按默认路径跑（那会跑错地方）。
+    if (body.agentPath !== undefined && !isAgentPath(body.agentPath)) {
+      return reply.code(400).send({
+        error: `unknown agentPath "${body.agentPath}". Supported: ${AGENT_PATHS.join(", ")}`,
+      });
+    }
+    const agentPath = normalizeAgentPath(body.agentPath);
     try {
       const task = gateway.createTask({
         title: body.title,
@@ -646,8 +618,40 @@ export async function registerRoutes(
         taskType: body.taskType,
         // 没传 = 用默认目标（合入主分支），保证新建的任务都有明确交付目标。
         goal: body.goal ?? DEFAULT_TASK_GOAL,
+        agentPath,
       });
-      // 系统自动投递需求 → agent 立刻开跑（并发满/部署 drain 时自动进入队列）。
+      if (agentPath === "autonomy") {
+        // 任务已在我们库里建好 → **执行**交给 autonomy（agent 由它的 runtime 创建）。
+        // 交接失败时任务**保留**并标 error + 原文（不静默消失、也不回落成本机执行）。
+        const handed = autonomy
+          ? await autonomy.createTask({
+              description,
+              ...(task.projectId ? { projectId: task.projectId } : {}),
+            })
+          : { ok: false as const, error: "autonomy 未配置（AUTONOMY_API_URL）" };
+        if (!handed.ok) {
+          gateway.recordTaskExecutorFailure(task.taskId, handed.error);
+          const status =
+            "httpStatus" in handed &&
+            handed.httpStatus != null &&
+            handed.httpStatus >= 400 &&
+            handed.httpStatus < 500
+              ? handed.httpStatus
+              : 503;
+          return reply.code(status).send({
+            error: `交给 autonomy 失败：${handed.error}`,
+            taskId: task.taskId,
+            task: gateway.getTaskDetail(task.taskId)?.task ?? task,
+          });
+        }
+        const withExecutor = gateway.saveTaskExecutor(task.taskId, {
+          taskId: handed.taskId,
+          ...(handed.agentId != null ? { agentId: String(handed.agentId) } : {}),
+        });
+        reply.code(201);
+        return withExecutor ?? task;
+      }
+      // 老路径（agentPath=control-plane）逐字不变：系统自动投递需求 → agent 立刻开跑。
       // 投递失败不回滚任务：任务已创建，用户可以自己在面板上重试/直接发消息。
       try {
         await gateway.dispatchTaskIntent(task.taskId);
@@ -664,6 +668,41 @@ export async function registerRoutes(
       return reply.code(400).send({ error: message });
     }
   });
+
+  /**
+   * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读，代理它的 `GET /api/tasks/{id}`。
+   *
+   * 只对 `agentPath=autonomy` 的任务有意义（它们由我们创建、执行在 autonomy）；没有交接记录 → 404。
+   * 不可达 → 503（读不到就说读不到，不假装没有进展）。
+   */
+  app.get<{ Params: { taskId: string } }>(
+    "/api/tasks/:taskId/executor",
+    async (req, reply) => {
+      const task = gateway.getTaskDetail(req.params.taskId)?.task;
+      if (!task) return reply.code(404).send({ error: "task not found" });
+      const executorTaskId = task.executorTaskId?.trim();
+      if (!executorTaskId) {
+        return reply.code(404).send({
+          error: "这条任务的 agent 不是 autonomy 创建的（没有执行方记录）",
+        });
+      }
+      if (!autonomy) {
+        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      }
+      const result = await autonomy.getTask(executorTaskId);
+      if (result.available && result.task) {
+        return {
+          ...result.task,
+          executorTaskId,
+          ...(task.executorAgentId ? { executorAgentId: task.executorAgentId } : {}),
+          fetchedAt: result.fetchedAt,
+        };
+      }
+      return reply
+        .code(result.status === 404 ? 404 : 503)
+        .send({ error: result.error ?? "autonomy 不可达" });
+    },
+  );
 
   /**
    * 任务意图（标题 / 类型 / 目标 / 描述）+ PR 链接的统一 PATCH。

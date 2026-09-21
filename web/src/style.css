@@ -3138,61 +3138,20 @@ button.agent-rounds-chip-link:focus-visible {
   border-color: var(--accent);
 }
 
+/* ---- agent 由 autonomy 创建的 task：详情沿用老版式，只多一条状态条 + 只读 chip ---------- */
+.task-id-chip.is-static {
+  cursor: default;
+}
 
-/* ---- 「Autonomy 任务」页（数据源是 autonomy 本身；控制面只代理）--------------------- */
-.auto-scope {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 0 16px 12px;
+.task-id-chip.is-static:hover {
+  border-color: var(--border);
 }
-.auto-scope-hint {
-  color: var(--text-dim);
-  font-size: 12px;
+
+.task-status-bar {
+  /* 和 TaskIdsBar 同一套条状样式（同一行 chip），不是新外壳。 */
+  gap: 8px;
 }
-.auto-banner {
-  margin: 0 16px 12px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-.auto-banner.bad {
-  background: rgba(220, 80, 80, 0.12);
-  border: 1px solid rgba(220, 80, 80, 0.4);
-  color: #ffb4b4;
-}
-.auto-empty {
-  color: var(--text-dim);
-  padding: 28px 16px;
-  font-size: 13px;
-}
-.auto-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.auto-table th {
-  text-align: left;
-  color: var(--text-dim);
-  font-weight: 500;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-}
-.auto-table td {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.auto-row {
-  cursor: pointer;
-}
-.auto-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-.auto-row.selected {
-  background: rgba(100, 150, 255, 0.1);
-}
+
 .auto-status {
   display: inline-block;
   padding: 1px 8px;
@@ -3225,46 +3184,36 @@ button.agent-rounds-chip-link:focus-visible {
   color: #cfcfcf;
   border-color: rgba(160, 160, 160, 0.4);
 }
-.auto-cell-task {
-  max-width: 420px;
+
+.auto-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
 }
-.auto-task-id {
-  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: var(--text-dim);
+.auto-banner.bad {
+  background: rgba(220, 80, 80, 0.12);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  color: #ffb4b4;
 }
-.auto-task-desc {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 420px;
-}
-.auto-cell-dim {
-  color: var(--text-dim);
-  font-size: 11px;
-}
+
 .auto-detail {
   margin: 16px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.auto-detail-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
 .auto-detail-row {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 140px 1fr;
   gap: 8px;
   font-size: 12px;
   padding: 3px 0;
 }
 .auto-detail-row > span:first-child {
   color: var(--text-dim);
+}
+.auto-detail-text {
+  white-space: pre-wrap;
 }
 .auto-err {
   color: #ffb4b4;

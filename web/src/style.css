@@ -3354,6 +3354,57 @@ button.agent-rounds-chip-link:focus-visible {
   padding-left: 18px;
 }
 
+/* ---- 给执行方（autonomy）发消息：输入框 + 投递回执 + 本页投递记录 ---- */
+.executor-chat {
+  margin: 16px;
+}
+.executor-chat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.executor-receipt {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(80, 200, 120, 0.12);
+  border: 1px solid rgba(80, 200, 120, 0.4);
+  color: #8fe0a8;
+}
+.executor-sent {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.executor-sent li {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-left: 2px solid rgba(90, 160, 255, 0.5);
+  background: rgba(255, 255, 255, 0.02);
+}
+.executor-sent-time {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.executor-sent-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.executor-sent-meta {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 .auto-raw {
   margin-top: 10px;
 }

@@ -40,6 +40,7 @@ export interface ChatPayload {
 
 interface Props {
   onSend: (payload: ChatPayload) => void | Promise<boolean | void>;
+  /** 不给就不显示 Stop（本机 agent 才有停止）——不置灰。 */
   onStop?: () => void;
   disabled: boolean;
   running: boolean;
@@ -47,6 +48,13 @@ interface Props {
   activeRunMode?: AgentMode;
   queueLength?: number;
   stopping?: boolean;
+  /**
+   * 执行方（autonomy）变体：它只收文字、也没有 Plan/Agent 这个模式 ——
+   * 那就**不显示**附件与模式选择（不置灰、不写占位），文案也跟着换。
+   */
+  hideMode?: boolean;
+  allowImages?: boolean;
+  placeholderOverride?: string;
 }
 
 const ALLOWED = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -101,6 +109,9 @@ export default function ChatInput({
   activeRunMode,
   queueLength = 0,
   stopping = false,
+  hideMode = false,
+  allowImages = true,
+  placeholderOverride,
 }: Props) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
@@ -174,13 +185,15 @@ export default function ChatInput({
       });
   };
 
-  const placeholder = running
-    ? queueLength > 0
-      ? `Agent 工作中，另有 ${queueLength} 条消息排队…`
-      : "Agent 工作中，消息将加入队列…"
-    : effectiveMode === "plan"
-      ? "Describe what to plan… (read-only planning mode)"
-      : "Send an instruction… (paste or attach images)";
+  const placeholder =
+    placeholderOverride ??
+    (running
+      ? queueLength > 0
+        ? `Agent 工作中，另有 ${queueLength} 条消息排队…`
+        : "Agent 工作中，消息将加入队列…"
+      : effectiveMode === "plan"
+        ? "Describe what to plan… (read-only planning mode)"
+        : "Send an instruction… (paste or attach images)");
 
   const modeSelectTitle = running
     ? "切换模式不会中断当前任务，仅影响下一条排队消息"
@@ -188,7 +201,7 @@ export default function ChatInput({
 
   return (
     <div className="chat-input">
-      {images.length > 0 && (
+      {allowImages && images.length > 0 && (
         <div className="chat-image-previews">
           {images.map((img, i) => (
             <div key={`${img.mimeType}-${i}`} className="chat-image-thumb">
@@ -207,7 +220,7 @@ export default function ChatInput({
         </div>
       )}
       {attachError && <div className="chat-attach-error">{attachError}</div>}
-      {running && activeRunMode && (
+      {!hideMode && running && activeRunMode && (
         <div className="chat-mode-hint">
           当前{" "}
           <span className={`event-mode event-mode-${activeRunMode}`}>
@@ -228,27 +241,31 @@ export default function ChatInput({
             e.target.value = "";
           }}
         />
-        <button
-          type="button"
-          className="btn-attach"
-          title="Attach images"
-          aria-label="Attach images"
-          disabled={disabled || stopping || sending || images.length >= MAX_IMAGES}
-          onClick={() => fileRef.current?.click()}
-        >
-          📎
-        </button>
-        <select
-          className="mode-select"
-          value={effectiveMode}
-          disabled={disabled || stopping || sending}
-          aria-label="Conversation mode"
-          title={modeSelectTitle}
-          onChange={(e) => selectMode(e.target.value as AgentMode)}
-        >
-          <option value="agent">Agent</option>
-          <option value="plan">Plan</option>
-        </select>
+        {allowImages ? (
+          <button
+            type="button"
+            className="btn-attach"
+            title="Attach images"
+            aria-label="Attach images"
+            disabled={disabled || stopping || sending || images.length >= MAX_IMAGES}
+            onClick={() => fileRef.current?.click()}
+          >
+            📎
+          </button>
+        ) : null}
+        {hideMode ? null : (
+          <select
+            className="mode-select"
+            value={effectiveMode}
+            disabled={disabled || stopping || sending}
+            aria-label="Conversation mode"
+            title={modeSelectTitle}
+            onChange={(e) => selectMode(e.target.value as AgentMode)}
+          >
+            <option value="agent">Agent</option>
+            <option value="plan">Plan</option>
+          </select>
+        )}
         <textarea
           value={text}
           placeholder={placeholder}
@@ -256,6 +273,7 @@ export default function ChatInput({
           rows={4}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
+            if (!allowImages) return;
             const items = e.clipboardData?.items;
             if (!items) return;
             const files: File[] = [];
@@ -271,9 +289,11 @@ export default function ChatInput({
             }
           }}
           onDragOver={(e) => {
+            if (!allowImages) return;
             if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
           }}
           onDrop={(e) => {
+            if (!allowImages) return;
             if (!e.dataTransfer?.files?.length) return;
             e.preventDefault();
             if (!disabled && !stopping) void addFiles(e.dataTransfer.files);
@@ -285,12 +305,8 @@ export default function ChatInput({
             }
           }}
         />
-        {running ? (
-          <button
-            className="btn-stop"
-            onClick={() => onStop?.()}
-            disabled={stopping || !onStop}
-          >
+        {running && onStop ? (
+          <button className="btn-stop" onClick={onStop} disabled={stopping}>
             {stopping ? "Stopping…" : "Stop"}
           </button>
         ) : null}

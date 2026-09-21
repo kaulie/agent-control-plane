@@ -26,12 +26,14 @@ interface BodyProps {
   row?: TaskListRow;
   /** autonomy 自述（地址 / 版本）——只写进 chip 的悬停。 */
   meta?: AutonomyMeta | null;
+  /** 变一下就立刻重读一次（投递了新指令时用；平时靠 5s 轮询）。 */
+  reloadSignal?: number;
 }
 
 /** 详情轮询间隔（状态/进展会变；payload 很小）。 */
 const REFRESH_MS = 5000;
 
-export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps) {
+export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal = 0 }: BodyProps) {
   const [detail, setDetail] = useState<AutonomyTaskDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +51,7 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta }: BodyProps)
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadSignal]);
 
   useEffect(() => {
     const timer = window.setInterval(() => void load(), REFRESH_MS);

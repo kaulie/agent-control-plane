@@ -332,7 +332,21 @@ export const api = {
     mode?: "agent" | "plan",
     planAnswerBatch?: import("./plan-questions").PlanAnswerBatch,
   ) =>
-    write<{ runId: string; queued?: boolean; queueLength?: number }>(
+    write<{
+      /** 本机 agent：这一轮 run 的 id（老行为）。 */
+      runId?: string;
+      queued?: boolean;
+      queueLength?: number;
+      /** `agentPath=autonomy`：这条消息**投递给执行方**了（本机没有 run）。 */
+      executor?: boolean;
+      executorTaskId?: string;
+      executorAgentId?: number;
+      executorStatus?: string;
+      /** 投递回执：这条指令在它 inbox 里的 id。 */
+      messageId?: number;
+      /** 投递回执：它前面还有几条（= autonomy 的 `queued`，数字）。 */
+      queueAhead?: number;
+    }>(
       `/tasks/${id}/messages`,
       {
         method: "POST",

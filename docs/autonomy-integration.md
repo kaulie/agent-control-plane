@@ -259,6 +259,34 @@ execution_step ──(execution_step_interaction.reason_turn_id)──▶ reason
 > 派活，背后有没有 worker、用哪只由 runtime 决定），不是串了别的任务 —— 三只 worker 的 `agents.current_task_id`
 > 都写着这条 task 的 id。
 
+### A9.2 `pending` 是什么（含「自部署把观察者杀掉」这个坑）
+
+`GET /api/tasks/{id}` 的 plan 里 `steps[].status` 只有三种来路（`src/api_service.go` → `planStepProgress`）：
+**计划里有这一步 → 默认 `pending`**，只有存在对应的 `execution_step` 行时才被盖成 `ok` / `failed`。
+所以 **`pending` = 「计划了、没有执行记录」**，**不是「正在跑」**。
+
+而 `execution_step` 行是在 `action.Execute()` **返回之后**才写的（`runtime.go` → `recordStep`），
+`CapabilityAction …` 日志也是 `cap.Run()` **返回之后**才打（`action.go`）—— 因此
+**执行中被打断 = 既没有日志、也没有行**，看起来就永远停在 `pending`。
+
+实测（`task-2c438baf5499b592` 最新 plan 14 = `service.deploy` + `deployment.monitor{watch:true}`）：
+
+1. `15:41:02.94` planner 决策出这份 plan（`reason` 还是「cycle 3 的 done 被验证拒了」）；
+2. `15:41:03.27→.28` `service.deploy {branch: main, service: autonomy}` 返回 **ok** —— 它**只触发、不等**：
+   `{pipeline_id: pipeline-e5f5c7db, poll: /api/pipelines/pipeline-e5f5c7db, state: queued}`；
+3. `deployment.monitor` 带着绑定 `deployment ← step:deploy.output.pipeline_id` 与 **`watch=true`** 开始轮询这条流水线
+   （客户端 20s 超时，流水线约 12s 完成 → 正常应在 ~15:41:15 返回并落行）；
+4. **这条流水线部署的正是 autonomy 自己**：`15:41:13/14` 进程被换掉重启（`runtime.pid` mtime `15:41:13`、
+   `server.log` mtime `15:41:14`，日志最后两行就是新进程 `[autonomy] version=cd3e7f54 listen=…`）；
+5. 观察者随进程一起被杀 → monitor **没有行** → 至今显示 `pending`；同一条指令（`agent_messages` 1000014）也停在 `queued`。
+
+14:11 的 plan 10 是**同一个模式**（那次 deploy 把版本换成 `5a4652a2` 并重启，monitor 至今 pending）→ 不是偶发：
+**用 `service.deploy` 部署自己、又在同一 plan 里 `watch` 自己那次部署，观察者必然被「被观察的动作」杀掉。**
+注意被观察的部署本身是**成功**的（`pipeline-e5f5c7db → succeeded → deployment-cd3e7f54` = 现在线上跑的版本），
+所以 `pending ≠ 部署失败`；重启后也**不会补跑**旧 plan 剩下的 step（只有**新指令**才会 resume 那只 agent、开新 cycle）。
+
+> 展示口径：我们若要把这种残留显示出来，应写「**未执行**（进程重启打断）」，不要写成「进行中」。
+
 ## 3. 控制面提供给 autonomy 的（也请一起复查）
 
 | 接口 | 实际返回 | 备注 |
@@ -363,6 +391,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.5 | 2026-09-21 | 新增 **A9.2 `pending` 是什么**：`steps[].status=pending` 是 autonomy 的**默认值**（计划有、`execution_step` 无）；而 step 行/日志都在 `cap.Run()` **返回后**才写 → 执行中被打断＝永远 pending。实测：plan 14 的 `deployment.monitor{watch:true}` 跟着的正是**部署 autonomy 自己**那次流水线，15:41:13/14 自重启把观察者杀掉；plan 10（14:11）同模式。被观察的部署其实成功，pending ≠ 失败，且重启不补跑旧 step |
 | v2.4 | 2026-09-21 | 新增 **A9.1 谁干的活**：`execution_step.agent_id` 是**委托方**（planner），不是 worker；worker 每次委托都**新建**（`Runtime.AcquireAgent` 首行 `agents.NewAgent()`，无复用分支；复用只针对 planner）——附 `execution_step_interaction.reason_turn_id → reason_turns.agent_id` 的映射链与三批指令 → 10003/10007/10008 实测 |
 | v2.3 | 2026-09-21 | 新增 **A9 数据落点与粒度**：线上 autonomy 库是 **PostgreSQL**（那份 `data/autonomy.db` SQLite 已是旧库，对着它查会得到「这条 task 没数据」的假象）；`agent_messages`（任务级对话）/ `reason_turns`（每次 LLM 调用）/ `llm_messages`（每条消息）/ `llm_events`（流式事件，本部署未落）**粒度不同、行数天然不等**（`llm_messages.turn_id` ↔ `reason_turns.id` 是 **N:1**，实测 41 : 5），附「真·错配」判据与只读自查 SQL |
 | v1 | 2026-09-20 | 初稿：A1–A8 接口需求 + 控制面提供的接口 + 5 条阻塞级问题；对 `:4300` 实测标注 |

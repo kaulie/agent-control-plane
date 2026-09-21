@@ -183,9 +183,13 @@ assert.equal(executorPhaseView({ task_id: "t", status: "completed", plans: [] })
 const { AUTONOMY_TASK_REFRESH_MS } = await import("../src/autonomy.ts");
 assert.equal(AUTONOMY_TASK_REFRESH_MS, 10_000, "autonomy 任务状态轮询 = 10s");
 // 两处轮询都必须用这个常量：写死一个数就又会各说各话（5s / 10s 并存过）
+// 用测试文件自身定位仓库根：CI 是从 backend/ 跑这些脚本的，cwd 相对路径会 ENOENT。
 const { readFileSync } = await import("node:fs");
+const { fileURLToPath } = await import("node:url");
+const { dirname, join } = await import("node:path");
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 for (const file of ["web/src/App.tsx", "web/src/components/AutonomyTaskPanel.tsx"]) {
-  const src = readFileSync(file, "utf8");
+  const src = readFileSync(join(repoRoot, file), "utf8");
   assert.ok(
     src.includes("AUTONOMY_TASK_REFRESH_MS"),
     `${file} 的轮询必须用 AUTONOMY_TASK_REFRESH_MS（不许写死间隔）`,

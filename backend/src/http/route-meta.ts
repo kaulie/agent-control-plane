@@ -92,12 +92,12 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     tags: ["accounts"],
   },
   "POST /api/accounts": {
-    summary: "新增账号（provider + vendor + apiKey + 工作区根）",
+    summary: "新增账号（provider + vendor + apiKey + 唯一工作区根）",
     tags: ["accounts"],
     responses: { 201: { description: "创建成功" } },
   },
   "PATCH /api/accounts/{accountId}": {
-    summary: "改账号（不传 apiKey 则保留原 key）",
+    summary: "改账号（不传 apiKey 则保留原 key；工作区根不可与其它账号相同）",
     tags: ["accounts"],
   },
   "DELETE /api/accounts/{accountId}": {

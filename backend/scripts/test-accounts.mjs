@@ -15,11 +15,18 @@ import { Store } from "../src/store/db.ts";
 import { AgentGateway } from "../src/gateway/gateway.ts";
 import { registerRoutes } from "../src/http/routes.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
-import { maskApiKey } from "../src/accounts.ts";
+import {
+  duplicateAgentRootMessage,
+  findAccountUsingRoot,
+  maskApiKey,
+  normalizeAgentRootWorkspace,
+} from "../src/accounts.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-accounts-"));
 const rootA = path.join(dir, "ws-a");
 const rootB = path.join(dir, "ws-b");
+const rootC = path.join(dir, "ws-c");
+const rootD = path.join(dir, "ws-d");
 const store = new Store(dir);
 const project = store.createProject("account-pool");
 
@@ -95,6 +102,27 @@ await registerRoutes(app, gateway, registry, {
 const hdr = { "x-ui-version": "0.0.0-test" };
 
 assert.equal(maskApiKey("cur_live_abcdefghijklmn"), "cur_…klmn");
+assert.equal(
+  normalizeAgentRootWorkspace(`${rootA}/`),
+  normalizeAgentRootWorkspace(rootA),
+  "trailing slash is the same root",
+);
+assert.equal(
+  findAccountUsingRoot(
+    [{ accountId: "a1", agentRootWorkspace: rootA }],
+    `${rootA}/`,
+  )?.accountId,
+  "a1",
+);
+assert.equal(
+  findAccountUsingRoot(
+    [{ accountId: "a1", agentRootWorkspace: rootA }],
+    rootA,
+    "a1",
+  ),
+  undefined,
+  "editing self is not a conflict",
+);
 
 // 1) 创建 Cursor + 两把 DeepSeek + 一把 MiniMax
 const cursorAcc = await app.inject({
@@ -137,7 +165,7 @@ const ds2 = await app.inject({
     vendor: "deepseek",
     label: "DeepSeek B",
     apiKey: "sk-deepseek-bbb",
-    agentRootWorkspace: rootB,
+    agentRootWorkspace: rootC,
   },
 });
 const mm = await app.inject({
@@ -149,7 +177,7 @@ const mm = await app.inject({
     vendor: "minimax",
     label: "MiniMax 夜班",
     apiKey: "mm-key-night",
-    agentRootWorkspace: rootB,
+    agentRootWorkspace: rootD,
     isDefault: true,
   },
 });
@@ -168,6 +196,56 @@ assert.equal(
   "同一 vendor 可以挂多把 key",
 );
 assert.ok(!JSON.stringify(listed).includes("sk-deepseek-aaa"));
+
+const dupCreate = await app.inject({
+  method: "POST",
+  url: "/api/accounts",
+  headers: hdr,
+  payload: {
+    provider: "cursor",
+    label: "撞根目录",
+    apiKey: "cur_live_other_key",
+    agentRootWorkspace: `${rootA}/`,
+  },
+});
+assert.equal(dupCreate.statusCode, 400, dupCreate.body);
+assert.match(
+  JSON.parse(dupCreate.body).error,
+  /不同账号必须使用不同的工作根目录/,
+);
+assert.match(
+  JSON.parse(dupCreate.body).error,
+  /Cursor 主号/,
+);
+
+const keepOwn = await app.inject({
+  method: "PATCH",
+  url: `/api/accounts/${cursorBody.accountId}`,
+  headers: hdr,
+  payload: {
+    provider: "cursor",
+    label: "Cursor 主号",
+    agentRootWorkspace: `${rootA}/`,
+  },
+});
+assert.equal(keepOwn.statusCode, 200, keepOwn.body);
+
+const stealRoot = await app.inject({
+  method: "PATCH",
+  url: `/api/accounts/${JSON.parse(ds1.body).accountId}`,
+  headers: hdr,
+  payload: {
+    provider: "cline",
+    vendor: "deepseek",
+    label: "DeepSeek A",
+    agentRootWorkspace: rootA,
+  },
+});
+assert.equal(stealRoot.statusCode, 400, stealRoot.body);
+assert.equal(
+  JSON.parse(stealRoot.body).error,
+  duplicateAgentRootMessage("Cursor 主号", rootA),
+);
 
 // 2) 创建任务：workspace = 该账号 root / agentId
 const created = await app.inject({
@@ -202,7 +280,7 @@ const clineTaskRes = await app.inject({
 assert.equal(clineTaskRes.statusCode, 201, clineTaskRes.body);
 const clineTask = JSON.parse(clineTaskRes.body);
 assert.equal(clineTask.provider, "cline");
-assert.equal(path.dirname(clineTask.workspace), rootB);
+assert.equal(path.dirname(clineTask.workspace), rootD);
 
 async function waitForRun(taskId) {
   for (let i = 0; i < 300; i += 1) {
@@ -236,6 +314,22 @@ const delBusy = await app.inject({
   headers: hdr,
 });
 assert.equal(delBusy.statusCode, 400, delBusy.body);
+
+const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "wc-accounts-seed-"));
+const seedStore = new Store(seedDir);
+const seeded = seedStore.seedLegacyAccountsIfEmpty({
+  workspaceRoot: path.join(seedDir, "ws"),
+  cursorApiKey: "cur_seed",
+  clineApiKey: "sk-seed",
+  clineVendor: "deepseek",
+});
+assert.equal(seeded.length, 2);
+assert.notEqual(
+  seeded[0].agentRootWorkspace,
+  seeded[1].agentRootWorkspace,
+  "seeded cursor/cline must not share a root",
+);
+seedStore.close();
 
 console.log("PASS: account pool");
 process.exit(0);

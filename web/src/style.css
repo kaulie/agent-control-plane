@@ -1904,6 +1904,17 @@ button.agent-rounds-chip-link:focus-visible {
   color: var(--amber);
 }
 
+.account-root-conflict {
+  display: inline-block;
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--red) 18%, var(--bg-3));
+  color: var(--red);
+}
+
+.account-root-warn {
+  color: var(--red);
+}
+
 .account-form {
   display: flex;
   flex-direction: column;

@@ -4,6 +4,12 @@ import type { ProviderAccount } from "../../types";
 
 const DEFAULT_ROOT = "/Users/gaolei/agent-workspace";
 
+function normalizeRoot(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/[\\/]+$/, "") || trimmed;
+}
+
 interface Draft {
   provider: "cursor" | "cline";
   vendor: string;
@@ -78,6 +84,18 @@ export default function AccountPoolSection() {
   };
 
   const save = async (): Promise<void> => {
+    const conflict = accounts.find(
+      (account) =>
+        account.accountId !== editingId &&
+        normalizeRoot(account.agentRootWorkspace) ===
+          normalizeRoot(draft.agentRootWorkspace),
+    );
+    if (conflict) {
+      setError(
+        `工作根目录已被账号「${conflict.label}」占用。不同账号必须使用不同的工作根目录。`,
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -144,6 +162,17 @@ export default function AccountPoolSection() {
     /\/$/,
     "",
   );
+  const rootConflict = accounts.find(
+    (account) =>
+      account.accountId !== editingId &&
+      normalizeRoot(account.agentRootWorkspace) ===
+        normalizeRoot(draft.agentRootWorkspace),
+  );
+  const duplicateRoots = new Set(
+    accounts
+      .map((account) => normalizeRoot(account.agentRootWorkspace))
+      .filter((root, _, all) => root && all.filter((item) => item === root).length > 1),
+  );
 
   return (
     <section className="settings-section">
@@ -154,9 +183,14 @@ export default function AccountPoolSection() {
           可以同时挂多个账户；Cline 下可以同时挂多把 DeepSeek、多把 MiniMax。
           新建 agent 时选用其中一个，工作区为该账号的{" "}
           <code>agent-root-workspace/{"{agentId}"}</code>
-          。不再读取环境变量里的 key。
+          。每个账号的工作根目录必须互不相同。不再读取环境变量里的 key。
         </p>
       </div>
+      {duplicateRoots.size > 0 ? (
+        <div className="settings-section-meta account-root-warn">
+          有账号共用了同一个工作根目录。请改成互不相同，否则新 agent 会写进同一棵目录。
+        </div>
+      ) : null}
       {loading ? (
         <div className="settings-section-meta">加载账号…</div>
       ) : accounts.length === 0 ? (
@@ -191,6 +225,9 @@ export default function AccountPoolSection() {
                 <td className="account-mono">{account.apiKeyMasked || "—"}</td>
                 <td className="account-mono" title={account.agentRootWorkspace}>
                   {account.agentRootWorkspace}
+                  {duplicateRoots.has(normalizeRoot(account.agentRootWorkspace)) ? (
+                    <span className="settings-badge account-root-conflict">根目录冲突</span>
+                  ) : null}
                 </td>
                 <td className="account-actions">
                   <button type="button" className="settings-back" onClick={() => startEdit(account)}>
@@ -295,6 +332,9 @@ export default function AccountPoolSection() {
           />
           <span className="intent-hint">
             新建 agent 的工作区是 <code>{previewRoot}/{"{agentId}"}</code>
+            {rootConflict
+              ? `。与账号「${rootConflict.label}」相同，不能保存。`
+              : "。不可与其它账号相同。"}
           </span>
         </label>
         <div className="account-checks">
@@ -319,7 +359,7 @@ export default function AccountPoolSection() {
           <button
             type="button"
             className="settings-save"
-            disabled={saving || !draft.label.trim()}
+            disabled={saving || !draft.label.trim() || Boolean(rootConflict)}
             onClick={() => void save()}
           >
             {saving ? "保存中…" : editingId ? "保存修改" : "添加账号"}

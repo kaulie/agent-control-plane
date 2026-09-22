@@ -66,7 +66,7 @@
         }
       },
       "post": {
-        "summary": "新增账号（provider + vendor + apiKey + 工作区根）",
+        "summary": "新增账号（provider + vendor + apiKey + 唯一工作区根）",
         "operationId": "postApiAccounts",
         "tags": [
           "accounts"
@@ -92,7 +92,7 @@
         }
       },
       "patch": {
-        "summary": "改账号（不传 apiKey 则保留原 key）",
+        "summary": "改账号（不传 apiKey 则保留原 key；工作区根不可与其它账号相同）",
         "operationId": "patchApiAccountsAccountId",
         "tags": [
           "accounts"

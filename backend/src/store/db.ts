@@ -36,8 +36,11 @@ import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
 import { resolveBilledCost, type CostSource } from "../billing/cost.js";
 import type { BillingRule } from "../billing/types.js";
 import {
+  duplicateAgentRootMessage,
+  findAccountUsingRoot,
   isAccountProvider,
   maskApiKey,
+  normalizeAgentRootWorkspace,
   normalizeVendor,
   toPublicAccount,
   type AccountProvider,
@@ -1024,6 +1027,8 @@ export class Store {
     const now = new Date().toISOString();
     const accountId = newId("acct");
     const isDefault = Boolean(input.isDefault);
+    const agentRootWorkspace = normalizeAgentRootWorkspace(input.agentRootWorkspace);
+    this.assertUniqueAgentRoot(agentRootWorkspace);
     if (isDefault) this.clearDefaultAccount(input.provider, input.vendor);
     this.db
       .prepare(
@@ -1039,7 +1044,7 @@ export class Store {
         input.label,
         input.apiKey,
         input.baseUrl ?? null,
-        input.agentRootWorkspace,
+        agentRootWorkspace,
         input.enabled === false ? 0 : 1,
         isDefault ? 1 : 0,
         now,
@@ -1062,6 +1067,11 @@ export class Store {
   ): ProviderAccountSecret | undefined {
     const current = this.getAccount(accountId);
     if (!current) return undefined;
+    if (patch.agentRootWorkspace !== undefined) {
+      const nextRoot = normalizeAgentRootWorkspace(patch.agentRootWorkspace);
+      this.assertUniqueAgentRoot(nextRoot, accountId);
+      patch = { ...patch, agentRootWorkspace: nextRoot };
+    }
     const vendor = patch.vendor?.trim() || current.vendor;
     const isDefault =
       patch.isDefault !== undefined ? Boolean(patch.isDefault) : current.isDefault;
@@ -1120,38 +1130,49 @@ export class Store {
   }): ProviderAccount[] {
     if (this.listAccounts().length > 0) return [];
     const seeded: ProviderAccount[] = [];
-    const root = input.workspaceRoot.trim();
+    const root = normalizeAgentRootWorkspace(input.workspaceRoot);
     if (!root) return [];
-    if (input.cursorApiKey?.trim()) {
+    const cursorKey = input.cursorApiKey?.trim();
+    const clineKey = input.clineApiKey?.trim();
+    if (cursorKey) {
       seeded.push(
         toPublicAccount(
           this.createAccount({
             provider: "cursor",
             vendor: "cursor",
             label: "默认 Cursor",
-            apiKey: input.cursorApiKey.trim(),
+            apiKey: cursorKey,
             agentRootWorkspace: root,
             isDefault: true,
           }),
         ),
       );
     }
-    if (input.clineApiKey?.trim()) {
+    if (clineKey) {
       const vendor = normalizeVendor("cline", input.clineVendor);
+      // 两个账号不能共用同一工作根目录；只迁 Cline 时仍用原来的 root。
+      const clineRoot = cursorKey ? path.join(root, "cline") : root;
       seeded.push(
         toPublicAccount(
           this.createAccount({
             provider: "cline",
             vendor,
             label: `默认 ${vendor}`,
-            apiKey: input.clineApiKey.trim(),
-            agentRootWorkspace: root,
+            apiKey: clineKey,
+            agentRootWorkspace: clineRoot,
             isDefault: true,
           }),
         ),
       );
     }
     return seeded;
+  }
+
+  private assertUniqueAgentRoot(root: string, exceptId?: string): void {
+    const hit = findAccountUsingRoot(this.listAccounts(), root, exceptId);
+    if (hit) {
+      throw new Error(duplicateAgentRootMessage(hit.label, hit.agentRootWorkspace));
+    }
   }
 
   private clearDefaultAccount(

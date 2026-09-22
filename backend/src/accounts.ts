@@ -11,6 +11,7 @@
  * 这次 run 用谁。列表接口只回掩码，完整 key 不出网。
  */
 
+import path from "node:path";
 import { Llms } from "@cline/sdk";
 
 export type AccountProvider = "cursor" | "cline";
@@ -123,7 +124,7 @@ export function assertAccountInput(
   }
   const label = input.label.trim();
   if (!label) throw new Error("label is required");
-  const agentRootWorkspace = input.agentRootWorkspace.trim();
+  const agentRootWorkspace = normalizeAgentRootWorkspace(input.agentRootWorkspace);
   if (!agentRootWorkspace) throw new Error("agentRootWorkspace is required");
   if (!isAbsoluteWorkspace(agentRootWorkspace)) {
     throw new Error("agentRootWorkspace must be an absolute path");
@@ -150,6 +151,53 @@ export function assertAccountInput(
 
 function isAbsoluteWorkspace(value: string): boolean {
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+/**
+ * Collapse `.` / `..` / extra slashes and drop a trailing separator so
+ * `/data/ws/` and `/data/ws` count as the same root.
+ */
+export function normalizeAgentRootWorkspace(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const normalized = path.normalize(trimmed);
+  if (normalized === path.sep) return normalized;
+  if (/^[A-Za-z]:[\\/]?$/.test(normalized)) {
+    return `${normalized[0]}:\\`;
+  }
+  return normalized.replace(/[\\/]+$/, "");
+}
+
+export function findAccountUsingRoot<
+  T extends { accountId: string; agentRootWorkspace: string },
+>(accounts: T[], root: string, exceptId?: string): T | undefined {
+  const want = normalizeAgentRootWorkspace(root);
+  if (!want) return undefined;
+  return accounts.find(
+    (account) =>
+      account.accountId !== exceptId &&
+      normalizeAgentRootWorkspace(account.agentRootWorkspace) === want,
+  );
+}
+
+export function duplicateAgentRootMessage(label: string, root: string): string {
+  return `工作根目录已被账号「${label}」占用（${root}）。不同账号必须使用不同的工作根目录。`;
+}
+
+export function listDuplicateAgentRoots<
+  T extends { accountId: string; label: string; agentRootWorkspace: string },
+>(accounts: T[]): Array<{ root: string; accounts: T[] }> {
+  const grouped = new Map<string, T[]>();
+  for (const account of accounts) {
+    const key = normalizeAgentRootWorkspace(account.agentRootWorkspace);
+    if (!key) continue;
+    const list = grouped.get(key) ?? [];
+    list.push(account);
+    grouped.set(key, list);
+  }
+  return [...grouped.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([root, group]) => ({ root, accounts: group }));
 }
 
 /** Cline SDK 登记的 LLM 厂商；拿不到就退回常见名单。 */

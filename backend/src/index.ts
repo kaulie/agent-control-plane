@@ -27,6 +27,7 @@ import {
   readPreviousShutdown,
 } from "./shutdown.js";
 import { shouldExitOnProcessError } from "./process-errors.js";
+import { listDuplicateAgentRoots } from "./accounts.js";
 
 const config = loadConfig();
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
@@ -122,6 +123,15 @@ if (seeded.length) {
   console.warn(
     "[startup] 账号池是空的。请在全局设置里添加 Cursor / Cline 账号，否则本机 agent 无法鉴权。",
   );
+}
+const sharedRoots = listDuplicateAgentRoots(store.listAccounts());
+if (sharedRoots.length) {
+  for (const group of sharedRoots) {
+    const labels = group.accounts.map((a) => a.label).join("、");
+    console.warn(
+      `[startup] 账号池工作根目录冲突：${group.root} 被 ${labels} 共用。不同账号必须使用不同根目录，请在全局设置里改开。`,
+    );
+  }
 }
 
 const proxyEnabled = Boolean(config.gitViaProxyUrl);

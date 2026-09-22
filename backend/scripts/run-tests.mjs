@@ -35,6 +35,8 @@ const tests = [
   { file: "scripts/test-agent-timeline.mjs", via: "node" },
   { file: "scripts/test-ui-version-guard.mjs", via: "node" },
   { file: "scripts/test-run-errors.mjs", via: "node" },
+  // Cursor SDK 关流后迟到 write：不能把 WriteIterableClosedError 当成 fatal
+  { file: "scripts/test-process-errors.mjs", via: "tsx" },
   { file: "scripts/test-token-volume.mjs", via: "node" },
   { file: "scripts/test-billing.mjs", via: "tsx" },
   { file: "scripts/test-context-size.mjs", via: "tsx" },

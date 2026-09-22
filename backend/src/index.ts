@@ -26,6 +26,7 @@ import {
   readPreviousExit,
   readPreviousShutdown,
 } from "./shutdown.js";
+import { shouldExitOnProcessError } from "./process-errors.js";
 
 const config = loadConfig();
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
@@ -75,16 +76,34 @@ function writeCrashReport(kind: string, err: unknown): void {
 }
 
 process.on("uncaughtException", (err) => {
+  if (!shouldExitOnProcessError(err)) {
+    logBenignSdkClosedStream("uncaughtException", err);
+    return;
+  }
   writeCrashReport("uncaughtException", err);
   console.error("[fatal] uncaughtException:", err);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
+  if (!shouldExitOnProcessError(reason)) {
+    logBenignSdkClosedStream("unhandledRejection", reason);
+    return;
+  }
   writeCrashReport("unhandledRejection", reason);
   console.error("[fatal] unhandledRejection:", reason);
   process.exit(1);
 });
+
+function logBenignSdkClosedStream(kind: string, reason: unknown): void {
+  const detail =
+    reason instanceof Error
+      ? `${reason.name}: ${reason.message}`
+      : String(reason);
+  console.warn(
+    `[sdk] ignored late WriteIterableClosedError from ${kind} (Cursor stream already closed; not fatal): ${detail}`,
+  );
+}
 
 const store = new Store(config.dataDir);
 const seeded = store.seedLegacyAccountsIfEmpty({

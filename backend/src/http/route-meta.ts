@@ -150,10 +150,11 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     tags: ["autonomy"],
     description:
       "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` " +
-      "= 给同一只 agent 追加一条指令，忙则排队，契约 A2③），区别只在寻址：这里直接用它的 task id。" +
+      "+ `mode=chat|command`，默认 command），区别只在寻址：这里直接用它的 task id。" +
+      "`chat` 只和 planner 互动、不改已有 plan；`command` 是可重规划的指令。" +
       "**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task" +
       "（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。" +
-      "成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus }`。",
+      "成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus, inputMode }`。",
     responses: {
       202: { description: "已投递给执行方（`executor: true` + `messageId` / `queueAhead`）" },
       400: { description: "空消息 / 带图（执行方只收文字）：消息没有投递" },
@@ -216,8 +217,9 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     description:
       "对**本机 agent** 的任务：起一个 run（`mode=agent|plan`），老行为逐字不变。" +
       "对 `agentPath=autonomy` 的任务：这条消息**投递给执行方**（autonomy 的 `POST /api/tasks` 带 " +
-      "`task_id` = 给同一只 agent 追加一条指令，忙则排队，契约 A2④），本机不跑 run —— 返回 " +
-      "`202 { executor: true, executorTaskId, messageId, queued, executorStatus }`（`queued` = 它前面还有几条）。" +
+      "`task_id` + `mode=chat|command`，默认 command），本机不跑 run —— 返回 " +
+      "`202 { executor: true, executorTaskId, messageId, queued, executorStatus, inputMode }`。" +
+      "`command` = 追加一条可重规划的指令（老行为）；`chat` = 只和 planner 互动，**不改已经产生的 plan**。" +
       "执行方只收文字：带图片 → 400 且**不投递**；投递前先确认执行方真有这条 task（否则它会当成新任务建出来）→ " +
       "404；不可达 / 被拒 → 503 / 4xx + 原文，**绝不**回落成本机执行。",
     responses: {

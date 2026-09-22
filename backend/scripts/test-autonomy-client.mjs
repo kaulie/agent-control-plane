@@ -236,6 +236,17 @@ await check("getTask(): 200 → 详情；404 → status 404（供路由透传）
   assert.equal(b.status, 400, "空 id 不打服务");
 });
 
+await check("addInstruction(): 默认不带 mode；chat / command 原样带上", async () => {
+  const { impl, calls } = makeFetch({ "/api/tasks": ok({ task_id: "task-1", message_id: 9, queued: 0 }) });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  await client.addInstruction({ taskId: "task-1", message: " 接着干 " });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { task_id: "task-1", description: "接着干" });
+  await client.addInstruction({ taskId: "task-1", message: "问一句", mode: "chat" });
+  assert.equal(JSON.parse(calls[1].init.body).mode, "chat");
+  await client.addInstruction({ taskId: "task-1", message: "改 plan", mode: "command" });
+  assert.equal(JSON.parse(calls[2].init.body).mode, "command");
+});
+
 await check("纯函数：url / 归一化 / 错误体", () => {
   assert.equal(autonomyTasksUrl("http://x:4300/", "p 1"), "http://x:4300/api/tasks?project_id=p%201");
   assert.equal(autonomyTasksUrl("http://x:4300"), "http://x:4300/api/tasks");

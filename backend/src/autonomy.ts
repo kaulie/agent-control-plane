@@ -337,6 +337,8 @@ export class AutonomyClient {
   async addInstruction(input: {
     taskId: string;
     message: string;
+    /** chat = 只和 planner 说话、不改已有 plan；command（默认）= 可重规划的指令。 */
+    mode?: "chat" | "command";
   }): Promise<AutonomyInstructionResult> {
     const taskId = input.taskId.trim();
     const message = input.message.trim();
@@ -344,12 +346,17 @@ export class AutonomyClient {
     if (!message) {
       return { ok: false, httpStatus: 400, error: "message is required（投递的指令不能为空）" };
     }
+    const mode = input.mode === "chat" ? "chat" : input.mode === "command" ? "command" : undefined;
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${TASKS_PATH}`, {
         method: "POST",
         signal: AbortSignal.timeout(this.timeoutMs),
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ task_id: taskId, description: message }),
+        body: JSON.stringify({
+          task_id: taskId,
+          description: message,
+          ...(mode ? { mode } : {}),
+        }),
       });
       const payload = await res.json().catch(() => undefined);
       if (!res.ok) {

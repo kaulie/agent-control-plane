@@ -40,7 +40,7 @@ import ProjectDialog, {
   type ProjectDialogResult,
 } from "./components/ProjectDialog";
 import Timeline from "./components/Timeline";
-import ChatInput, { type AgentMode } from "./components/ChatInput";
+import ChatInput, { type AgentMode, type ChatPayload } from "./components/ChatInput";
 import ExecutorChat from "./components/ExecutorChat";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
@@ -848,11 +848,7 @@ export default function App() {
   const sendTo = useCallback(
     async (
       taskId: string,
-      payload: {
-        text: string;
-        images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
-        mode: "agent" | "plan";
-      },
+      payload: ChatPayload,
     ): Promise<boolean> => {
       setError(null);
       setInterruptNotice(null);
@@ -938,11 +934,7 @@ export default function App() {
   );
 
   const sendMessage = useCallback(
-    async (payload: {
-      text: string;
-      images: Array<{ data: string; mimeType: string; width?: number; height?: number }>;
-      mode: "agent" | "plan";
-    }): Promise<boolean> => {
+    async (payload: ChatPayload): Promise<boolean> => {
       if (!selectedId) return false;
       if (!payload.text.trim() && payload.images.length === 0) return false;
 

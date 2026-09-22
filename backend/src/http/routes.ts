@@ -206,8 +206,11 @@ export async function registerRoutes(
     const defaultAuth = results.find((r) => r.name === providers.defaultProviderName);
     return {
       ok: results.some((r) => r.ok),
+      // `detail` 是右上角状态条直接显示的那行字：默认 provider 命中时就用它自己的
+      // 文案（如 `authenticated as <email>`），不再加 `default=<name>: ` 前缀 ——
+      // 那个前缀对用户没意义，只会让「当前是哪个账号」更难读。
       detail: defaultAuth
-        ? `default=${defaultAuth.name}: ${defaultAuth.detail}`
+        ? defaultAuth.detail
         : results.map((r) => `${r.name}: ${r.detail}`).join("; "),
       providers: results,
     };

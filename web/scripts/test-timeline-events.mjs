@@ -190,7 +190,7 @@ const quota = classifyRunError(
 assert.equal(quota.kind, "quota");
 assert.match(quota.message, /额度/);
 assert.match(quota.message, /Auto/);
-assert.match(quota.message, /CURSOR_API_KEY/);
+assert.match(quota.message, /所选账号/);
 assert.equal(
   classifyRunError("The request exceeds the model's context window").kind,
   "context_window",

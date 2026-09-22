@@ -217,23 +217,29 @@ export class ClineProvider implements AgentProvider {
 
   // ---- AgentProvider ----
 
-  async verifyAuth(): Promise<{ ok: boolean; detail: string }> {
-    if (!this.apiKey) {
+  async verifyAuth(opts?: {
+    apiKey?: string;
+    vendor?: string;
+  }): Promise<{ ok: boolean; detail: string }> {
+    const apiKey = opts?.apiKey?.trim() || this.apiKey;
+    const vendor = opts?.vendor?.trim() || this.providerId;
+    if (!apiKey) {
       return {
         ok: false,
-        detail: `missing API key for provider "${this.providerId}" (set DEEPSEEK_API_KEY)`,
+        detail: `未配置 ${vendor} API key（请在全局设置的账号池里添加）`,
       };
     }
-    const known = Llms.getProviderIds().includes(this.providerId);
+    const known = Llms.getProviderIds().includes(vendor);
     return known
-      ? { ok: true, detail: `provider "${this.providerId}" configured (key present)` }
-      : { ok: false, detail: `unknown provider "${this.providerId}"` };
+      ? { ok: true, detail: `provider "${vendor}" configured (key present)` }
+      : { ok: false, detail: `unknown provider "${vendor}"` };
   }
 
-  async listModels(): Promise<ModelInfo[]> {
-    if (this.modelsCache) return this.modelsCache;
+  async listModels(opts?: { vendor?: string }): Promise<ModelInfo[]> {
+    const vendor = opts?.vendor?.trim() || this.providerId;
+    if (!opts?.vendor && this.modelsCache) return this.modelsCache;
     try {
-      const models = (await Llms.getModelsForProvider(this.providerId)) as Record<
+      const models = (await Llms.getModelsForProvider(vendor)) as Record<
         string,
         {
           name?: string;
@@ -245,31 +251,33 @@ export class ClineProvider implements AgentProvider {
       const entries = Object.entries(models);
       if (entries.length) {
         // 上下文窗口一起带上：计费/上下文显示都要用（见 context/limits.ts）。
-        this.modelsCache = entries.map(([id, m]) => ({
+        const mapped = entries.map(([id, m]) => ({
           id,
           displayName: m.name ?? id,
           ...(typeof m.contextWindow === "number" ? { contextWindow: m.contextWindow } : {}),
           ...(typeof m.maxInputTokens === "number" ? { maxInputTokens: m.maxInputTokens } : {}),
           ...(typeof m.maxTokens === "number" ? { maxTokens: m.maxTokens } : {}),
         }));
-        return this.modelsCache;
+        if (!opts?.vendor) this.modelsCache = mapped;
+        return mapped;
       }
     } catch (err) {
       console.warn(
-        `[cline] listModels failed for "${this.providerId}":`,
+        `[cline] listModels failed for "${vendor}":`,
         err instanceof Error ? err.message : err,
       );
     }
-    this.modelsCache =
-      this.providerId === DEFAULT_PROVIDER_ID
+    const fallback =
+      vendor === DEFAULT_PROVIDER_ID
         ? DEEPSEEK_FALLBACK_MODELS.map((m) => ({ ...m }))
         : [];
-    return this.modelsCache;
+    if (!opts?.vendor) this.modelsCache = fallback;
+    return fallback;
   }
 
-  async resolveModel(): Promise<string | undefined> {
+  async resolveModel(opts?: { vendor?: string }): Promise<string | undefined> {
     if (this.model) return this.model;
-    const models = await this.listModels();
+    const models = await this.listModels(opts);
     return models[0]?.id;
   }
 
@@ -311,11 +319,12 @@ export class ClineProvider implements AgentProvider {
 
     try {
       const cline = await this.getClient();
-      const modelId = input.model || (await this.resolveModel());
+      const vendor = input.vendor?.trim() || this.providerId;
+      const modelId = input.model || (await this.resolveModel({ vendor }));
       if (!modelId) {
         throw new Error(
-          `No model available for provider "${this.providerId}". ` +
-            `Set CLINE_MODEL or check your provider id.`,
+          `No model available for provider "${vendor}". ` +
+            `Pick a model or check that vendor in the account pool.`,
         );
       }
 
@@ -637,11 +646,14 @@ export class ClineProvider implements AgentProvider {
     mode: AgentMode,
     sessionId: string,
   ): ClineCoreStartConfig {
+    const vendor = input.vendor?.trim() || this.providerId;
+    const apiKey = input.apiKey?.trim() || this.apiKey;
+    const baseUrl = input.baseUrl?.trim() || this.baseUrl;
     return {
-      providerId: this.providerId,
+      providerId: vendor,
       modelId,
-      ...(this.apiKey ? { apiKey: this.apiKey } : {}),
-      ...(this.baseUrl ? { baseUrl: this.baseUrl } : {}),
+      ...(apiKey ? { apiKey } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
       cwd: input.cwd,
       enableTools: true,
       enableSpawnAgent: false,
@@ -655,13 +667,13 @@ export class ClineProvider implements AgentProvider {
         strategy: this.compactionStrategy,
         // agentic（LLM 摘要式）需要 summarizer：默认沿用本 provider 的凭据/模型
         // （`CLINE_COMPACTION=agentic` 才开；缺 key 时退回 basic，不让配置把会话搞挂）。
-        ...(this.compactionStrategy === "agentic" && this.apiKey
+        ...(this.compactionStrategy === "agentic" && apiKey
           ? {
               summarizer: {
-                providerId: this.providerId,
+                providerId: vendor,
                 modelId: this.compactionModel ?? modelId,
-                apiKey: this.apiKey,
-                ...(this.baseUrl ? { baseUrl: this.baseUrl } : {}),
+                apiKey,
+                ...(baseUrl ? { baseUrl } : {}),
                 maxOutputTokens: 1_500,
               },
             }

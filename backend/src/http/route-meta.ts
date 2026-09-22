@@ -37,6 +37,7 @@ export const OPENAPI_TAGS: Array<{ name: string; description: string }> = [
   { name: "ops", description: "运维：健康检查、优雅重启契约、进程与并发状态" },
   { name: "catalog", description: "运行目录：provider 鉴权状态、provider 列表、模型目录" },
   { name: "settings", description: "全局设置" },
+  { name: "accounts", description: "Provider 账号池（Cursor / Cline vendor 多把 key）" },
   { name: "projects", description: "项目与项目设置" },
   { name: "org", description: "组织：部门目录（organization 服务）" },
   { name: "tasks", description: "任务：创建 / 详情 / 事件 / 消息 / 停止 / fork / PR / 附件" },
@@ -74,14 +75,38 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     summary: "Agent 运行时曲线（并发占用与队列采样）",
     tags: ["ops"],
   },
-  "GET /api/auth": { summary: "各 provider 的鉴权状态", tags: ["catalog"] },
+  "GET /api/auth": {
+    summary: "账号池 + 各 provider 的鉴权状态",
+    tags: ["catalog"],
+  },
   "GET /api/providers": {
     summary: "provider 列表与默认 provider（含可用性）",
     tags: ["catalog"],
   },
   "GET /api/models": {
-    summary: "某 provider 的模型目录与默认模型",
+    summary: "某 provider / 账号的模型目录与默认模型",
     tags: ["catalog"],
+  },
+  "GET /api/accounts": {
+    summary: "账号池列表（key 只回掩码）+ 可用 vendor",
+    tags: ["accounts"],
+  },
+  "POST /api/accounts": {
+    summary: "新增账号（provider + vendor + apiKey + 工作区根）",
+    tags: ["accounts"],
+    responses: { 201: { description: "创建成功" } },
+  },
+  "PATCH /api/accounts/{accountId}": {
+    summary: "改账号（不传 apiKey 则保留原 key）",
+    tags: ["accounts"],
+  },
+  "DELETE /api/accounts/{accountId}": {
+    summary: "删除账号（有进行中任务则拒绝）",
+    tags: ["accounts"],
+  },
+  "POST /api/accounts/{accountId}/verify": {
+    summary: "用该账号的 key 做一次鉴权探测",
+    tags: ["accounts"],
   },
   "GET /api/settings/global": { summary: "全局设置", tags: ["settings"] },
   "PATCH /api/settings/global": {

@@ -29,12 +29,12 @@ export default function WorkspaceRootSection({
         onChange={(e) => onChange(e.target.value)}
       />
       <div className="settings-section-meta">
-        Agent 初始目录为{" "}
+        兜底目录为{" "}
         <code>
           {(value.trim() || defaultRoot).replace(/\/$/, "")}
-          /{"{project_name}"}/{"{task_id}"}
+          /{"{agentId}"}
         </code>
-        ；留空则使用默认 {defaultRoot}
+        ；账号池里的根目录优先。留空则使用默认 {defaultRoot}
       </div>
     </section>
   );

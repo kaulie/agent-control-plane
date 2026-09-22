@@ -78,6 +78,17 @@ export interface RunInput {
   sessionContext?: RunSessionContext;
   /** Display name for the underlying session (typically task.title). */
   agentName?: string;
+  /**
+   * 这次 run 用的账号 API key（来自账号池，不是进程 env）。
+   * Cursor / Cline 都走这里；缺省才回落到适配器构造时的那把（老路径 / 测试）。
+   */
+  apiKey?: string;
+  /**
+   * Cline 的 LLM 厂商（deepseek / minimax / …）。Cursor 不需要。
+   */
+  vendor?: string;
+  /** Cline OpenAI-compatible / 自建网关。 */
+  baseUrl?: string;
   onEvent: (event: AgentEvent) => Promise<void> | void;
 }
 
@@ -101,10 +112,20 @@ export interface RunResultData {
  * SDK. Cursor today lives in `providers/cursor/`; add another runtime by
  * implementing this interface and registering it in `createProvider`.
  */
+export interface AuthVerifyOpts {
+  apiKey?: string;
+  vendor?: string;
+}
+
+export interface ListModelsOpts {
+  apiKey?: string;
+  vendor?: string;
+}
+
 export interface AgentProvider {
   readonly name: string;
-  verifyAuth(): Promise<{ ok: boolean; detail: string }>;
-  listModels(): Promise<ModelInfo[]>;
+  verifyAuth(opts?: AuthVerifyOpts): Promise<{ ok: boolean; detail: string }>;
+  listModels(opts?: ListModelsOpts): Promise<ModelInfo[]>;
   resolveModel(): Promise<string | undefined>;
   run(input: RunInput): Promise<RunResultData>;
   /** Request cancellation of an in-flight run. Returns false if unknown. */

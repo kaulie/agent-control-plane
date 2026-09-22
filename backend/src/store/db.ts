@@ -36,6 +36,15 @@ import { DEFAULT_BILLING_RULES } from "../billing/rules.js";
 import { resolveBilledCost, type CostSource } from "../billing/cost.js";
 import type { BillingRule } from "../billing/types.js";
 import {
+  isAccountProvider,
+  maskApiKey,
+  normalizeVendor,
+  toPublicAccount,
+  type AccountProvider,
+  type ProviderAccount,
+  type ProviderAccountSecret,
+} from "../accounts.js";
+import {
   sqlMarkerInList,
   sqlStateCase,
   type TimelineMarkerRow,
@@ -68,6 +77,20 @@ interface UserRow {
   created_at: string;
 }
 
+interface AccountRow {
+  account_id: string;
+  provider: string;
+  vendor: string;
+  label: string;
+  api_key: string;
+  base_url: string | null;
+  agent_root_workspace: string;
+  enabled: number;
+  is_default: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface TaskRow {
   task_id: string;
   project_id: string | null;
@@ -92,6 +115,8 @@ interface TaskRow {
   /** 执行方（autonomy）那侧的 task / agent id。 */
   executor_task_id: string | null;
   executor_agent_id: string | null;
+  /** 选用的 provider 账号（NULL = 老任务，创建时还没有账号池）。 */
+  account_id: string | null;
 }
 
 interface RunRow {
@@ -338,6 +363,9 @@ export class Store {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_task_id TEXT`);
       this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_agent_id TEXT`);
     }
+    if (!taskCols.some((c) => c.name === "account_id")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN account_id TEXT`);
+    }
     if (!taskCols.some((c) => c.name === "last_user_input_at")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
       // Backfill: latest user_message event, else created_at.
@@ -420,6 +448,26 @@ export class Store {
         note                TEXT,
         updated_at          TEXT NOT NULL
       );
+    `);
+
+    // Provider + 账号池：一把 key = 一行。Cursor 多账号、Cline 下多个 deepseek /
+    // minimax 账号都可以同时存在。完整 api_key 只存在这张表，HTTP 层只回掩码。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS provider_accounts (
+        account_id            TEXT PRIMARY KEY,
+        provider              TEXT NOT NULL,
+        vendor                TEXT NOT NULL,
+        label                 TEXT NOT NULL,
+        api_key               TEXT NOT NULL DEFAULT '',
+        base_url              TEXT,
+        agent_root_workspace  TEXT NOT NULL,
+        enabled               INTEGER NOT NULL DEFAULT 1,
+        is_default            INTEGER NOT NULL DEFAULT 0,
+        created_at            TEXT NOT NULL,
+        updated_at            TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_provider_accounts_provider
+        ON provider_accounts(provider, vendor, enabled);
     `);
 
     this.db.exec(
@@ -919,6 +967,235 @@ export class Store {
     return Number(result.changes) > 0;
   }
 
+  // ---- provider accounts ----
+
+  listAccounts(filter?: {
+    provider?: string;
+    vendor?: string;
+    enabled?: boolean;
+  }): ProviderAccountSecret[] {
+    const where: string[] = [];
+    const values: unknown[] = [];
+    if (filter?.provider?.trim()) {
+      where.push("provider = ?");
+      values.push(filter.provider.trim());
+    }
+    if (filter?.vendor?.trim()) {
+      where.push("vendor = ?");
+      values.push(filter.vendor.trim());
+    }
+    if (filter?.enabled !== undefined) {
+      where.push("enabled = ?");
+      values.push(filter.enabled ? 1 : 0);
+    }
+    const sql = `SELECT * FROM provider_accounts${
+      where.length ? ` WHERE ${where.join(" AND ")}` : ""
+    } ORDER BY provider, vendor, is_default DESC, created_at ASC`;
+    const rows = this.db.prepare(sql).all(...(values as never[])) as unknown as AccountRow[];
+    return rows.map((r) => this.toAccount(r));
+  }
+
+  getAccount(accountId: string): ProviderAccountSecret | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM provider_accounts WHERE account_id = ?`)
+      .get(accountId) as AccountRow | undefined;
+    return row ? this.toAccount(row) : undefined;
+  }
+
+  countActiveTasksForAccount(accountId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM tasks WHERE account_id = ? AND status = 'active'`,
+      )
+      .get(accountId) as { n: number };
+    return Number(row?.n ?? 0);
+  }
+
+  createAccount(input: {
+    provider: AccountProvider;
+    vendor: string;
+    label: string;
+    apiKey: string;
+    baseUrl?: string;
+    agentRootWorkspace: string;
+    enabled?: boolean;
+    isDefault?: boolean;
+  }): ProviderAccountSecret {
+    const now = new Date().toISOString();
+    const accountId = newId("acct");
+    const isDefault = Boolean(input.isDefault);
+    if (isDefault) this.clearDefaultAccount(input.provider, input.vendor);
+    this.db
+      .prepare(
+        `INSERT INTO provider_accounts (
+           account_id, provider, vendor, label, api_key, base_url,
+           agent_root_workspace, enabled, is_default, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        accountId,
+        input.provider,
+        input.vendor,
+        input.label,
+        input.apiKey,
+        input.baseUrl ?? null,
+        input.agentRootWorkspace,
+        input.enabled === false ? 0 : 1,
+        isDefault ? 1 : 0,
+        now,
+        now,
+      );
+    return this.getAccount(accountId) as ProviderAccountSecret;
+  }
+
+  updateAccount(
+    accountId: string,
+    patch: {
+      label?: string;
+      vendor?: string;
+      apiKey?: string;
+      baseUrl?: string | null;
+      agentRootWorkspace?: string;
+      enabled?: boolean;
+      isDefault?: boolean;
+    },
+  ): ProviderAccountSecret | undefined {
+    const current = this.getAccount(accountId);
+    if (!current) return undefined;
+    const vendor = patch.vendor?.trim() || current.vendor;
+    const isDefault =
+      patch.isDefault !== undefined ? Boolean(patch.isDefault) : current.isDefault;
+    if (isDefault) this.clearDefaultAccount(current.provider, vendor, accountId);
+    const sets: string[] = ["updated_at = ?"];
+    const values: unknown[] = [new Date().toISOString()];
+    if (patch.label !== undefined) {
+      sets.push("label = ?");
+      values.push(patch.label);
+    }
+    if (patch.vendor !== undefined) {
+      sets.push("vendor = ?");
+      values.push(vendor);
+    }
+    if (patch.apiKey !== undefined) {
+      sets.push("api_key = ?");
+      values.push(patch.apiKey);
+    }
+    if (patch.baseUrl !== undefined) {
+      sets.push("base_url = ?");
+      values.push(patch.baseUrl);
+    }
+    if (patch.agentRootWorkspace !== undefined) {
+      sets.push("agent_root_workspace = ?");
+      values.push(patch.agentRootWorkspace);
+    }
+    if (patch.enabled !== undefined) {
+      sets.push("enabled = ?");
+      values.push(patch.enabled ? 1 : 0);
+    }
+    if (patch.isDefault !== undefined) {
+      sets.push("is_default = ?");
+      values.push(isDefault ? 1 : 0);
+    }
+    this.db
+      .prepare(`UPDATE provider_accounts SET ${sets.join(", ")} WHERE account_id = ?`)
+      .run(...(values as never[]), accountId);
+    return this.getAccount(accountId);
+  }
+
+  deleteAccount(accountId: string): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM provider_accounts WHERE account_id = ?`)
+      .run(accountId);
+    return Number(result.changes) > 0;
+  }
+
+  /**
+   * 库空时从旧 env 迁一条默认账号（只跑一次）。之后以表为准，不再读这些 env。
+   */
+  seedLegacyAccountsIfEmpty(input: {
+    workspaceRoot: string;
+    cursorApiKey?: string;
+    clineApiKey?: string;
+    clineVendor?: string;
+  }): ProviderAccount[] {
+    if (this.listAccounts().length > 0) return [];
+    const seeded: ProviderAccount[] = [];
+    const root = input.workspaceRoot.trim();
+    if (!root) return [];
+    if (input.cursorApiKey?.trim()) {
+      seeded.push(
+        toPublicAccount(
+          this.createAccount({
+            provider: "cursor",
+            vendor: "cursor",
+            label: "默认 Cursor",
+            apiKey: input.cursorApiKey.trim(),
+            agentRootWorkspace: root,
+            isDefault: true,
+          }),
+        ),
+      );
+    }
+    if (input.clineApiKey?.trim()) {
+      const vendor = normalizeVendor("cline", input.clineVendor);
+      seeded.push(
+        toPublicAccount(
+          this.createAccount({
+            provider: "cline",
+            vendor,
+            label: `默认 ${vendor}`,
+            apiKey: input.clineApiKey.trim(),
+            agentRootWorkspace: root,
+            isDefault: true,
+          }),
+        ),
+      );
+    }
+    return seeded;
+  }
+
+  private clearDefaultAccount(
+    provider: string,
+    vendor: string,
+    exceptId?: string,
+  ): void {
+    if (exceptId) {
+      this.db
+        .prepare(
+          `UPDATE provider_accounts SET is_default = 0
+           WHERE provider = ? AND vendor = ? AND account_id != ?`,
+        )
+        .run(provider, vendor, exceptId);
+      return;
+    }
+    this.db
+      .prepare(
+        `UPDATE provider_accounts SET is_default = 0
+         WHERE provider = ? AND vendor = ?`,
+      )
+      .run(provider, vendor);
+  }
+
+  private toAccount(r: AccountRow): ProviderAccountSecret {
+    if (!isAccountProvider(r.provider)) {
+      throw new Error(`corrupt account provider "${r.provider}"`);
+    }
+    return {
+      accountId: r.account_id,
+      provider: r.provider,
+      vendor: r.vendor,
+      label: r.label,
+      apiKey: r.api_key ?? "",
+      apiKeyMasked: maskApiKey(r.api_key),
+      ...(r.base_url ? { baseUrl: r.base_url } : {}),
+      agentRootWorkspace: r.agent_root_workspace,
+      enabled: Boolean(r.enabled),
+      isDefault: Boolean(r.is_default),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
   private toProject(r: ProjectRow): Project {
     // 部门住在 settings_json 里：列表/详情一起带上，左栏才能显示“项目所在的部门”。
     // （项目级 git 仓库地址已废弃：接口不再返回 gitRepoUrl，真源 = 服务中心。）
@@ -961,6 +1238,8 @@ export class Store {
      * 缺省 / 非法 → 老行为（控制面）。
      */
     agentPath?: string;
+    /** 选用的 provider 账号（控制面本机 agent 用它的 key + 工作区根）。 */
+    accountId?: string;
   }): Task {
     if (!this.getProject(input.projectId)) {
       throw new Error(`project ${input.projectId} not found`);
@@ -990,11 +1269,12 @@ export class Store {
       ...(normalizeAgentPath(input.agentPath) === "autonomy"
         ? { agentPath: "autonomy" as const }
         : {}),
+      ...(input.accountId?.trim() ? { accountId: input.accountId.trim() } : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from, agent_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from, agent_path, account_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -1014,6 +1294,7 @@ export class Store {
         task.lastUserInputAt,
         task.forkedFrom ?? null,
         task.agentPath ?? null,
+        task.accountId ?? null,
       );
     return task;
   }
@@ -1294,6 +1575,7 @@ export class Store {
       ...(isAgentPath(r.agent_path) ? { agentPath: r.agent_path.trim() as AgentPath } : {}),
       ...(r.executor_task_id ? { executorTaskId: r.executor_task_id } : {}),
       ...(r.executor_agent_id ? { executorAgentId: r.executor_agent_id } : {}),
+      ...(r.account_id ? { accountId: r.account_id } : {}),
     };
   }
 

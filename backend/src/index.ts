@@ -86,16 +86,22 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-if (!config.apiKey) {
+const store = new Store(config.dataDir);
+const seeded = store.seedLegacyAccountsIfEmpty({
+  workspaceRoot:
+    store.getGlobalSettings().workspace?.root?.trim() ||
+    config.agentWorkspaceRoot,
+  ...(config.apiKey ? { cursorApiKey: config.apiKey } : {}),
+  ...(config.clineApiKey ? { clineApiKey: config.clineApiKey } : {}),
+  clineVendor: config.clineProviderId,
+});
+if (seeded.length) {
   console.warn(
-    "[startup] CURSOR_API_KEY is not set. Cursor-backed tasks will fail until it is set.\n" +
-      "          Set it in backend/.env (see backend/.env.example).",
+    `[startup] 账号池为空，已从旧 env 迁入 ${seeded.length} 个默认账号；之后以全局设置的账号池为准，不再读 CURSOR_API_KEY / DEEPSEEK_API_KEY。`,
   );
-}
-if (!config.clineApiKey) {
+} else if (!store.listAccounts().length) {
   console.warn(
-    "[startup] DEEPSEEK_API_KEY is not set. Cline-backed tasks will fail until it is set.\n" +
-      "          Set it in backend/.env (see backend/.env.example).",
+    "[startup] 账号池是空的。请在全局设置里添加 Cursor / Cline 账号，否则本机 agent 无法鉴权。",
   );
 }
 
@@ -111,7 +117,6 @@ if (mcpWanted && !assertMcpServerPresent(config.gitViaProxyServerPath)) {
   );
 }
 
-const store = new Store(config.dataDir);
 const interrupted = store.markInterruptedRuns();
 // 计费模块：provider 与 gateway 共用同一个实例（数据源 = billing_rules 表）。
 const billing = createBillingService(store);

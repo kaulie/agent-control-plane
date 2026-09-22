@@ -1873,6 +1873,57 @@ button.agent-rounds-chip-link:focus-visible {
   font-weight: 600;
 }
 
+.account-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.account-table th,
+.account-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.account-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.account-disabled {
+  background: color-mix(in srgb, var(--amber) 20%, var(--bg-3));
+  color: var(--amber);
+}
+
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.account-form-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-checks {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
 .settings-actions {
   display: flex;
   align-items: center;

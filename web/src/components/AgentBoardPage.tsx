@@ -547,7 +547,9 @@ export default function AgentBoardPage({
                           </span>
                         </div>
                         <div className="stats-agent-sub" title={r.agentId}>
-                          {r.provider} · {shortAgentId(r.agentId)}
+                          {r.provider}
+                          {r.accountLabel ? ` · ${r.accountLabel}` : ""} ·{" "}
+                          {shortAgentId(r.agentId)}
                           {r.supersededAt
                             ? ` · 接替于 ${formatDateTime(r.supersededAt)}${
                                 r.supersededReason === "mode_change"

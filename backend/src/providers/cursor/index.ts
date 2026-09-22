@@ -76,9 +76,13 @@ export class CursorProvider implements AgentProvider {
 
   constructor(private config: CursorProviderConfig) {}
 
-  async verifyAuth(): Promise<{ ok: boolean; detail: string }> {
+  async verifyAuth(opts?: { apiKey?: string }): Promise<{ ok: boolean; detail: string }> {
+    const apiKey = opts?.apiKey?.trim() || this.config.apiKey;
+    if (!apiKey) {
+      return { ok: false, detail: "未配置 Cursor API key（请在全局设置的账号池里添加）" };
+    }
     try {
-      const me = await Cursor.me(this.config.apiKey ? { apiKey: this.config.apiKey } : undefined);
+      const me = await Cursor.me({ apiKey });
       const who = me.userEmail ?? me.apiKeyName ?? "unknown";
       return { ok: true, detail: `authenticated as ${who}` };
     } catch (err) {
@@ -89,14 +93,14 @@ export class CursorProvider implements AgentProvider {
     }
   }
 
-  async listModels(): Promise<ModelInfo[]> {
-    if (this.modelsCache) return this.modelsCache;
+  async listModels(opts?: { apiKey?: string }): Promise<ModelInfo[]> {
+    const apiKey = opts?.apiKey?.trim() || this.config.apiKey;
+    if (!opts?.apiKey && this.modelsCache) return this.modelsCache;
     try {
-      const models = await Cursor.models.list(
-        this.config.apiKey ? { apiKey: this.config.apiKey } : undefined,
-      );
-      this.modelsCache = models.map((m) => ({ id: m.id, displayName: m.displayName }));
-      return this.modelsCache;
+      const models = await Cursor.models.list(apiKey ? { apiKey } : undefined);
+      const mapped = models.map((m) => ({ id: m.id, displayName: m.displayName }));
+      if (!opts?.apiKey) this.modelsCache = mapped;
+      return mapped;
     } catch (err) {
       console.warn("[cursor] listModels failed:", err instanceof Error ? err.message : err);
       return [];
@@ -201,7 +205,8 @@ export class CursorProvider implements AgentProvider {
       },
     };
     if (modelId) options.model = { id: modelId };
-    if (this.config.apiKey) options.apiKey = this.config.apiKey;
+    const apiKey = input.apiKey?.trim() || this.config.apiKey;
+    if (apiKey) options.apiKey = apiKey;
     if (input.mode === "plan" || input.mode === "agent") {
       options.mode = input.mode;
     }

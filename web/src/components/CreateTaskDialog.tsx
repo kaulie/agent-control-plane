@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import type {
   ModelInfo,
+  ProviderAccount,
   ProviderInfo,
   TaskEntry,
   TaskGoal,
@@ -22,6 +23,7 @@ export interface CreateTaskInput {
   goal: TaskGoal;
   provider?: string;
   model?: string;
+  accountId?: string;
 }
 
 interface Props {
@@ -65,6 +67,8 @@ export default function CreateTaskDialog({
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
+  const [accountId, setAccountId] = useState("");
   const [envDefault, setEnvDefault] = useState("cursor");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [resolved, setResolved] = useState<string | undefined>();
@@ -84,6 +88,7 @@ export default function CreateTaskDialog({
     setGoal(DEFAULT_TASK_GOAL);
     setProvider(projectDefaultProvider ?? "");
     setModel(projectDefaultModel ?? "");
+    setAccountId("");
     setError(null);
     // 只留新入口时（TASK_ENTRY=autonomy）直接落在新入口上。
     setEntryMode(entry === "autonomy" ? "autonomy" : "gateway");
@@ -91,6 +96,9 @@ export default function CreateTaskDialog({
       setProviders(r.providers);
       setEnvDefault(r.defaultProvider);
     });
+    void api.listAccounts({ enabled: true }).then((r) => {
+      setAccounts(r.accounts);
+    }).catch(() => setAccounts([]));
   }, [open, projectDefaultProvider, projectDefaultModel, projectId, entry]);
 
   const effectiveProvider =
@@ -100,7 +108,7 @@ export default function CreateTaskDialog({
     if (!open) return;
     let cancelled = false;
     void api
-      .listModels(effectiveProvider)
+      .listModels(effectiveProvider, accountId || undefined)
       .then((r) => {
         if (cancelled) return;
         setModels(r.models);
@@ -115,7 +123,7 @@ export default function CreateTaskDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, effectiveProvider]);
+  }, [open, effectiveProvider, accountId]);
 
   if (!open) return null;
 
@@ -165,6 +173,7 @@ export default function CreateTaskDialog({
           goal,
           provider: provider.trim() || undefined,
           model: model.trim() || undefined,
+          accountId: accountId.trim() || undefined,
         });
       }
       onClose();
@@ -314,6 +323,7 @@ export default function CreateTaskDialog({
               onChange={(e) => {
                 setProvider(e.target.value);
                 setModel("");
+                setAccountId("");
               }}
             >
               <option value="">
@@ -328,6 +338,36 @@ export default function CreateTaskDialog({
                   {name}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="runtime-field">
+            <span className="runtime-field-label">账号</span>
+            <select
+              className="runtime-select"
+              value={accountId}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAccountId(next);
+                const hit = accounts.find((a) => a.accountId === next);
+                if (hit && hit.provider !== provider) {
+                  setProvider(hit.provider);
+                  setModel("");
+                }
+              }}
+            >
+              <option value="">
+                {accounts.some((a) => a.provider === effectiveProvider && a.isDefault)
+                  ? "该厂商默认账号"
+                  : "自动（该运行时第一条启用账号）"}
+              </option>
+              {accounts
+                .filter((a) => a.provider === effectiveProvider)
+                .map((a) => (
+                  <option key={a.accountId} value={a.accountId}>
+                    {a.provider === "cline" ? `${a.vendor} / ${a.label}` : a.label}
+                    {a.isDefault ? "（默认）" : ""}
+                  </option>
+                ))}
             </select>
           </label>
           <label className="runtime-field">

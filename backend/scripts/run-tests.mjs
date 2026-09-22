@@ -24,6 +24,8 @@ const tests = [
   { file: "scripts/test-shutdown.mjs", via: "tsx" },
   { file: "scripts/test-organization.mjs", via: "tsx" },
   { file: "scripts/test-injected-repos.mjs", via: "tsx" },
+  // 右上角状态条那行字（/api/auth 的 detail）：默认 provider 命中时不带 `default=<name>: ` 前缀
+  { file: "scripts/test-auth-status.mjs", via: "tsx" },
   { file: "scripts/test-decisions.mjs", via: "tsx" },
   { file: "scripts/test-settings.mjs", via: "node" },
   { file: "scripts/test-project-department.mjs", via: "node" },

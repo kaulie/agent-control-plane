@@ -9,6 +9,7 @@ import type { BillingService } from "../../billing/service.js";
 import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
 import { shouldRotateContext } from "../../context/index.js";
 import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
+import { isBenignSdkClosedStreamError } from "../../process-errors.js";
 import type { AgentProvider, ModelInfo, RunInput, RunResultData } from "../types.js";
 
 export interface CursorProviderConfig {
@@ -529,6 +530,13 @@ export class CursorProvider implements AgentProvider {
         const attemptToolCalls = toolCalls - attemptToolCallsBefore;
         const attemptModelCalls = modelCalls - attemptModelCallsBefore;
 
+        if (streamError && isBenignSdkClosedStreamError(streamError)) {
+          console.warn(
+            "[cursor] run.stream() hit WriteIterableClosedError after the iterable closed; continuing to wait()",
+          );
+          streamError = undefined;
+        }
+
         if (streamError) {
           if (handle.cancelled) break;
           const raw = streamError instanceof Error ? streamError.message : String(streamError);
@@ -582,7 +590,16 @@ export class CursorProvider implements AgentProvider {
           };
         }
 
-        const result = await run.wait();
+        let result: Awaited<ReturnType<Run["wait"]>>;
+        try {
+          result = await run.wait();
+        } catch (err) {
+          if (!isBenignSdkClosedStreamError(err)) throw err;
+          console.warn(
+            "[cursor] run.wait() after closed WritableIterable; treating the turn as finished",
+          );
+          result = { status: "finished" } as Awaited<ReturnType<Run["wait"]>>;
+        }
         const durationMs = Date.now() - startedAt;
         const usage = result.usage
           ? normalizeTokenUsage(result.usage, "cursor")

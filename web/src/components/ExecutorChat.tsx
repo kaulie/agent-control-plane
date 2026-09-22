@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { deliveryReceipt, executorBusy } from "../autonomy";
 import { formatDateTime } from "../format";
-import ChatInput, { type ChatPayload } from "./ChatInput";
+import ChatInput, { type ChatPayload, type ExecutorInputMode } from "./ChatInput";
 import { onExecutorReply, type ReplyOutcome } from "../executorReply";
 
 /**
  * 给**执行方**（autonomy）发消息 —— 「autonomy 创建的 agent 也要能 chat」。
  *
- * 链路：同一个输入框 → 控制面（按 `via` 选路）→ autonomy `POST /api/tasks { task_id, description }`
- * （= 给同一条 task 的那只 agent 追加一条指令，**忙则排队**，契约 A2③）→ `202 { message_id, queued }`。
+ * 链路：同一个输入框 → 控制面（按 `via` 选路）→ autonomy `POST /api/tasks { task_id, description, mode }`
+ * （= 给同一条 task 的那只 agent 追加一条消息，**忙则排队**，契约 A2③）→ `202 { message_id, queued }`。
  * **本机不跑 run**。
+ *
+ * `mode`：
+ * - `command`（默认）：老行为，planner 可以重规划并执行；
+ * - `chat`：只和 planner 互动，**不对已经产生的 plan 造成影响**。
  *
  * `via` 只决定**寻址**（都走控制面代理，都不写我们的库）：
  * - `via="task"`（默认）：我们建的任务（`agentPath=autonomy`）→ `POST /api/tasks/{我们的 id}/messages`；
@@ -18,7 +22,7 @@ import { onExecutorReply, type ReplyOutcome } from "../executorReply";
  *   `POST /api/autonomy/tasks/{它的 id}/messages`。
  *
  * 三条不假装的规矩：
- * 1. 只收文字 → 不显示附件与 Plan/Agent 模式（**不置灰、不占位**）；
+ * 1. 只收文字 → 不显示附件（**不置灰、不占位**）；模式是 Chat / Command；
  * 2. 投递成功才清空输入框（失败保留草稿 + 显示原文）；回执只写它真给了的 `message_id` / `queued` / 状态；
  * 3. 它那边的完整对话（事件流）**还没接**（契约 A6.1 待定）→ 这里只列**本页投递过的**，并写明是「本页记录」。
  */
@@ -41,6 +45,11 @@ interface Sent {
   at: string;
   messageId?: number;
   queueAhead?: number;
+  mode: ExecutorInputMode;
+}
+
+function asExecutorMode(mode: ChatPayload["mode"]): ExecutorInputMode {
+  return mode === "chat" ? "chat" : "command";
 }
 
 export default function ExecutorChat({ taskId, via = "task", status, onDelivered }: Props) {
@@ -49,15 +58,14 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
   const [error, setError] = useState<string | null>(null);
   const busy = executorBusy(status);
   /** 唯一的投递实现：手写输入与阻塞面板的【确认】都走它（回执只此一份）。 */
-  const deliver = async (text: string): Promise<ReplyOutcome> => {
+  const deliver = async (text: string, mode: ExecutorInputMode = "command"): Promise<ReplyOutcome> => {
     setError(null);
     setReceipt(null);
     try {
-      // 执行方只收文字：不带 images / mode（后端也会拦带图的请求）。
       const res =
         via === "executor"
-          ? await api.sendMessageToExecutor(taskId, text)
-          : await api.sendMessage(taskId, text);
+          ? await api.sendMessageToExecutor(taskId, text, mode)
+          : await api.sendMessage(taskId, text, undefined, mode);
       const line = deliveryReceipt(res);
       setReceipt(line);
       setSent((prev) => [
@@ -65,6 +73,7 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
         {
           text,
           at: new Date().toISOString(),
+          mode: res.inputMode ?? mode,
           ...(res.messageId != null ? { messageId: res.messageId } : {}),
           ...(typeof res.queueAhead === "number" ? { queueAhead: res.queueAhead } : {}),
         },
@@ -72,19 +81,20 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
       onDelivered?.();
       return { ok: true, receipt: line };
     } catch (e) {
-      // 400（带图 / 空）/ 404（执行方没有这条 task）/ 503（不可达）都按原文说清：没有投递。
+      // 400（带图 / 空 / 非法 mode）/ 404 / 503 都按原文说清：没有投递。
       const text2 = errorText(e);
       setError(text2);
       return { ok: false, error: text2 };
     }
   };
 
-  // 阻塞面板的【确认】复用这条通道；用 ref 保证面板拿到的是**当前**任务的投递函数
+  // 阻塞面板的【确认】复用这条通道（回答 need_input = command，可以推进计划）。
   const deliverRef = useRef(deliver);
   deliverRef.current = deliver;
-  useEffect(() => onExecutorReply((text) => deliverRef.current(text)), []);
+  useEffect(() => onExecutorReply((text) => deliverRef.current(text, "command")), []);
 
-  const send = async (payload: ChatPayload): Promise<boolean> => (await deliver(payload.text)).ok;
+  const send = async (payload: ChatPayload): Promise<boolean> =>
+    (await deliver(payload.text, asExecutorMode(payload.mode))).ok;
 
   return (
     <div className="executor-chat">
@@ -94,6 +104,7 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
           {via === "executor"
             ? "这条任务我们没建过（只在 autonomy 那边）：消息按它的 task id 投递给它那只 agent；我们这边不落库、不跑 run"
             : "这条消息投递给 autonomy 那边这只 agent（它忙就排队）；本机不跑 run"}
+          。Chat 只和 planner 说话，不改已有 plan；Command 才可以重规划。
         </span>
       </div>
       {error ? <div className="auto-banner bad">没有投递：{error}</div> : null}
@@ -109,7 +120,7 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
                 <span className="executor-sent-time">{formatDateTime(m.at)}</span>
                 <span className="executor-sent-text">{m.text}</span>
                 <span className="executor-sent-meta">
-                  已投递
+                  已投递 · {m.mode === "chat" ? "Chat" : "Command"}
                   {m.messageId != null ? ` · 指令 #${m.messageId}` : ""}
                   {typeof m.queueAhead === "number" && m.queueAhead > 0
                     ? ` · 当时前面还有 ${m.queueAhead} 条`
@@ -125,12 +136,12 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
         disabled={false}
         running={busy}
         queueLength={0}
-        hideMode
+        modeSet="chat-command"
         allowImages={false}
         placeholderOverride={
           busy
             ? "执行方工作中，消息将排到它后面…（只收文字）"
-            : "发一条指令给执行方（autonomy）…（只收文字）"
+            : undefined
         }
       />
     </div>

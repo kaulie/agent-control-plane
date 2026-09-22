@@ -153,9 +153,10 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   const said = deliveries().at(-1)[1];
   assert.deepEqual(
     said,
-    { taskId: created.executorTaskId, message: "顺便把 CHANGELOG 也加上" },
-    "投递内容 trim 后原样给执行方（它自己决定怎么理解）",
+    { taskId: created.executorTaskId, message: "顺便把 CHANGELOG 也加上", mode: "command" },
+    "省略 mode → command（老行为：可重规划的指令）",
   );
+  assert.equal(body.inputMode, "command");
   assert.equal(deliveries().length, deliveriesBefore + 1, "只投递一次");
   assert.deepEqual(
     autonomy.calls.filter((c) => c[0] === "getTask").at(-1)[1],
@@ -292,8 +293,8 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   assert.equal(body.queueAhead, 0);
   assert.deepEqual(
     autonomy.calls.filter((c) => c[0] === "addInstruction").at(-1)[1],
-    { taskId: "task-exec-1", message: "接着干" },
-    "按它的 task id 投递，内容 trim",
+    { taskId: "task-exec-1", message: "接着干", mode: "command" },
+    "按它的 task id 投递，内容 trim，默认 command",
   );
   assert.deepEqual(counts(), before, "纯代理：我方库一行都不写");
   assert.ok(autonomy.calls.length > beforeCalls, "走的是 autonomy 那份客户端");
@@ -320,7 +321,43 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   assert.equal(deliveries().length, beforeDeliveries, "上面这些（未知 / 不可达 / 空 / 带图）都没有投递");
 }
 
-// ---- 10) 没配 autonomy → 对账行这条也是 503 ----
+// ---- 10) chat / command：mode 原样投递给执行方；非法 mode 400 且不投递 ----
+{
+  const before = deliveries().length;
+  const chat = await json(
+    await post(`/api/tasks/${created.taskId}/messages`, { message: "plan 现在走到哪了", mode: "chat" }),
+  );
+  assert.equal(chat.executor, true);
+  assert.equal(chat.inputMode, "chat");
+  assert.deepEqual(deliveries().at(-1)[1], {
+    taskId: created.executorTaskId,
+    message: "plan 现在走到哪了",
+    mode: "chat",
+  });
+
+  const cmd = await json(
+    await post(`/api/tasks/${created.taskId}/messages`, { message: "改成先写测试", mode: "command" }),
+  );
+  assert.equal(cmd.inputMode, "command");
+  assert.deepEqual(deliveries().at(-1)[1].mode, "command");
+
+  const bad = await post(`/api/tasks/${created.taskId}/messages`, { message: "x", mode: "plan" });
+  assert.equal(bad.statusCode, 400);
+  assert.match((await json(bad)).error, /chat.*command/);
+  assert.equal(deliveries().length, before + 2, "非法 mode 没有投递");
+
+  const recon = await json(
+    await post("/api/autonomy/tasks/task-exec-1/messages", { message: "只问一句", mode: "chat" }),
+  );
+  assert.equal(recon.inputMode, "chat");
+  assert.deepEqual(deliveries().at(-1)[1], {
+    taskId: "task-exec-1",
+    message: "只问一句",
+    mode: "chat",
+  });
+}
+
+// ---- 11) 没配 autonomy → 对账行这条也是 503 ----
 {
   const bare2 = Fastify({ logger: false });
   await registerRoutes(bare2, gateway, providers, { dataDir, appVersion: APP_VERSION });
@@ -335,5 +372,5 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
 }
 
 console.log(
-  "PASS: autonomy 任务能 chat（两种寻址都投递给执行方 / 只收文字 / 先确认 task 存在 / 不可达不假装 / 纯代理不写库 / 本机路径不变）",
+  "PASS: autonomy 任务能 chat（两种寻址都投递给执行方 / chat|command 分流 / 只收文字 / 先确认 task 存在 / 不可达不假装 / 纯代理不写库 / 本机路径不变）",
 );

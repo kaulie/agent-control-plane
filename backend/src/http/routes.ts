@@ -32,6 +32,7 @@ import {
   isTaskGoal,
   TASK_GOAL_IDS,
 } from "../task-goals.js";
+import { parseExecutorInputMode } from "../executor-input-mode.js";
 
 export async function registerRoutes(
   app: FastifyInstance,
@@ -69,6 +70,7 @@ export async function registerRoutes(
       addInstruction(input: {
         taskId: string;
         message: string;
+        mode?: "chat" | "command";
       }): Promise<AutonomyInstructionResult>;
     };
     /** 新建任务入口开关（`TASK_ENTRY`）：both（默认）/ autonomy / gateway。 */
@@ -425,7 +427,7 @@ export async function registerRoutes(
    */
   app.post<{
     Params: { taskId: string };
-    Body: { message?: string; images?: IncomingImage[] };
+    Body: { message?: string; images?: IncomingImage[]; mode?: string };
   }>("/api/autonomy/tasks/:taskId/messages", async (req, reply) => {
     if (!autonomy) {
       return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
@@ -440,6 +442,10 @@ export async function registerRoutes(
     if (!message) {
       return reply.code(400).send({ error: "message text is required（执行方只收文字消息）" });
     }
+    const parsedMode = parseExecutorInputMode(req.body?.mode);
+    if (!parsedMode.ok) {
+      return reply.code(400).send({ error: parsedMode.error });
+    }
     const executorTaskId = req.params.taskId.trim();
     const known = await autonomy.getTask(executorTaskId);
     if (!known.available) {
@@ -452,7 +458,11 @@ export async function registerRoutes(
               : (known.error ?? "autonomy 不可达"),
         });
     }
-    const sent = await autonomy.addInstruction({ taskId: executorTaskId, message });
+    const sent = await autonomy.addInstruction({
+      taskId: executorTaskId,
+      message,
+      mode: parsedMode.mode,
+    });
     if (!sent.ok) {
       return reply
         .code(sent.httpStatus && sent.httpStatus >= 400 && sent.httpStatus < 500 ? sent.httpStatus : 503)
@@ -466,6 +476,7 @@ export async function registerRoutes(
       ...(sent.status ? { executorStatus: sent.status } : {}),
       ...(sent.messageId != null ? { messageId: sent.messageId } : {}),
       ...(sent.queued != null ? { queueAhead: sent.queued } : {}),
+      inputMode: parsedMode.mode,
     };
   });
 
@@ -1092,13 +1103,6 @@ export async function registerRoutes(
         .send({ error: "message text or at least one image is required" });
     }
     const rawMode = req.body?.mode;
-    let mode: "agent" | "plan" = "agent";
-    if (rawMode != null) {
-      if (rawMode !== "agent" && rawMode !== "plan") {
-        return reply.code(400).send({ error: "mode must be \"agent\" or \"plan\"" });
-      }
-      mode = rawMode;
-    }
     const detail = gateway.getTaskDetail(req.params.taskId);
     if (!detail) {
       return reply.code(404).send({ error: "task not found" });
@@ -1124,6 +1128,10 @@ export async function registerRoutes(
           error: "message text is required（执行方只收文字消息）",
         });
       }
+      const parsedMode = parseExecutorInputMode(rawMode);
+      if (!parsedMode.ok) {
+        return reply.code(400).send({ error: parsedMode.error });
+      }
       const executorTaskId = detail.task.executorTaskId?.trim();
       if (!executorTaskId) {
         return reply.code(404).send({
@@ -1144,7 +1152,11 @@ export async function registerRoutes(
                 : (known.error ?? "autonomy 不可达"),
           });
       }
-      const sent = await autonomy.addInstruction({ taskId: executorTaskId, message: text });
+      const sent = await autonomy.addInstruction({
+        taskId: executorTaskId,
+        message: text,
+        mode: parsedMode.mode,
+      });
       if (!sent.ok) {
         return reply
           .code(sent.httpStatus && sent.httpStatus >= 400 && sent.httpStatus < 500 ? sent.httpStatus : 503)
@@ -1160,7 +1172,15 @@ export async function registerRoutes(
         // autonomy 的 `queued` = 「它前面还有几条」（数字）；本机那条 `queued` 是 boolean，
         // 语义不同 → 这里用独立字段名，免得前端两种含义串味。
         ...(sent.queued != null ? { queueAhead: sent.queued } : {}),
+        inputMode: parsedMode.mode,
       };
+    }
+    let mode: "agent" | "plan" = "agent";
+    if (rawMode != null) {
+      if (rawMode !== "agent" && rawMode !== "plan") {
+        return reply.code(400).send({ error: "mode must be \"agent\" or \"plan\"" });
+      }
+      mode = rawMode;
     }
     try {
       const { runId, queued, queueLength } = await gateway.sendMessage(

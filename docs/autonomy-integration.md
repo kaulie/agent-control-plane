@@ -30,13 +30,14 @@
       → 201 返回**我们的** task（前端当普通任务展示）
       失败：4xx/503 + 原文；任务保留并标 error（时间线 `executor_failed`）
 
-继续：前端（详情/对账行底部的输入框，同一个 ChatInput）→ POST 控制面 /api/tasks/{我们的 id}/messages { message }
+继续：前端（详情/对账行底部的输入框，同一个 ChatInput，Chat / Command）→ POST 控制面 /api/tasks/{我们的 id}/messages { message, mode }
       （对账行——只在 autonomy 那边存在、我们没建过的任务——走 POST /api/autonomy/tasks/{它的 id}/messages；
        除寻址外与下面逐条一致，同样纯代理、我方库一行不写）
       → 控制面先 GET autonomy /api/tasks/{executor_task_id}（确认它真有这条 task）
-      → POST autonomy /api/tasks { task_id: <executor_task_id>, description: <那句话> }   ← 追加一条指令（忙则排队）
+      → POST autonomy /api/tasks { task_id, description, mode: chat|command }   ← 追加一条消息（忙则排队）
       → 202 { task_id, agent_id, status, message_id, queued }
-      → 202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus } 给前端（本机不跑 run）
+      → 202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus, inputMode } 给前端（本机不跑 run）
+      `command`（默认）= 可重规划的指令；`chat` = 只和 planner 互动，**不改已经产生的 plan**。
       只收文字：带图 → 400 且**不投递**；它不可达/被拒 → 503/4xx + 原文（绝不回落成本机 agent）
 
 查看：前端 → GET 控制面 /api/tasks/{我们的 id}/executor → autonomy GET /api/tasks/{executor_task_id}（状态 + plans/steps + project）
@@ -65,9 +66,9 @@
 | 项 | 内容 |
 |---|---|
 | 调用 | `POST /api/tasks` |
-| 请求（文档） | `{ description, domain?, goal_type?, task_id?, context_ref?: { project } }` |
+| 请求（文档） | `{ description, domain?, goal_type?, task_id?, context_ref?: { project }, mode?: chat\|command }` |
 | 响应 `202` | `{ task_id, agent_id, status: "pending", message_id, queued }` |
-| 我们的用法 | **建任务**时**只传** `description` + `context_ref.project`（= 当前 projectId），不传 `domain` / `goal_type`；**继续对话**（chat 输入）时传 `task_id`（= 我们记下的 `executorTaskId`）+ `description`（那句话），不传 `context_ref`（它按行里已有的上下文走） |
+| 我们的用法 | **建任务**时**只传** `description` + `context_ref.project`（= 当前 projectId），不传 `domain` / `goal_type` / `mode`；**后续消息**传 `task_id` + `description` + `mode`（`chat` = 只和 planner 互动、不改已有 plan；`command` 或缺省 = 可重规划的指令），不传 `context_ref` |
 | ✅ 已确认（2026-09-21） | **`context_ref.project` 指向未知 project → 硬失败**：返回 4xx + `{"error": "…"}`，**不创建任何 task 行**（不要「照跑但世界只剩 id」）。控制面把这段原文直接显示给用户 —— 这正是我们「任务不许跑在一个没有仓库的世界里」的保证。 |
 | ✅ 已实测（2026-09-21，③） | **同一 `task_id` 再次 POST ＝ 给同一只 owner agent 追加一条指令，忙则排队**（不会被拒）：`202 {task_id, agent_id, status, message_id, queued}`；实测投递后那一轮的 `thinking` 里就引用了我们发的那句话。→ **chat 输入**（控制面详情底部的输入框）就架在它上面，不需要新接口。<br>⚠️ 同一实测也确认了**它的反面**：`task_id` 在它库里**未知**时，这条路会**当成新任务建出来**（接受路径就是创建路径，`src/api_service.go`）。所以控制面**投递前先 `GET /api/tasks/{id}` 确认它真有这条 task**，否则 404 且**不投递**。 |
 | ❓ | ① 能否**显式**传组织/仓库（注册表读不到时兜底）？字段名？<br>② 省略 `domain`/`goal_type` 是否 OK（默认取行内已有值）？我们不想猜枚举、猜错就 400<br>④ `queued` 是否**含**正在跑的那条（文档说含）<br>⑤ 响应能否顺带回 **`context_ref` 的解析结果**（project 名 / organization / 仓库）？这样创建完立刻能显示「这条任务的世界」，不必再查一次详情 |

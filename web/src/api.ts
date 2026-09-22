@@ -394,7 +394,11 @@ export const api = {
    * 给**对账行**（只在 autonomy 那边存在、我们没建过的任务）投递一条指令 —— 按它的 task id。
    * 与 `sendMessage` 对 `agentPath=autonomy` 的任务做的事完全一样，只是寻址不同。
    */
-  sendMessageToExecutor: (executorTaskId: string, message: string) =>
+  sendMessageToExecutor: (
+    executorTaskId: string,
+    message: string,
+    mode?: "chat" | "command",
+  ) =>
     write<{
       executor?: boolean;
       executorTaskId?: string;
@@ -402,9 +406,10 @@ export const api = {
       executorStatus?: string;
       messageId?: number;
       queueAhead?: number;
+      inputMode?: "chat" | "command";
     }>(`/autonomy/tasks/${executorTaskId}/messages`, {
       method: "POST",
-      body: { message },
+      body: { message, ...(mode ? { mode } : {}) },
     }),
 
   sendMessage: (
@@ -416,7 +421,7 @@ export const api = {
       width?: number;
       height?: number;
     }>,
-    mode?: "agent" | "plan",
+    mode?: "agent" | "plan" | "chat" | "command",
     planAnswerBatch?: import("./plan-questions").PlanAnswerBatch,
   ) =>
     write<{
@@ -433,6 +438,8 @@ export const api = {
       messageId?: number;
       /** 投递回执：它前面还有几条（= autonomy 的 `queued`，数字）。 */
       queueAhead?: number;
+      /** `agentPath=autonomy`：这次投递用的 chat / command。 */
+      inputMode?: "chat" | "command";
     }>(
       `/tasks/${id}/messages`,
       {

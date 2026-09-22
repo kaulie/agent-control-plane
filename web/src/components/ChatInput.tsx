@@ -1,22 +1,34 @@
 import { useRef, useState } from "react";
 
 export type AgentMode = "agent" | "plan";
+export type ExecutorInputMode = "chat" | "command";
+export type ChatMode = AgentMode | ExecutorInputMode;
+export type ChatModeSet = "agent-plan" | "chat-command";
 
 const MODE_STORAGE_KEY = "web-cursor:agentMode";
+const EXECUTOR_MODE_STORAGE_KEY = "web-cursor:executorInputMode";
 
-function loadStoredMode(): AgentMode {
+function loadStoredMode(modeSet: ChatModeSet): ChatMode {
   try {
+    if (modeSet === "chat-command") {
+      const v = localStorage.getItem(EXECUTOR_MODE_STORAGE_KEY);
+      if (v === "chat" || v === "command") return v;
+      return "command";
+    }
     const v = localStorage.getItem(MODE_STORAGE_KEY);
     if (v === "plan" || v === "agent") return v;
   } catch {
     /* ignore */
   }
-  return "agent";
+  return modeSet === "chat-command" ? "command" : "agent";
 }
 
-function storeMode(mode: AgentMode): void {
+function storeMode(mode: ChatMode, modeSet: ChatModeSet): void {
   try {
-    localStorage.setItem(MODE_STORAGE_KEY, mode);
+    localStorage.setItem(
+      modeSet === "chat-command" ? EXECUTOR_MODE_STORAGE_KEY : MODE_STORAGE_KEY,
+      mode,
+    );
   } catch {
     /* ignore */
   }
@@ -35,7 +47,7 @@ export interface ChatImage {
 export interface ChatPayload {
   text: string;
   images: ChatImage[];
-  mode: AgentMode;
+  mode: ChatMode;
 }
 
 interface Props {
@@ -49,10 +61,12 @@ interface Props {
   queueLength?: number;
   stopping?: boolean;
   /**
-   * 执行方（autonomy）变体：它只收文字、也没有 Plan/Agent 这个模式 ——
-   * 那就**不显示**附件与模式选择（不置灰、不写占位），文案也跟着换。
+   * 执行方（autonomy）变体：它只收文字 —— 不显示附件（不置灰、不写占位）。
+   * 模式选择由 `modeSet` 决定：`chat-command` 显示 Chat / Command。
    */
   hideMode?: boolean;
+  /** 本机 agent 用 Agent/Plan；autonomy 后续消息用 Chat/Command。 */
+  modeSet?: ChatModeSet;
   allowImages?: boolean;
   placeholderOverride?: string;
 }
@@ -110,6 +124,7 @@ export default function ChatInput({
   queueLength = 0,
   stopping = false,
   hideMode = false,
+  modeSet = "agent-plan",
   allowImages = true,
   placeholderOverride,
 }: Props) {
@@ -118,18 +133,18 @@ export default function ChatInput({
   const [attachError, setAttachError] = useState<string | null>(null);
   // The mode is always user-chosen; it is never forced by the task state.
   // Only the user's last selection is remembered (localStorage).
-  const [mode, setMode] = useState<AgentMode>(loadStoredMode);
+  const [mode, setMode] = useState<ChatMode>(() => loadStoredMode(modeSet));
   const [sending, setSending] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const effectiveMode: AgentMode = mode;
+  const effectiveMode: ChatMode = mode;
 
   const canSend =
     (!!text.trim() || images.length > 0) && !disabled && !stopping && !sending;
 
-  const selectMode = (next: AgentMode): void => {
+  const selectMode = (next: ChatMode): void => {
     setMode(next);
-    storeMode(next);
+    storeMode(next, modeSet);
   };
 
   const addFiles = async (files: FileList | File[]): Promise<void> => {
@@ -193,11 +208,20 @@ export default function ChatInput({
         : "Agent 工作中，消息将加入队列…"
       : effectiveMode === "plan"
         ? "Describe what to plan… (read-only planning mode)"
-        : "Send an instruction… (paste or attach images)");
+        : effectiveMode === "chat"
+          ? "和 planner 说一句…（不改已经产生的 plan）"
+          : effectiveMode === "command"
+            ? "发一条指令给执行方…（可以改 plan）"
+            : "Send an instruction… (paste or attach images)");
 
-  const modeSelectTitle = running
-    ? "切换模式不会中断当前任务，仅影响下一条排队消息"
-    : "Agent 可编辑代码；Plan 只读规划（由模型运行时控制，与工作流阶段无关）";
+  const modeSelectTitle =
+    modeSet === "chat-command"
+      ? running
+        ? "切换模式不会中断当前任务，仅影响下一条排队消息"
+        : "Chat 只和 planner 互动，不改已有 plan；Command 是可重规划的指令"
+      : running
+        ? "切换模式不会中断当前任务，仅影响下一条排队消息"
+        : "Agent 可编辑代码；Plan 只读规划（由模型运行时控制，与工作流阶段无关）";
 
   return (
     <div className="chat-input">
@@ -220,7 +244,7 @@ export default function ChatInput({
         </div>
       )}
       {attachError && <div className="chat-attach-error">{attachError}</div>}
-      {!hideMode && running && activeRunMode && (
+      {!hideMode && running && activeRunMode && modeSet === "agent-plan" && (
         <div className="chat-mode-hint">
           当前{" "}
           <span className={`event-mode event-mode-${activeRunMode}`}>
@@ -260,10 +284,19 @@ export default function ChatInput({
             disabled={disabled || stopping || sending}
             aria-label="Conversation mode"
             title={modeSelectTitle}
-            onChange={(e) => selectMode(e.target.value as AgentMode)}
+            onChange={(e) => selectMode(e.target.value as ChatMode)}
           >
-            <option value="agent">Agent</option>
-            <option value="plan">Plan</option>
+            {modeSet === "chat-command" ? (
+              <>
+                <option value="command">Command</option>
+                <option value="chat">Chat</option>
+              </>
+            ) : (
+              <>
+                <option value="agent">Agent</option>
+                <option value="plan">Plan</option>
+              </>
+            )}
           </select>
         )}
         <textarea

@@ -182,4 +182,19 @@ assert.match(overflow.message, /Fork 新 task/);
 assert.match(overflow.message, /完整历史仍在时间线里/);
 assert.equal(classifyRunError("already has active run").kind, "busy", "其它分类不受影响");
 
-console.log("PASS: 时间线透明化文案（会话重置 / 重启续接 / seed 体量 / 简报裁剪 / 自动轮转 / 模型摘要 / 超限报错）");
+// 9) 上游额度用尽（Cursor「out of usage」）→ 可操作中文。
+// 原文只会说「Switch to Auto / ask your admin」，用户看不懂，还以为「更新账户了怎么还额度不够」。
+const quota = classifyRunError(
+  "Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.",
+);
+assert.equal(quota.kind, "quota");
+assert.match(quota.message, /额度/);
+assert.match(quota.message, /Auto/);
+assert.match(quota.message, /CURSOR_API_KEY/);
+assert.equal(
+  classifyRunError("The request exceeds the model's context window").kind,
+  "context_window",
+  "额度分类不影响上下文超限判定",
+);
+
+console.log("PASS: 时间线透明化文案（会话重置 / 重启续接 / seed 体量 / 简报裁剪 / 自动轮转 / 模型摘要 / 超限报错 / 额度报错）");

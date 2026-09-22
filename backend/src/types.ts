@@ -196,6 +196,11 @@ export interface Task {
   executorTaskId?: string;
   /** 执行方那侧的 agent id（M2 拼它的事件流用）；`agentPath=autonomy` 时才有。 */
   executorAgentId?: string;
+  /**
+   * 选用的 provider 账号（一把 key = 一个账号）。老任务没有。
+   * 控制面本机 agent 用这个账号的 API key + agentRootWorkspace。
+   */
+  accountId?: string;
 }
 
 export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";
@@ -471,6 +476,9 @@ export interface AgentBoardRow {
   taskStatus: TaskStatus;
   taskCreatedAt: string;
   taskWorkspace: string;
+  /** 这个 agent 绑的账号（provider + vendor + key）。 */
+  accountId?: string;
+  accountLabel?: string;
   /** This is the task's currently bound agent. */
   current: boolean;
   /** Latest activity of this agent: newest event, else newest run. */

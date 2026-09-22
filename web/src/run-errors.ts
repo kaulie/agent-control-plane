@@ -43,9 +43,8 @@ export function isQuotaError(raw: string | undefined | null): boolean {
 
 /** 额度用尽的可操作中文（与 `backend/src/run-errors.ts` 保持同一口径）。 */
 export const QUOTA_ERROR_MESSAGE =
-  "Cursor 额度已用尽（只影响非 Auto 模型）：CURSOR_API_KEY 对应账号的 fast/高级模型用量已耗尽。" +
-  "先在模型下拉切到 Auto（default）即可继续；要恢复高级模型，需由该账号的管理员提升额度 —— " +
-  "在别处「更新账户」不会改变本应用实际使用的账号与额度。";
+  "Cursor 额度已用尽（只影响非 Auto 模型）：该任务所选账号的 fast/高级模型用量已耗尽。" +
+  "先在模型下拉切到 Auto（default）即可继续；要恢复高级模型，换一个账号或请该账号管理员提升额度。";
 
 /**
  * 上游只回一个 **gRPC 状态码占位**、没有可读文案时的形状（`[resource_exhausted] Error` 等）。
@@ -60,10 +59,9 @@ export function upstreamStatusCode(
 
 /** `resource_exhausted`（上游对该模型限额/限流）的可操作中文。 */
 export const UPSTREAM_EXHAUSTED_MESSAGE =
-  "Cursor 上游返回 resource_exhausted（无更多文案）：所选模型在 CURSOR_API_KEY " +
-  "对应账号上额度/容量已受限（多为该模型单独的限额，Auto 不受影响）。先在模型" +
-  "下拉切到 Auto（default）或换一个模型即可继续；在别处「更新账户」/换浏览器都" +
-  "不会改变本应用实际使用的 key。";
+  "Cursor 上游返回 resource_exhausted（无更多文案）：所选模型在该任务账号上" +
+  "额度/容量已受限（多为该模型单独的限额，Auto 不受影响）。先在模型下拉切到 " +
+  "Auto（default）、换模型，或到全局设置换一个账号。";
 
 /** `unavailable` / `deadline_exceeded`（上游模型服务暂时不可用）的可操作中文。 */
 export const UPSTREAM_UNAVAILABLE_MESSAGE =

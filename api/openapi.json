@@ -19,6 +19,10 @@
       "description": "全局设置"
     },
     {
+      "name": "accounts",
+      "description": "Provider 账号池（Cursor / Cline vendor 多把 key）"
+    },
+    {
       "name": "projects",
       "description": "项目与项目设置"
     },
@@ -48,6 +52,72 @@
     }
   ],
   "paths": {
+    "/api/accounts": {
+      "get": {
+        "summary": "账号池列表（key 只回掩码）+ 可用 vendor",
+        "operationId": "getApiAccounts",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "summary": "新增账号（provider + vendor + apiKey + 工作区根）",
+        "operationId": "postApiAccounts",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "201": {
+            "description": "创建成功"
+          }
+        }
+      }
+    },
+    "/api/accounts/{accountId}": {
+      "delete": {
+        "summary": "删除账号（有进行中任务则拒绝）",
+        "operationId": "deleteApiAccountsAccountId",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "改账号（不传 apiKey 则保留原 key）",
+        "operationId": "patchApiAccountsAccountId",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/accounts/{accountId}/verify": {
+      "post": {
+        "summary": "用该账号的 key 做一次鉴权探测",
+        "operationId": "postApiAccountsAccountIdVerify",
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/agents": {
       "get": {
         "summary": "Agent 看板（per-agent / per-task 两个口径）",
@@ -78,7 +148,7 @@
     },
     "/api/auth": {
       "get": {
-        "summary": "各 provider 的鉴权状态",
+        "summary": "账号池 + 各 provider 的鉴权状态",
         "operationId": "getApiAuth",
         "tags": [
           "catalog"
@@ -201,7 +271,7 @@
     },
     "/api/models": {
       "get": {
-        "summary": "某 provider 的模型目录与默认模型",
+        "summary": "某 provider / 账号的模型目录与默认模型",
         "operationId": "getApiModels",
         "tags": [
           "catalog"

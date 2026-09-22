@@ -58,7 +58,10 @@ const render = (props) =>
   const html = render({ entry: "gateway" });
   assert.ok(!html.includes("交给 autonomy"), "只留老入口时不显示新入口");
   assert.ok(html.includes("类型") && html.includes("目标"), "老入口的类型 / 目标照旧");
-  assert.ok(html.includes("Provider") && html.includes("Model"), "老入口的 Provider / Model 照旧");
+  assert.ok(
+    html.includes("Provider") && html.includes("账号") && html.includes("Model"),
+    "老入口的 Provider / 账号 / Model",
+  );
   assert.ok(html.includes("创建并开始"), "老入口按钮文案不变");
 }
 

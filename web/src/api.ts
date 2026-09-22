@@ -1,5 +1,6 @@
 import type {
   AgentBoard,
+  ProviderAccount,
   AutonomyMeta,
   AutonomyTaskDetail,
   AutonomyTaskList,
@@ -148,12 +149,79 @@ export const api = {
       j<{ providers: ProviderInfo[]; defaultProvider: string }>(r),
     ),
 
-  listModels: (provider?: string) => {
-    const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+  listModels: (provider?: string, accountId?: string) => {
+    const params = new URLSearchParams();
+    if (provider) params.set("provider", provider);
+    if (accountId) params.set("accountId", accountId);
+    const q = params.toString() ? `?${params.toString()}` : "";
     return fetch(`${BASE}/models${q}`).then((r) =>
-      j<{ provider: string; models: ModelInfo[]; resolved?: string }>(r),
+      j<{
+        provider: string;
+        accountId?: string;
+        vendor?: string;
+        models: ModelInfo[];
+        resolved?: string;
+      }>(r),
     );
   },
+
+  listAccounts: (filter?: { provider?: string; vendor?: string; enabled?: boolean }) => {
+    const params = new URLSearchParams();
+    if (filter?.provider) params.set("provider", filter.provider);
+    if (filter?.vendor) params.set("vendor", filter.vendor);
+    if (filter?.enabled !== undefined) params.set("enabled", filter.enabled ? "1" : "0");
+    const q = params.toString() ? `?${params.toString()}` : "";
+    return fetch(`${BASE}/accounts${q}`).then((r) =>
+      j<{
+        accounts: ProviderAccount[];
+        vendors: { cursor: string[]; cline: string[] };
+      }>(r),
+    );
+  },
+
+  createAccount: (body: {
+    provider: string;
+    vendor?: string;
+    label: string;
+    apiKey: string;
+    baseUrl?: string;
+    agentRootWorkspace: string;
+    enabled?: boolean;
+    isDefault?: boolean;
+  }) => write<ProviderAccount>("/accounts", { method: "POST", body }),
+
+  updateAccount: (
+    accountId: string,
+    body: {
+      provider?: string;
+      vendor?: string;
+      label?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      agentRootWorkspace?: string;
+      enabled?: boolean;
+      isDefault?: boolean;
+    },
+  ) =>
+    write<ProviderAccount>(`/accounts/${encodeURIComponent(accountId)}`, {
+      method: "PATCH",
+      body,
+    }),
+
+  deleteAccount: (accountId: string) =>
+    write<{ ok: true }>(`/accounts/${encodeURIComponent(accountId)}`, {
+      method: "DELETE",
+    }),
+
+  verifyAccount: (accountId: string) =>
+    write<{
+      accountId: string;
+      provider: string;
+      vendor: string;
+      label: string;
+      ok: boolean;
+      detail: string;
+    }>(`/accounts/${encodeURIComponent(accountId)}/verify`, { method: "POST" }),
 
   listProjects: () => fetch(`${BASE}/projects`).then((r) => j<Project[]>(r)),
 
@@ -215,6 +283,8 @@ export const api = {
     projectId?: string;
     provider?: string;
     model?: string;
+    accountId?: string;
+    vendor?: string;
     /**
      * agent 创建路径：`autonomy` = 任务仍由控制面创建，**执行**交给 autonomy
      * （agent 由它的 runtime 创建；交接失败时任务保留并标 error，错误原文在 4xx/503 里）。

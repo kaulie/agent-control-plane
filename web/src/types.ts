@@ -260,6 +260,8 @@ export interface Task {
   executorTaskId?: string;
   /** 执行方那侧的 agent id（详情里的 Agent chip 用它）。 */
   executorAgentId?: string;
+  /** 选用的 provider 账号。 */
+  accountId?: string;
 }
 
 /**
@@ -328,6 +330,8 @@ export interface AgentBoardRow {
   taskStatus: "active" | "completed" | "error";
   taskCreatedAt: string;
   taskWorkspace: string;
+  accountId?: string;
+  accountLabel?: string;
   /** 是否是 task 当前绑定的 agent。 */
   current: boolean;
   /** 最后活跃时间（该 agent 最新事件 / run）。 */
@@ -557,6 +561,29 @@ export interface AuthStatus {
   ok: boolean;
   detail: string;
   providers?: Array<{ name: string; ok: boolean; detail: string }>;
+  accounts?: Array<{
+    accountId: string;
+    provider: string;
+    vendor: string;
+    label: string;
+    isDefault: boolean;
+    ok: boolean;
+    detail: string;
+  }>;
+}
+
+export interface ProviderAccount {
+  accountId: string;
+  provider: "cursor" | "cline";
+  vendor: string;
+  label: string;
+  apiKeyMasked: string;
+  baseUrl?: string;
+  agentRootWorkspace: string;
+  enabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProviderInfo {

@@ -624,6 +624,7 @@ export default function App() {
       goal?: TaskGoal;
       provider?: string;
       model?: string;
+      accountId?: string;
     }) => {
       if (!selectedProjectId) return;
       const task = await api.createTask({
@@ -634,6 +635,7 @@ export default function App() {
         projectId: selectedProjectId,
         provider: input.provider,
         model: input.model,
+        accountId: input.accountId,
       });
       await refreshTasks(selectedProjectId);
       await selectTask(task.taskId);

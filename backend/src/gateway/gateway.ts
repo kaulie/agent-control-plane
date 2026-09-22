@@ -24,6 +24,15 @@ import type {
   UsageGranularity,
 } from "../types.js";
 import { Store, newId, DEFAULT_PROJECT_ID, SYSTEM_OPS_PROJECT_ID, WATCHDOG_USER_ID } from "../store/db.js";
+import {
+  accountDisplayName,
+  assertAccountInput,
+  listClineVendors,
+  toPublicAccount,
+  type ProviderAccount,
+  type ProviderAccountInput,
+  type ProviderAccountSecret,
+} from "../accounts.js";
 import type { AgentProvider } from "../providers/types.js";
 import { DEFAULT_MAX_CONCURRENT_RUNS } from "../config.js";
 import { agentDisplayName } from "../agent-id.js";
@@ -495,6 +504,212 @@ export class AgentGateway {
     return this.providers;
   }
 
+  listAccounts(filter?: {
+    provider?: string;
+    vendor?: string;
+    enabled?: boolean;
+  }): ProviderAccount[] {
+    return this.store.listAccounts(filter).map(toPublicAccount);
+  }
+
+  getAccount(accountId: string): ProviderAccount | undefined {
+    const row = this.store.getAccount(accountId);
+    return row ? toPublicAccount(row) : undefined;
+  }
+
+  createAccount(input: ProviderAccountInput): ProviderAccount {
+    const parsed = assertAccountInput(input, { requireKey: true });
+    return toPublicAccount(
+      this.store.createAccount({
+        provider: parsed.provider,
+        vendor: parsed.vendor,
+        label: parsed.label,
+        apiKey: parsed.apiKey ?? "",
+        ...(parsed.baseUrl ? { baseUrl: parsed.baseUrl } : {}),
+        agentRootWorkspace: parsed.agentRootWorkspace,
+        enabled: parsed.enabled,
+        isDefault: parsed.isDefault,
+      }),
+    );
+  }
+
+  updateAccount(
+    accountId: string,
+    input: ProviderAccountInput & { apiKey?: string },
+  ): ProviderAccount | undefined {
+    const current = this.store.getAccount(accountId);
+    if (!current) return undefined;
+    const parsed = assertAccountInput(
+      {
+        provider: input.provider || current.provider,
+        vendor: input.vendor ?? current.vendor,
+        label: input.label?.trim() || current.label,
+        agentRootWorkspace:
+          input.agentRootWorkspace?.trim() || current.agentRootWorkspace,
+        enabled: input.enabled ?? current.enabled,
+        isDefault: input.isDefault ?? current.isDefault,
+        ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+        ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+      },
+      { requireKey: false },
+    );
+    const updated = this.store.updateAccount(accountId, {
+      label: parsed.label,
+      vendor: parsed.vendor,
+      agentRootWorkspace: parsed.agentRootWorkspace,
+      enabled: parsed.enabled,
+      isDefault: parsed.isDefault,
+      ...(parsed.apiKey ? { apiKey: parsed.apiKey } : {}),
+      ...(input.baseUrl !== undefined ? { baseUrl: parsed.baseUrl ?? null } : {}),
+    });
+    return updated ? toPublicAccount(updated) : undefined;
+  }
+
+  deleteAccount(accountId: string): { ok: true } {
+    const current = this.store.getAccount(accountId);
+    if (!current) throw new Error("account not found");
+    const active = this.store.countActiveTasksForAccount(accountId);
+    if (active > 0) {
+      throw new Error(`账号仍有 ${active} 个进行中的任务，先结束这些任务再删除`);
+    }
+    this.store.deleteAccount(accountId);
+    return { ok: true };
+  }
+
+  async verifyAccount(accountId: string): Promise<{
+    accountId: string;
+    provider: string;
+    vendor: string;
+    label: string;
+    ok: boolean;
+    detail: string;
+  }> {
+    const account = this.store.getAccount(accountId);
+    if (!account) throw new Error("account not found");
+    const auth = await this.verifyAccountSecret(account);
+    return {
+      accountId: account.accountId,
+      provider: account.provider,
+      vendor: account.vendor,
+      label: account.label,
+      ...auth,
+    };
+  }
+
+  listAccountVendors(): { cursor: string[]; cline: string[] } {
+    return { cursor: ["cursor"], cline: listClineVendors() };
+  }
+
+  async getAuthStatus(): Promise<{
+    ok: boolean;
+    detail: string;
+    providers: Array<{ name: string; ok: boolean; detail: string }>;
+    accounts: Array<{
+      accountId: string;
+      provider: string;
+      vendor: string;
+      label: string;
+      isDefault: boolean;
+      ok: boolean;
+      detail: string;
+    }>;
+  }> {
+    const accounts = this.store.listAccounts({ enabled: true });
+    const accountResults = await Promise.all(
+      accounts.map(async (account) => {
+        const auth = await this.verifyAccountSecret(account);
+        return {
+          accountId: account.accountId,
+          provider: account.provider,
+          vendor: account.vendor,
+          label: account.label,
+          isDefault: account.isDefault,
+          ...auth,
+        };
+      }),
+    );
+    const providers = await Promise.all(
+      this.providers.list().map(async (p) => {
+        const mine = accountResults.filter((a) => a.provider === p.name);
+        if (mine.length) {
+          const ok = mine.some((a) => a.ok);
+          const hit = mine.find((a) => a.isDefault && a.ok) ?? mine.find((a) => a.ok) ?? mine[0];
+          return {
+            name: p.name,
+            ok,
+            detail: `${mine.length} 个账号 · ${accountDisplayName(hit)}：${hit.detail}`,
+          };
+        }
+        const auth = await p.verifyAuth();
+        return { name: p.name, ...auth };
+      }),
+    );
+    const defaultName = this.providers.defaultProviderName;
+    const defaultAuth = providers.find((r) => r.name === defaultName);
+    const defaultAccount =
+      accountResults.find((a) => a.provider === defaultName && a.isDefault && a.ok) ??
+      accountResults.find((a) => a.ok);
+    const ok = accountResults.length
+      ? accountResults.some((a) => a.ok)
+      : providers.some((r) => r.ok);
+    const detail = accountResults.length
+      ? defaultAccount
+        ? `${accountDisplayName(defaultAccount)}：${defaultAccount.detail}`
+        : `${accountResults.length} 个账号均未通过鉴权`
+      : defaultAuth
+        ? defaultAuth.detail
+        : providers.map((r) => `${r.name}: ${r.detail}`).join("; ");
+    return { ok, detail, providers, accounts: accountResults };
+  }
+
+  /**
+   * 账号解析：显式 accountId > 该 provider(+vendor) 的默认账号 > 该 provider 第一条启用账号。
+   * 库里完全没有账号时返回 undefined（测试 / 老路径回落到全局 WorkspaceRoot）。
+   */
+  resolveAccount(input: {
+    accountId?: string;
+    provider?: string;
+    vendor?: string;
+    require?: boolean;
+  }): ProviderAccountSecret | undefined {
+    if (input.accountId?.trim()) {
+      const account = this.store.getAccount(input.accountId.trim());
+      if (!account) throw new Error(`account ${input.accountId} not found`);
+      if (!account.enabled) throw new Error(`account ${account.label} is disabled`);
+      return account;
+    }
+    const provider = input.provider?.trim();
+    const vendor = input.vendor?.trim();
+    const pool = this.store.listAccounts({
+      ...(provider ? { provider } : {}),
+      ...(vendor ? { vendor } : {}),
+      enabled: true,
+    });
+    if (!pool.length) {
+      if (input.require) {
+        throw new Error(
+          provider
+            ? `没有可用的 ${provider} 账号，请先在全局设置的账号池里添加`
+            : "没有可用账号，请先在全局设置的账号池里添加",
+        );
+      }
+      return undefined;
+    }
+    return pool.find((a) => a.isDefault) ?? pool[0];
+  }
+
+  private async verifyAccountSecret(
+    account: ProviderAccountSecret,
+  ): Promise<{ ok: boolean; detail: string }> {
+    if (!this.providers.has(account.provider)) {
+      return { ok: false, detail: `unknown provider ${account.provider}` };
+    }
+    return this.providers.get(account.provider).verifyAuth({
+      apiKey: account.apiKey,
+      vendor: account.vendor,
+    });
+  }
+
   // ---- projects ----
 
   listProjects(): Project[] {
@@ -618,6 +833,10 @@ export class AgentGateway {
      * `autonomy`（**执行**交给 autonomy：仍在我们库里建任务，但不建本地工作区、不预分配本地 agent）。
      */
     agentPath?: string;
+    /** 选用的账号（provider + vendor + key）。不传则用该 provider 的默认账号。 */
+    accountId?: string;
+    /** Cline 账号的厂商过滤（deepseek / minimax）；有 accountId 时以账号为准。 */
+    vendor?: string;
   }): Task {
     const title = input.title?.trim() || `Task ${new Date().toLocaleString()}`;
     const projectId = input.projectId?.trim() || DEFAULT_PROJECT_ID;
@@ -651,10 +870,17 @@ export class AgentGateway {
     const projectSettings = this.store.getProjectSettings(projectId) ?? {};
     const runtimeDefaults = resolveRuntimeDefaults(globalSettings, projectSettings);
 
-    const providerName = normalizeProviderName(
+    const hintedProvider = normalizeProviderName(
       input.provider ?? runtimeDefaults.defaultProvider,
       this.providers.defaultProviderName,
     );
+    const account = this.resolveAccount({
+      accountId: input.accountId,
+      provider: hintedProvider,
+      vendor: input.vendor,
+      require: this.store.listAccounts().length > 0,
+    });
+    const providerName = account?.provider ?? hintedProvider;
     if (!isProviderName(providerName) || !this.providers.has(providerName)) {
       throw new Error(
         `Unknown agent provider "${providerName}". Supported: ${this.providers.names().join(", ")}`,
@@ -667,14 +893,13 @@ export class AgentGateway {
       undefined;
 
     const taskId = newId("task");
-    // 每个 agent 一个工作区：`<WorkspaceRoot>/agent-<agentid>`。
-    // agent id 在这里**预分配**（provider 用得上就直接拿它开会话，例如 Cline；
-    // Cursor 的 SDK 自己生成 id，工作区目录名保持预分配的那个），
-    // 所以目录从建立那一刻起就带着这个 agent 的 id。
+    // 每个 agent 一个工作区：`<账号 agentRootWorkspace>/agent-<agentid>`。
+    // 没有账号池时回落到全局 WorkspaceRoot（测试 / 老路径）。
     const agentId = newId("agent");
+    const workspaceRoot = account?.agentRootWorkspace || this.effectiveWorkspaceRoot();
     const workspace =
       input.workspace?.trim() ||
-      agentWorkspaceDir(agentId, this.effectiveWorkspaceRoot());
+      agentWorkspaceDir(agentId, workspaceRoot);
     fs.mkdirSync(workspace, { recursive: true });
 
     const task = this.store.createTask({
@@ -685,6 +910,7 @@ export class AgentGateway {
       model,
       projectId,
       createdBy: input.createdBy,
+      ...(account ? { accountId: account.accountId } : {}),
       // 预分配的 agent id：落库 + 标记「还不是活会话」（首个 run 用它开新会话）。
       agentId,
       ...(input.description !== undefined
@@ -888,6 +1114,7 @@ export class AgentGateway {
       ...(source.model ? { model: source.model } : {}),
       projectId: source.projectId,
       ...(source.createdBy ? { createdBy: source.createdBy } : {}),
+      ...(source.accountId ? { accountId: source.accountId } : {}),
       taskType: source.taskType,
       // 交付目标必须一起继承：否则 fork 出来的 task 会退回「开完 PR 停」，
       // 而源任务的目标（可能还要部署）就丢了。
@@ -1481,6 +1708,15 @@ export class AgentGateway {
         taskStatus: task.status,
         taskCreatedAt: task.createdAt,
         taskWorkspace: task.workspace,
+        ...(task.accountId
+          ? {
+              accountId: task.accountId,
+              accountLabel: (() => {
+                const acc = this.store.getAccount(task.accountId);
+                return acc ? accountDisplayName(acc) : task.accountId;
+              })(),
+            }
+          : {}),
         taskTotals,
         agentCount: taskTotals.agentCount,
       };
@@ -2547,6 +2783,9 @@ export class AgentGateway {
       // No plan-mode guidance is injected into the conversation: read-only
       // restrictions come solely from the provider's own `mode` parameter on
       // this run, so nothing lingers in long sessions when the user switches.
+      const account = task.accountId
+        ? this.store.getAccount(task.accountId)
+        : this.resolveAccount({ provider: task.provider });
       const result = await this.providerFor(task).run({
         taskId,
         runId,
@@ -2560,6 +2799,9 @@ export class AgentGateway {
         cwd: task.workspace,
         model: task.model,
         mode,
+        ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
+        ...(account?.vendor ? { vendor: account.vendor } : {}),
+        ...(account?.baseUrl ? { baseUrl: account.baseUrl } : {}),
         bootstrapText: bootstrap.text,
         bootstrap,
         sessionContext,

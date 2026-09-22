@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import type { AppSettings } from "../types";
+import AccountPoolSection from "./settings/AccountPoolSection";
 import WorkspaceRootSection from "./settings/WorkspaceRootSection";
 
 const DEFAULT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
@@ -71,9 +72,10 @@ export default function GlobalSettingsPage({ onBack }: Props) {
         <div className="settings-loading">加载中…</div>
       ) : (
         <div className="settings-body">
+          <AccountPoolSection />
           <WorkspaceRootSection
-            title="WorkspaceRoot"
-            description="系统级 Agent 工作区根目录。新建任务时 cwd 为 WorkspaceRoot/{project_name}/{task_id}。"
+            title="WorkspaceRoot（兜底）"
+            description="只在账号池为空时，本机 agent 才回落到这个根目录。有账号后，新 agent 用该账号自己的 agent-root-workspace/{agentId}。"
             value={workspaceRoot}
             defaultRoot={DEFAULT_WORKSPACE_ROOT}
             onChange={setWorkspaceRoot}

@@ -82,7 +82,7 @@ assert(
 );
 assert(
   formatRunErrorMessage(exhaustedRaw).includes("Auto") &&
-    formatRunErrorMessage(exhaustedRaw).includes("CURSOR_API_KEY"),
+    formatRunErrorMessage(exhaustedRaw).includes("该任务账号"),
   "resource_exhausted message actionable (Auto + which key)",
 );
 assert(

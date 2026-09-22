@@ -43,6 +43,7 @@ const tests = [
   { file: "scripts/test-task-intent.mjs", via: "tsx" },
   { file: "scripts/test-task-goal.mjs", via: "tsx" },
   { file: "scripts/test-agent-workspace.mjs", via: "tsx" },
+  { file: "scripts/test-accounts.mjs", via: "tsx" },
   { file: "scripts/test-openapi-contract.mjs", via: "tsx" },
   { file: "scripts/test-context-rotation.mjs", via: "tsx" },
   { file: "scripts/test-restart-resume.mjs", via: "tsx" },

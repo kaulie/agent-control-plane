@@ -196,25 +196,7 @@ export async function registerRoutes(
     });
   });
 
-  app.get("/api/auth", async () => {
-    const results = await Promise.all(
-      providers.list().map(async (p) => {
-        const auth = await p.verifyAuth();
-        return { name: p.name, ...auth };
-      }),
-    );
-    const defaultAuth = results.find((r) => r.name === providers.defaultProviderName);
-    return {
-      ok: results.some((r) => r.ok),
-      // `detail` 是右上角状态条直接显示的那行字：默认 provider 命中时就用它自己的
-      // 文案（如 `authenticated as <email>`），不再加 `default=<name>: ` 前缀 ——
-      // 那个前缀对用户没意义，只会让「当前是哪个账号」更难读。
-      detail: defaultAuth
-        ? defaultAuth.detail
-        : results.map((r) => `${r.name}: ${r.detail}`).join("; "),
-      providers: results,
-    };
-  });
+  app.get("/api/auth", async () => gateway.getAuthStatus());
 
   app.get("/api/providers", async () => {
     const list = await Promise.all(
@@ -231,20 +213,149 @@ export async function registerRoutes(
     return { providers: list, defaultProvider: providers.defaultProviderName };
   });
 
-  app.get<{ Querystring: { provider?: string } }>("/api/models", async (req, reply) => {
-    const name =
-      req.query.provider?.trim() || providers.defaultProviderName;
+  app.get<{ Querystring: { provider?: string; accountId?: string } }>(
+    "/api/models",
+    async (req, reply) => {
+      const accountId = req.query.accountId?.trim();
+      const account = accountId ? gateway.resolveAccount({ accountId }) : undefined;
+      const name =
+        account?.provider ||
+        req.query.provider?.trim() ||
+        providers.defaultProviderName;
+      try {
+        const provider = providers.get(name);
+        const models = await provider.listModels({
+          ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
+          ...(account?.vendor ? { vendor: account.vendor } : {}),
+        });
+        const resolved = await provider.resolveModel();
+        return {
+          provider: provider.name,
+          ...(account ? { accountId: account.accountId, vendor: account.vendor } : {}),
+          models,
+          resolved,
+        };
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { provider?: string; vendor?: string; enabled?: string } }>(
+    "/api/accounts",
+    async (req) => {
+      const enabledRaw = req.query.enabled?.trim();
+      const enabled =
+        enabledRaw === "1" || enabledRaw === "true"
+          ? true
+          : enabledRaw === "0" || enabledRaw === "false"
+            ? false
+            : undefined;
+      return {
+        accounts: gateway.listAccounts({
+          ...(req.query.provider?.trim() ? { provider: req.query.provider.trim() } : {}),
+          ...(req.query.vendor?.trim() ? { vendor: req.query.vendor.trim() } : {}),
+          ...(enabled !== undefined ? { enabled } : {}),
+        }),
+        vendors: gateway.listAccountVendors(),
+      };
+    },
+  );
+
+  app.post<{
+    Body: {
+      provider?: string;
+      vendor?: string;
+      label?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      agentRootWorkspace?: string;
+      enabled?: boolean;
+      isDefault?: boolean;
+    };
+  }>("/api/accounts", async (req, reply) => {
+    const body = req.body ?? {};
     try {
-      const provider = providers.get(name);
-      const models = await provider.listModels();
-      const resolved = await provider.resolveModel();
-      return { provider: provider.name, models, resolved };
+      const account = gateway.createAccount({
+        provider: body.provider ?? "",
+        vendor: body.vendor,
+        label: body.label ?? "",
+        apiKey: body.apiKey,
+        baseUrl: body.baseUrl,
+        agentRootWorkspace: body.agentRootWorkspace ?? "",
+        enabled: body.enabled,
+        isDefault: body.isDefault,
+      });
+      reply.code(201);
+      return account;
     } catch (err) {
       return reply
         .code(400)
         .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  app.patch<{
+    Params: { accountId: string };
+    Body: {
+      provider?: string;
+      vendor?: string;
+      label?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      agentRootWorkspace?: string;
+      enabled?: boolean;
+      isDefault?: boolean;
+    };
+  }>("/api/accounts/:accountId", async (req, reply) => {
+    const body = req.body ?? {};
+    try {
+      const updated = gateway.updateAccount(req.params.accountId, {
+        provider: body.provider ?? "",
+        vendor: body.vendor,
+        label: body.label ?? "",
+        apiKey: body.apiKey,
+        baseUrl: body.baseUrl,
+        agentRootWorkspace: body.agentRootWorkspace || "",
+        enabled: body.enabled,
+        isDefault: body.isDefault,
+      });
+      if (!updated) return reply.code(404).send({ error: "account not found" });
+      return updated;
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.delete<{ Params: { accountId: string } }>(
+    "/api/accounts/:accountId",
+    async (req, reply) => {
+      try {
+        return gateway.deleteAccount(req.params.accountId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const notFound = /not found/i.test(msg);
+        return reply.code(notFound ? 404 : 400).send({ error: msg });
+      }
+    },
+  );
+
+  app.post<{ Params: { accountId: string } }>(
+    "/api/accounts/:accountId/verify",
+    async (req, reply) => {
+      try {
+        return await gateway.verifyAccount(req.params.accountId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const notFound = /not found/i.test(msg);
+        return reply.code(notFound ? 404 : 400).send({ error: msg });
+      }
+    },
+  );
 
   // ---- autonomy（「交给 autonomy」入口）------------------------------------
   //
@@ -624,6 +735,10 @@ export async function registerRoutes(
       provider?: string;
       model?: string;
       projectId?: string;
+      /** 选用的账号（provider + vendor + key）。 */
+      accountId?: string;
+      /** Cline 厂商过滤（有 accountId 时以账号为准）。 */
+      vendor?: string;
       /** 任务描述（需求原文）——**必填**：它就是 agent 要干的事。 */
       description?: string;
       /** 任务类型标签（纯分类，不改变行为）；缺省 `general`。 */
@@ -679,6 +794,8 @@ export async function registerRoutes(
         provider: body.provider,
         model: body.model,
         projectId: body.projectId,
+        accountId: body.accountId,
+        vendor: body.vendor,
         description,
         taskType: body.taskType,
         // 没传 = 用默认目标（合入主分支），保证新建的任务都有明确交付目标。

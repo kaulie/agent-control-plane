@@ -7,6 +7,7 @@ import {
   formatRunErrorMessage,
   isQuotaError,
   isRetryableSilentAbort,
+  upstreamStatusCode,
 } from "../dist/run-errors.js";
 
 function assert(cond, msg) {
@@ -65,6 +66,56 @@ assert(
     modelCalls: 0,
   }) === false,
   "abort after tools not retryable",
+);
+
+// 上游只回 gRPC 状态码、没有文案（Cursor 新版 API）→ 必须归到「哪一类 + 下一步」。
+// 2026-09-22 实测：新账号下只有 grok-4.7 报 `[resource_exhausted] Error`（grok-4.6/Auto 正常），
+// 之前落成 kind=other，用户只看到 `Error · kind=other`，判不出原因。
+const exhaustedRaw = "[resource_exhausted] Error";
+assert(
+  upstreamStatusCode(exhaustedRaw) === "resource_exhausted",
+  "resource_exhausted code parsed",
+);
+assert(
+  classifyRunError(exhaustedRaw).kind === "quota",
+  "resource_exhausted -> quota kind",
+);
+assert(
+  formatRunErrorMessage(exhaustedRaw).includes("Auto") &&
+    formatRunErrorMessage(exhaustedRaw).includes("CURSOR_API_KEY"),
+  "resource_exhausted message actionable (Auto + which key)",
+);
+assert(
+  formatRunErrorMessage(exhaustedRaw) !== exhaustedRaw,
+  "resource_exhausted raw code not passed through",
+);
+
+const unavailableRaw = "[unavailable] Error";
+assert(
+  upstreamStatusCode(unavailableRaw) === "unavailable",
+  "unavailable code parsed",
+);
+assert(
+  classifyRunError(unavailableRaw).kind === "network",
+  "unavailable -> network kind",
+);
+assert(
+  formatRunErrorMessage(unavailableRaw).includes("稍后重试"),
+  "unavailable message actionable",
+);
+assert(
+  formatRunErrorMessage("[deadline_exceeded] Error").includes("Auto"),
+  "deadline_exceeded message actionable",
+);
+
+// 未收录的上游码：原文照旧，但补上下文；纯文本错误不受影响。
+assert(
+  formatRunErrorMessage("[weird_code] Error").startsWith("[weird_code] Error（"),
+  "unknown upstream code annotated",
+);
+assert(
+  upstreamStatusCode("Something else") === undefined,
+  "no code for plain text",
 );
 
 console.log("PASS: run error formatting");

@@ -5,6 +5,7 @@
 import {
   classifyRunError,
   formatRunErrorMessage,
+  isQuotaError,
   isRetryableSilentAbort,
 } from "../dist/run-errors.js";
 
@@ -37,6 +38,20 @@ assert(
 );
 assert(formatRunErrorMessage("") === "未知错误", "empty -> 未知错误");
 assert(formatRunErrorMessage("Something else") === "Something else", "passthrough");
+
+// 上游额度用尽（Cursor「out of usage」）→ 可操作中文。
+// 不识别的话英文原文会被透传，用户看到「额度不够」却以为自己更新账户后会好。
+const quotaRaw =
+  "Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.";
+assert(classifyRunError(quotaRaw).kind === "quota", "quota kind");
+assert(isQuotaError(quotaRaw) === true, "quota matcher hits cursor out-of-usage");
+assert(
+  formatRunErrorMessage(quotaRaw).includes("额度") &&
+    formatRunErrorMessage(quotaRaw).includes("Auto"),
+  "quota message localized + actionable (points to Auto)",
+);
+assert(isQuotaError("Network request failed") === false, "quota matcher ignores network");
+assert(isQuotaError("already has active run") === false, "quota matcher ignores busy");
 assert(
   isRetryableSilentAbort("This operation was aborted", {
     toolCalls: 0,

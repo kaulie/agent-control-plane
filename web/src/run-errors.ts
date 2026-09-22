@@ -47,6 +47,29 @@ export const QUOTA_ERROR_MESSAGE =
   "先在模型下拉切到 Auto（default）即可继续；要恢复高级模型，需由该账号的管理员提升额度 —— " +
   "在别处「更新账户」不会改变本应用实际使用的账号与额度。";
 
+/**
+ * 上游只回一个 **gRPC 状态码占位**、没有可读文案时的形状（`[resource_exhausted] Error` 等）。
+ * 与 `backend/src/run-errors.ts` 保持同一口径：不识别就会被显示成 `Error · kind=other`。
+ */
+export function upstreamStatusCode(
+  raw: string | undefined | null,
+): string | undefined {
+  const m = /^\[([a-z_]+)\]\s*error$/i.exec((raw ?? "").trim());
+  return m ? m[1].toLowerCase() : undefined;
+}
+
+/** `resource_exhausted`（上游对该模型限额/限流）的可操作中文。 */
+export const UPSTREAM_EXHAUSTED_MESSAGE =
+  "Cursor 上游返回 resource_exhausted（无更多文案）：所选模型在 CURSOR_API_KEY " +
+  "对应账号上额度/容量已受限（多为该模型单独的限额，Auto 不受影响）。先在模型" +
+  "下拉切到 Auto（default）或换一个模型即可继续；在别处「更新账户」/换浏览器都" +
+  "不会改变本应用实际使用的 key。";
+
+/** `unavailable` / `deadline_exceeded`（上游模型服务暂时不可用）的可操作中文。 */
+export const UPSTREAM_UNAVAILABLE_MESSAGE =
+  "Cursor 上游返回 unavailable（无更多文案）：模型服务当前不可用或过载，多为暂时性。" +
+  "稍后重试即可，也可以先切 Auto（default）或换模型继续。";
+
 export function classifyRunError(
   raw: string | undefined | null,
 ): ClassifiedRunError {
@@ -57,6 +80,15 @@ export function classifyRunError(
 
   if (isQuotaError(s)) {
     return { kind: "quota", message: QUOTA_ERROR_MESSAGE };
+  }
+
+  // 上游只给状态码、没有文案：至少说清「是哪一类」并给出下一步，别落成 other。
+  const code = upstreamStatusCode(s);
+  if (code === "resource_exhausted") {
+    return { kind: "quota", message: UPSTREAM_EXHAUSTED_MESSAGE };
+  }
+  if (code === "unavailable" || code === "deadline_exceeded") {
+    return { kind: "network", message: UPSTREAM_UNAVAILABLE_MESSAGE };
   }
 
   // 上下文撞模型窗口：给可操作的中文（原文只说"no conversation history to compact"，谁也看不懂）。
@@ -98,6 +130,14 @@ export function classifyRunError(
     return {
       kind: "image_unsupported",
       message: "当前 Agent 不支持图片输入，请改用支持多模态的 Agent 或仅发送文字",
+    };
+  }
+
+  // 其它上游状态码：原文照旧，但补一句「这是上游码、可以怎么绕」，而不是干巴巴一个 Error。
+  if (code) {
+    return {
+      kind: "other",
+      message: `${s}（Cursor 上游状态码 ${code}，未附详情；可先切 Auto / 换模型重试）`,
     };
   }
 

@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import {
   AutonomyClient,
   autonomyTasksUrl,
+  normalizeAccountList,
   normalizeCreateResult,
   normalizeTaskList,
   readAutonomyError,
@@ -256,6 +257,81 @@ await check("纯函数：url / 归一化 / 错误体", () => {
   assert.equal(readAutonomyError({}, "fallback"), "fallback");
   assert.equal(normalizeCreateResult({ status: "pending" }).ok, false, "没有 task_id 不算成功");
   assert.equal(normalizeCreateResult(null).ok, false);
+});
+
+await check("createTask(): 带账号就发 account_id（trim），不带就不发这个字段", async () => {
+  const { impl, calls } = makeFetch({ "/api/tasks": ok({ task_id: "t" }) });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  await client.createTask({ description: "x", accountId: "  acct-1  " });
+  assert.equal(JSON.parse(calls[0].init.body).account_id, "acct-1");
+  await client.createTask({ description: "x" });
+  assert.equal("account_id" in JSON.parse(calls[1].init.body), false);
+});
+
+await check("listAccounts(): 池子归一化（掩码、无 key 原文）+ 缺 id 的行丢掉", async () => {
+  const { impl, calls } = makeFetch({
+    "/api/accounts": ok({
+      accounts: [
+        {
+          accountId: "acct-1",
+          harness: "cline",
+          vendor: "deepseek",
+          label: "deepseek keyA",
+          model: "deepseek-v4-flash",
+          agentRootWorkspace: "/tmp/a",
+          enabled: true,
+          isDefault: true,
+          apiKeyMasked: "sk-1…06d2",
+          hasKey: true,
+        },
+        { label: "没有 id 的行" },
+      ],
+    }),
+  });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const pool = await client.listAccounts();
+  assert.equal(pool.available, true);
+  assert.equal(pool.accounts.length, 1, "缺 accountId 的行丢掉");
+  assert.deepEqual(pool.accounts[0], {
+    accountId: "acct-1",
+    harness: "cline",
+    vendor: "deepseek",
+    label: "deepseek keyA",
+    model: "deepseek-v4-flash",
+    agentRootWorkspace: "/tmp/a",
+    enabled: true,
+    isDefault: true,
+    apiKeyMasked: "sk-1…06d2",
+    hasKey: true,
+  });
+  assert.equal(Object.hasOwn(pool.accounts[0], "apiKey"), false, "归一化结果里没有 key 字段");
+  assert.equal(calls[0].url, `${BASE}/api/accounts`);
+});
+
+await check("listAccounts(): 不可达 → available:false（不抛，页面显示「读不到」）", async () => {
+  const { impl } = makeFetch({
+    "/api/accounts": () => {
+      throw new Error("connect ECONNREFUSED");
+    },
+  });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const pool = await client.listAccounts();
+  assert.equal(pool.available, false);
+  assert.deepEqual(pool.accounts, []);
+  assert.match(pool.error, /ECONNREFUSED/);
+});
+
+await check("normalizeAccountList(): 非对象 / 非数组 → 空（不编造账号）", async () => {
+  assert.deepEqual(normalizeAccountList(null), []);
+  assert.deepEqual(normalizeAccountList({ accounts: "nope" }), []);
+  assert.deepEqual(normalizeAccountList({ accounts: [{ account_id: "acct-x", enabled: false }] })[0], {
+    accountId: "acct-x",
+    harness: "",
+    vendor: "",
+    label: "",
+    enabled: false,
+    isDefault: false,
+  });
 });
 
 console.log(failed ? `\n${failed} check(s) failed` : "\ntest-autonomy-client: ok");

@@ -160,6 +160,21 @@
         }
       }
     },
+    "/api/autonomy/accounts": {
+      "get": {
+        "summary": "autonomy 的账号池（只代理；新建「交给 autonomy」任务时选账号的下拉）",
+        "description": "代理 autonomy 的 `GET /api/accounts`（每条 accountId / harness / vendor / label / model / agentRootWorkspace / enabled / isDefault / apiKeyMasked）。**key 只有掩码**，永远拿不到原文。与 `/api/accounts`（控制面自己的池子，给本机 agent 用）是两个池子。读不到 → `200 + available:false`（页面显示「读不到」而不是 500）。",
+        "operationId": "getApiAutonomyAccounts",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/autonomy/meta": {
       "get": {
         "summary": "autonomy 可用性 / 版本 / 当前 LLM 后端（读不到时 available=false，不是 500）",
@@ -208,7 +223,7 @@
     "/api/autonomy/tasks/{taskId}/messages": {
       "post": {
         "summary": "给**对账行**（只在 autonomy 那边存在的任务）投递一条指令",
-        "description": "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` = 给同一只 agent 追加一条指令，忙则排队，契约 A2③），区别只在寻址：这里直接用它的 task id。**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus }`。",
+        "description": "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` + `mode=chat|command`，默认 command），区别只在寻址：这里直接用它的 task id。`chat` 只和 planner 互动、不改已有 plan；`command` 是可重规划的指令。**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus, inputMode }`。",
         "operationId": "postApiAutonomyTasksTaskIdMessages",
         "tags": [
           "autonomy"
@@ -514,7 +529,7 @@
       },
       "post": {
         "summary": "新建任务（描述必填；默认创建后自动投递需求并开跑；`agentPath=autonomy` 时改为交给 autonomy 执行）",
-        "description": "任务始终由控制面创建/落库（谁建的就是谁建的）。`agentPath`（`control-plane` 默认 / `autonomy`）只决定** agent 由谁创建**：后者把执行交给 autonomy（agent 由它的 runtime 创建），交接结果记在`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。",
+        "description": "任务始终由控制面创建/落库（谁建的就是谁建的）。`agentPath`（`control-plane` 默认 / `autonomy`）只决定** agent 由谁创建**：后者把执行交给 autonomy（agent 由它的 runtime 创建），交接结果记在`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。`agentPath=autonomy` 时可带 `autonomyAccountId`（autonomy 的账号池里的 id，见 `GET /api/autonomy/accounts`）—— 决定这条任务在它那边用哪个 harness / vendor / model / 工作目录；不传 = 交给它的池子解析（该 harness 的默认账号）。id 不存在 / 被停用会被 **autonomy** 拒绝，原文原样带出（绝不静默换一个账号跑）。`autonomyAccountId` 配 `control-plane` 路径 → 400（那是两次请求混在一起，不静默丢掉这个选择）。",
         "operationId": "postApiTasks",
         "tags": [
           "tasks"
@@ -632,7 +647,7 @@
     "/api/tasks/{taskId}/messages": {
       "post": {
         "summary": "给 agent 发消息（本机 agent → 起一个 run；agent 由 autonomy 创建 → 投递给执行方）",
-        "description": "对**本机 agent** 的任务：起一个 run（`mode=agent|plan`），老行为逐字不变。对 `agentPath=autonomy` 的任务：这条消息**投递给执行方**（autonomy 的 `POST /api/tasks` 带 `task_id` = 给同一只 agent 追加一条指令，忙则排队，契约 A2④），本机不跑 run —— 返回 `202 { executor: true, executorTaskId, messageId, queued, executorStatus }`（`queued` = 它前面还有几条）。执行方只收文字：带图片 → 400 且**不投递**；投递前先确认执行方真有这条 task（否则它会当成新任务建出来）→ 404；不可达 / 被拒 → 503 / 4xx + 原文，**绝不**回落成本机执行。",
+        "description": "对**本机 agent** 的任务：起一个 run（`mode=agent|plan`），老行为逐字不变。对 `agentPath=autonomy` 的任务：这条消息**投递给执行方**（autonomy 的 `POST /api/tasks` 带 `task_id` + `mode=chat|command`，默认 command），本机不跑 run —— 返回 `202 { executor: true, executorTaskId, messageId, queued, executorStatus, inputMode }`。`command` = 追加一条可重规划的指令（老行为）；`chat` = 只和 planner 互动，**不改已经产生的 plan**。执行方只收文字：带图片 → 400 且**不投递**；投递前先确认执行方真有这条 task（否则它会当成新任务建出来）→ 404；不可达 / 被拒 → 503 / 4xx + 原文，**绝不**回落成本机执行。",
         "operationId": "postApiTasksTaskIdMessages",
         "tags": [
           "tasks"

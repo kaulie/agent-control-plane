@@ -74,7 +74,26 @@
 | ❓ | ① 能否**显式**传组织/仓库（注册表读不到时兜底）？字段名？<br>② 省略 `domain`/`goal_type` 是否 OK（默认取行内已有值）？我们不想猜枚举、猜错就 400<br>④ `queued` 是否**含**正在跑的那条（文档说含）<br>⑤ 响应能否顺带回 **`context_ref` 的解析结果**（project 名 / organization / 仓库）？这样创建完立刻能显示「这条任务的世界」，不必再查一次详情 |
 | 状态 | 未知 project（硬失败）、**同一 task 追加指令（③）**已确认；其余 ❓ 待回 |
 
-### A3. 任务列表（控制面侧栏 Tasks 列表里的一行）
+### A2.1 账号：这条任务跑在哪个账号上（autonomy 的账号池）
+
+autonomy 侧新增的**账号池**（一条账号 = 一个 harness（`cursor` / `cline` / `codex`）+ 一个 vendor
++ 一份凭据）。它决定了这条任务在 autonomy 那边用哪个 harness / vendor / model / 工作目录 ——
+**不再由环境变量决定**。控制面在「交给 autonomy」入口给了这个选择。
+
+| 项 | 内容 |
+|---|---|
+| 读池子 | 控制面代理 `GET /api/autonomy/accounts` → autonomy 的 `GET /api/accounts` |
+| 响应 | `{ available, accounts: [ { accountId, harness, vendor, label, model?, agentRootWorkspace?, enabled, isDefault, apiKeyMasked?, hasKey? } ], url, error?, fetchedAt, entry }` |
+| **key** | **只有掩码**（`sk-1…06d2`）；autonomy 的类型层面就不渲染 key 原文，控制面也不缓存它 |
+| 写：选账号 | 建任务时 `POST /api/tasks` 带 `autonomyAccountId`（我们的字段名），在 `agentPath=autonomy` 时随交接交给 autonomy 的 `account_id` |
+| 不选 | **不发这个字段**（不是发空串）→ 交给它的池子解析：该 harness 的默认账号，否则第一条启用账号 |
+| 未知 / 已停用的 id | autonomy **拒绝**（4xx + 原文），控制面原样带出（把任务标 error），**绝不静默换一个账号跑** |
+| `autonomyAccountId` + `agentPath=control-plane` | 控制面 **400**：那是两次请求混在一起，不静默丢掉这个选择 |
+| 两个池子别混 | 控制面自己的 `/api/accounts`（给**本机** agent 用）与 autonomy 的池子不是一个东西；字段也故意不同名（`accountId` vs `autonomyAccountId`） |
+| 读不到池子 | `200 + available:false`（与其它读一致）：页面显示「读不到」，**留空仍可建任务** |
+| 状态 | ✅ 已实现（autonomy PR #163/#164/#166…；控制面本次） |
+
+
 
 | 项 | 内容 |
 |---|---|

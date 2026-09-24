@@ -1,6 +1,7 @@
 import type {
   AgentBoard,
   ProviderAccount,
+  AutonomyAccountList,
   AutonomyMeta,
   AutonomyTaskDetail,
   AutonomyTaskList,
@@ -258,6 +259,14 @@ export const api = {
     ),
 
   /**
+   * autonomy 的账号池 —— 「交给 autonomy」时选账号的下拉（不可达时 `available:false`，不是 500）。
+   * 注意：这是 **autonomy 的**池子（决定它那边用哪个 harness / vendor / model），
+   * 与 `listAccounts`（控制面自己的池子，给本机 agent 用）不是一个。
+   */
+  autonomyAccounts: () =>
+    fetch(`${BASE}/autonomy/accounts`).then((r) => j<AutonomyAccountList>(r)),
+
+  /**
    * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读（控制面代理）。
    * 只对 `agentPath=autonomy` 的任务有意义（没有交接记录 → 404）。
    */
@@ -290,6 +299,11 @@ export const api = {
      * （agent 由它的 runtime 创建；交接失败时任务保留并标 error，错误原文在 4xx/503 里）。
      */
     agentPath?: "control-plane" | "autonomy";
+    /**
+     * **autonomy 的**账号池里的账号（只在 `agentPath=autonomy` 时有意义）：
+     * 决定这条任务在它那边用哪个 harness / vendor / model / 工作目录。不传 = 由它的池子解析。
+     */
+    autonomyAccountId?: string;
   }) => write<Task>("/tasks", { method: "POST", body }),
 
   /**

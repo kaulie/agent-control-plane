@@ -164,6 +164,15 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     description:
       "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面用它给 `agentPath=autonomy` 的任务显示执行方状态，也用来把「没在我们这边建过」的行显示出来（对账）。",
   },
+  "GET /api/autonomy/accounts": {
+    summary: "autonomy 的账号池（只代理；新建「交给 autonomy」任务时选账号的下拉）",
+    tags: ["autonomy"],
+    description:
+      "代理 autonomy 的 `GET /api/accounts`（每条 accountId / harness / vendor / label / model / " +
+      "agentRootWorkspace / enabled / isDefault / apiKeyMasked）。**key 只有掩码**，永远拿不到原文。" +
+      "与 `/api/accounts`（控制面自己的池子，给本机 agent 用）是两个池子。读不到 → " +
+      "`200 + available:false`（页面显示「读不到」而不是 500）。",
+  },
   "GET /api/autonomy/tasks/{taskId}": {
     summary: "autonomy 任务详情 / 进展（只代理；404 原样透传）",
     tags: ["autonomy"],
@@ -198,7 +207,12 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     description:
       "任务始终由控制面创建/落库（谁建的就是谁建的）。`agentPath`（`control-plane` 默认 / `autonomy`）" +
       "只决定** agent 由谁创建**：后者把执行交给 autonomy（agent 由它的 runtime 创建），交接结果记在" +
-      "`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。",
+      "`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。" +
+      "`agentPath=autonomy` 时可带 `autonomyAccountId`（autonomy 的账号池里的 id，见 " +
+      "`GET /api/autonomy/accounts`）—— 决定这条任务在它那边用哪个 harness / vendor / model / " +
+      "工作目录；不传 = 交给它的池子解析（该 harness 的默认账号）。id 不存在 / 被停用会被 **autonomy** " +
+      "拒绝，原文原样带出（绝不静默换一个账号跑）。`autonomyAccountId` 配 `control-plane` 路径 → 400" +
+      "（那是两次请求混在一起，不静默丢掉这个选择）。",
     responses: {
       201: { description: "创建成功，返回任务" },
       400: { description: "参数非法 / autonomy 明确拒绝（原文在 error 里）" },

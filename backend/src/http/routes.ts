@@ -7,6 +7,7 @@ import type { BillingRuleInput } from "../billing/index.js";
 import type { TaskEntry } from "../config.js";
 import { AGENT_PATHS, isAgentPath, normalizeAgentPath } from "../agent-path.js";
 import type {
+  AutonomyAccountListResult,
   AutonomyCreateResult,
   AutonomyInstructionResult,
   AutonomyStatus,
@@ -64,8 +65,15 @@ export async function registerRoutes(
       url: string;
       status(opts?: { refresh?: boolean }): Promise<AutonomyStatus>;
       listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
+      /** 它的账号池：新建「交给 autonomy」任务时选账号的下拉（key 只回掩码）。 */
+      listAccounts(): Promise<AutonomyAccountListResult>;
       getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
-      createTask(input: { description: string; projectId?: string }): Promise<AutonomyCreateResult>;
+      createTask(input: {
+        description: string;
+        projectId?: string;
+        /** 它的池子里的账号 id（不传 = 由它的池子解析）。 */
+        accountId?: string;
+      }): Promise<AutonomyCreateResult>;
       /** chat 输入：给**已存在**的执行方任务追加一条指令（忙则排队）。 */
       addInstruction(input: {
         taskId: string;
@@ -397,6 +405,27 @@ export async function registerRoutes(
       return { ...result, entry: taskEntry };
     },
   );
+
+  /**
+   * autonomy 的**账号池**（`GET /api/accounts`）—— 「交给 autonomy」时「这条任务跑在哪个账号上」
+   * 那个下拉的数据源。
+   *
+   * 与它自己的 `/api/accounts` 是**两个池子**：那个是控制面板给本机 agent 用的，这个是 autonomy
+   * 的（决定它那边用哪个 harness / vendor / model / 凭据）。口径与其它读一致：best-effort，
+   * 不可达 → 200 + `available:false`（页面显示「读不到」，不是 500）；key 只有掩码。
+   */
+  app.get("/api/autonomy/accounts", async () => {
+    const result: AutonomyAccountListResult = autonomy
+      ? await autonomy.listAccounts()
+      : {
+          available: false,
+          accounts: [],
+          url: "",
+          error: "autonomy 未配置（AUTONOMY_API_URL）",
+          fetchedAt: new Date().toISOString(),
+        };
+    return { ...result, entry: taskEntry };
+  });
 
   app.get<{ Params: { taskId: string } }>(
     "/api/autonomy/tasks/:taskId",
@@ -764,6 +793,14 @@ export async function registerRoutes(
        * `autonomy`（**执行**交给 autonomy：任务仍在我们库里创建，agent 由它的 runtime 创建）。
        */
       agentPath?: string;
+      /**
+       * **autonomy 的**账号池里的一条账号（`GET /api/autonomy/accounts` 的 `accountId`）：
+       * 决定了这条任务在 autonomy 那边用哪个 harness / vendor / model / 工作目录。
+       *
+       * 只在 `agentPath=autonomy` 时有意义 —— 和本机路径的 `accountId`（我们自己的池子）
+       * 是两个池子、两个字段，故意不共用一个名字。不传 = 交给 autonomy 的池子解析。
+       */
+      autonomyAccountId?: string;
     };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
@@ -798,6 +835,15 @@ export async function registerRoutes(
       });
     }
     const agentPath = normalizeAgentPath(body.agentPath);
+    // 选了 autonomy 的账号，却是本机路径：那是两次请求混在一起 —— 明说，别静默丢掉这个选择
+    // （静默丢掉 = 用户以为指定了账号，实际跑在别处）。
+    const autonomyAccountId = body.autonomyAccountId?.trim() ?? "";
+    if (autonomyAccountId && agentPath !== "autonomy") {
+      return reply.code(400).send({
+        error:
+          "autonomyAccountId 只在 agentPath=autonomy 时有意义（本机 agent 的账号用 accountId）",
+      });
+    }
     try {
       const task = gateway.createTask({
         title: body.title,
@@ -820,6 +866,7 @@ export async function registerRoutes(
           ? await autonomy.createTask({
               description,
               ...(task.projectId ? { projectId: task.projectId } : {}),
+              ...(autonomyAccountId ? { accountId: autonomyAccountId } : {}),
             })
           : { ok: false as const, error: "autonomy 未配置（AUTONOMY_API_URL）" };
         if (!handed.ok) {

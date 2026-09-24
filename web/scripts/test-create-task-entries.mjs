@@ -91,13 +91,19 @@ const render = (props) =>
   assert.ok(!html.includes("本机 agent（现状）"), "只留新入口时不显示老入口");
   assert.ok(html.includes("交给 autonomy 创建"), "按钮换成新入口文案");
   // 注意：提示文案里会出现「Provider / Model」这几个字，所以按**控件**断言（下拉框）。
-  assert.ok(!html.includes("runtime-select"), "新入口不显示 Provider / Model 下拉框");
+  assert.ok(!html.includes(">Provider<"), "新入口不显示 Provider 控件");
+  assert.ok(!html.includes(">Model<"), "新入口不显示 Model 控件");
   assert.ok(!html.includes("runtime-fields"), "新入口不显示 Provider / Model 那一组");
   assert.ok(!html.includes(">类型<"), "新入口不显示类型");
   assert.ok(!html.includes(">目标<"), "新入口不显示目标");
   assert.ok(html.includes("context_ref.project"), "提示里写清项目会作为 context_ref.project 带过去");
   assert.ok(html.includes("cline"), "提示里写清 autonomy 当前的 LLM 后端");
-  assert.ok(html.includes("任务描述"), "描述仍然必填（唯一的输入）");
+  assert.ok(html.includes("任务描述"), "描述仍然必填");
+  // 账号：新入口**有**这个下拉 —— 它选的是 **autonomy 的**账号池（与本机入口的账号不是一个池子）
+  assert.ok(html.includes("runtime-select"), "新入口有账号下拉");
+  assert.ok(html.includes("autonomy 的账号池"), "写明这是 autonomy 的池子");
+  assert.ok(html.includes("由 autonomy 的账号池解析"), "默认项 = 交给它的池子解析");
+  assert.ok(html.includes("账号留空 = 由它的账号池解析"), "提示里写清留空意味着什么");
 }
 
 // ---- 4) autonomy 不可达：置灰 + 写明原因 ----
@@ -178,6 +184,66 @@ const render = (props) =>
     calls.some((c) => c.url === "/api/tasks/task-ours/executor"),
     "执行方状态按**我们的** taskId 读"
   );
+
+  // 账号：选了就随创建一起下发（字段名是 autonomyAccountId，与**我们的** accountId 分开）；
+  // 不选就不发这个字段（= 交给它的池子解析，而不是发个空串）。
+  const withAccount = await api.createTask({
+    description: "跑在 deepseek 上",
+    projectId: "project-59c41b54",
+    agentPath: "autonomy",
+    autonomyAccountId: "acct-1",
+  });
+  const accountPost = calls.filter((c) => c.init.method === "POST").at(-1);
+  assert.equal(
+    JSON.parse(accountPost.init.body).autonomyAccountId,
+    "acct-1",
+    "选中的账号随创建下发"
+  );
+  assert.equal(withAccount.agentPath, "autonomy");
+  const noAccountPost = await api.createTask({
+    description: "不指定账号",
+    projectId: "project-59c41b54",
+    agentPath: "autonomy",
+  });
+  assert.equal(noAccountPost.agentPath, "autonomy");
+  assert.equal(
+    "autonomyAccountId" in JSON.parse(calls.filter((c) => c.init.method === "POST").at(-1).init.body),
+    false,
+    "没选就不发这个字段"
+  );
+
+  // 账号池（下拉的数据源）：读它自己的代理路由，不是控制面的 /api/accounts。
+  const { api: apiAgain } = await import("../src/api.ts");
+  globalThis.fetch = async (url) => {
+    calls.push({ url: String(url), init: {} });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        available: true,
+        accounts: [
+          {
+            accountId: "acct-1",
+            harness: "cline",
+            vendor: "deepseek",
+            label: "deepseek keyA",
+            enabled: true,
+            isDefault: true,
+            apiKeyMasked: "sk-1…06d2",
+          },
+        ],
+        url: "http://127.0.0.1:4300",
+        fetchedAt: "2026-09-21T00:00:00.000Z",
+      }),
+      clone() {
+        return this;
+      },
+    };
+  };
+  const pool = await apiAgain.autonomyAccounts();
+  assert.equal(calls.at(-1).url, "/api/autonomy/accounts", "账号池走它自己的代理路由");
+  assert.equal(pool.accounts[0].accountId, "acct-1");
+  assert.equal(pool.accounts[0].apiKeyMasked, "sk-1…06d2", "只有掩码");
 }
 
 // ---- 6) 适配层：autonomy 任务 → 和老任务同一个行模型（区别只有 agentPath）----

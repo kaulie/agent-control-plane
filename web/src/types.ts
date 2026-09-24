@@ -697,6 +697,36 @@ export interface AutonomyTaskList {
   entry: TaskEntry;
 }
 
+/**
+ * `GET /api/autonomy/accounts` 的一行：autonomy 账号池里的一条账号。
+ *
+ * 一条账号 = 一个 harness（`cursor` / `cline` / `codex`）+ 一个 vendor + 一份凭据；
+ * 「交给 autonomy」的任务跑在哪个 harness / vendor / model / 工作目录上，就是选它。
+ * **没有 key 原文**（autonomy 只回掩码），页面也别想显示它。
+ */
+export interface AutonomyAccount {
+  accountId: string;
+  harness: string;
+  vendor: string;
+  label: string;
+  model?: string;
+  agentRootWorkspace?: string;
+  enabled: boolean;
+  isDefault: boolean;
+  /** 掩码；空 = 没存 key，跑 provider 自己保存的登录态。 */
+  apiKeyMasked?: string;
+  hasKey?: boolean;
+}
+
+export interface AutonomyAccountList {
+  available: boolean;
+  accounts: AutonomyAccount[];
+  url: string;
+  error?: string;
+  fetchedAt: string;
+  entry: TaskEntry;
+}
+
 /** `POST /api/autonomy/tasks` 的 202（autonomy 已受理）。 */
 export interface AutonomyAccepted {
   taskId: string;

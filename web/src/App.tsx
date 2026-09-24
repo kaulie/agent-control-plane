@@ -699,13 +699,15 @@ export default function App() {
    * 同时把原文抛给对话框显示。
    */
   const createAutonomyTask = useCallback(
-    async (input: { description: string }) => {
+    async (input: { description: string; accountId?: string }) => {
       if (!selectedProjectId) return;
       try {
         const task = await api.createTask({
           description: input.description,
           projectId: selectedProjectId,
           agentPath: "autonomy",
+          // 选了 autonomy 池子里的哪条账号（不选 = 交给它的池子解析）。
+          autonomyAccountId: input.accountId,
         });
         await refreshTasks(selectedProjectId);
         await loadAutonomy();

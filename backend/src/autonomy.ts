@@ -10,7 +10,11 @@
  *   GET  /health                    → { status, llm_backend, llm_model, turns }（部署平台探活路径）
  *   GET  /api/meta                  → { service, version, reason_turns, has_tasks_table, turns }
  *   POST /api/tasks                 → 202 { task_id, agent_id, status, message_id, queued }
- *         body: { description, context_ref: { project } }
+ *         body: { description, context_ref: { project }, account_id? }
+ *   GET  /api/accounts              → { accounts: [{ accountId, harness, vendor, label, model?,
+ *                                       agentRootWorkspace?, enabled, isDefault, apiKeyMasked?, hasKey? }] }
+ *         *账号池*：autonomy 的任务跑在哪个 harness / vendor / model 上由它决定（不再是环境变量）。
+ *         这里只列**掩码**，永远拿不到 key 原文（契约里 key 是只写不读的）。
  *   GET  /api/tasks?project_id=<id> → { tasks: [{ id, description, status, turns, last_at, project_id, agent_id, updated_at }] }
  *   GET  /api/tasks/{task_id}       → { task_id, description, domain, status, error, goal_type,
  *                                       context_ref, agent_id, created_at, updated_at,
@@ -30,6 +34,7 @@ import { DEFAULT_AUTONOMY_TIMEOUT_MS } from "./config.js";
 const META_PATH = "/api/meta";
 const HEALTH_PATH = "/health";
 const TASKS_PATH = "/api/tasks";
+const ACCOUNTS_PATH = "/api/accounts";
 
 /** Default cache TTL for a successful lookup. */
 const DEFAULT_TTL_MS = 30_000;
@@ -99,6 +104,35 @@ export interface AutonomyTaskListResult {
 
 /** `GET /api/tasks/{id}`（只保留我们页面会用到的部分，其余原样透传）。 */
 export type AutonomyTaskDetail = Record<string, unknown>;
+
+/**
+ * `GET /api/accounts` 的一行：autonomy 账号池里的一条账号。
+ *
+ * 一条账号 = 一个 harness（`cursor` / `cline` / `codex`）+ 一个 vendor + 一份凭据，
+ * 任务的 harness / vendor / model / 工作目录都从它来。**没有 key 原文**（autonomy 只回掩码，
+ * 这是它的类型层面保证）—— 这里也照抄，别给它补一个字段。
+ */
+export interface AutonomyAccountSummary {
+  accountId: string;
+  harness: string;
+  vendor: string;
+  label: string;
+  model?: string;
+  agentRootWorkspace?: string;
+  enabled: boolean;
+  isDefault: boolean;
+  /** 掩码（`sk-1…06d2`）；空 = 这条账号没存 key，跑 provider 自己保存的登录态。 */
+  apiKeyMasked?: string;
+  hasKey?: boolean;
+}
+
+export interface AutonomyAccountListResult {
+  available: boolean;
+  accounts: AutonomyAccountSummary[];
+  url: string;
+  error?: string;
+  fetchedAt: string;
+}
 
 export interface AutonomyTaskDetailResult {
   available: boolean;
@@ -206,6 +240,38 @@ export function autonomyTasksUrl(baseUrl: string, projectId?: string): string {
   return project ? `${base}?project_id=${encodeURIComponent(project)}` : base;
 }
 
+/** 一行账号 → 归一化（缺 `accountId` 的行直接丢掉：没有 id 就选不了它）。 */
+export function normalizeAccount(payload: unknown): AutonomyAccountSummary | null {
+  if (!isRecord(payload)) return null;
+  const accountId = trimmedString(payload.accountId ?? payload.account_id);
+  if (!accountId) return null;
+  const model = trimmedString(payload.model);
+  const root = trimmedString(payload.agentRootWorkspace ?? payload.agent_root_workspace);
+  const masked = trimmedString(payload.apiKeyMasked ?? payload.api_key_masked);
+  return {
+    accountId,
+    harness: trimmedString(payload.harness),
+    vendor: trimmedString(payload.vendor),
+    label: trimmedString(payload.label),
+    ...(model ? { model } : {}),
+    ...(root ? { agentRootWorkspace: root } : {}),
+    // 缺 enabled 按启用算：autonomy 的 `enabled` 是布尔，缺字段只可能来自更老的版本。
+    enabled: payload.enabled === undefined ? true : payload.enabled === true,
+    isDefault: payload.isDefault === true || payload.is_default === true,
+    ...(masked ? { apiKeyMasked: masked } : {}),
+    ...(typeof payload.hasKey === "boolean" ? { hasKey: payload.hasKey } : {}),
+  };
+}
+
+/** `GET /api/accounts` 的响应体 → 账号列表（缺字段不补假值）。 */
+export function normalizeAccountList(payload: unknown): AutonomyAccountSummary[] {
+  if (!isRecord(payload)) return [];
+  const rows = Array.isArray(payload.accounts) ? payload.accounts : [];
+  return rows
+    .map((row) => normalizeAccount(row))
+    .filter((row): row is AutonomyAccountSummary => row !== null);
+}
+
 export class AutonomyClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
@@ -259,6 +325,30 @@ export class AutonomyClient {
     }
   }
 
+  /**
+   * 账号池（`GET /api/accounts`）：新建任务时「选哪个账号」这个下拉的数据源。
+   *
+   * 和别的**读**一样 best-effort：不可达 → `available:false` + 原因，不抛异常（页面显示
+   * 「读不到账号池」而不是 500）；key 永远只是掩码。
+   */
+  async listAccounts(): Promise<AutonomyAccountListResult> {
+    try {
+      const res = await this.get(`${this.baseUrl}${ACCOUNTS_PATH}`);
+      const payload = await res.json().catch(() => undefined);
+      if (!res.ok) {
+        return this.unavailableAccounts(`autonomy 返回 HTTP ${res.status}`);
+      }
+      return {
+        available: true,
+        accounts: normalizeAccountList(payload),
+        url: this.baseUrl,
+        fetchedAt: new Date(this.now()).toISOString(),
+      };
+    } catch (err) {
+      return this.unavailableAccounts(this.reason(err));
+    }
+  }
+
   /** 任务详情 / 进展（404 原样带出，供路由透传）。 */
   async getTask(taskId: string): Promise<AutonomyTaskDetailResult> {
     const id = taskId.trim();
@@ -298,9 +388,16 @@ export class AutonomyClient {
   async createTask(input: {
     description: string;
     projectId?: string;
+    /**
+     * autonomy 账号池里的账号（`GET /api/accounts` 的 `accountId`）：这条任务跑在哪个
+     * harness / vendor / model / 工作目录上，就由它决定。不传 = 交给它的池子解析
+     * （该 harness 的默认账号）。id 不存在 / 被停用 → autonomy 拒绝，原文由路由带出。
+     */
+    accountId?: string;
   }): Promise<AutonomyCreateResult> {
     const description = input.description.trim();
     const projectId = input.projectId?.trim();
+    const accountId = input.accountId?.trim();
     if (!description) return { ok: false, error: "description is required (任务描述必填)" };
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${TASKS_PATH}`, {
@@ -310,6 +407,7 @@ export class AutonomyClient {
         body: JSON.stringify({
           description,
           ...(projectId ? { context_ref: { project: projectId } } : {}),
+          ...(accountId ? { account_id: accountId } : {}),
         }),
       });
       const payload = await res.json().catch(() => undefined);
@@ -433,6 +531,16 @@ export class AutonomyClient {
     return {
       available: false,
       tasks: [],
+      url: this.baseUrl,
+      error,
+      fetchedAt: new Date(this.now()).toISOString(),
+    };
+  }
+
+  private unavailableAccounts(error: string): AutonomyAccountListResult {
+    return {
+      available: false,
+      accounts: [],
       url: this.baseUrl,
       error,
       fetchedAt: new Date(this.now()).toISOString(),

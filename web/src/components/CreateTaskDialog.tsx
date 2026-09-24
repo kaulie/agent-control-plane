@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import type {
+  AutonomyAccount,
   ModelInfo,
   ProviderAccount,
   ProviderInfo,
@@ -45,8 +46,12 @@ interface Props {
     model?: string;
     error?: string;
   } | null;
-  /** 「交给 autonomy」入口：只传描述（provider/model/类型/目标都不适用，见契约）。 */
-  onCreateAutonomy?: (input: { description: string }) => Promise<void>;
+  /** 「交给 autonomy」入口：只传描述 + 可选的账号（provider/model/类型/目标都不适用，见契约）。 */
+  onCreateAutonomy?: (input: {
+    description: string;
+    /** autonomy 账号池里的账号 id；不传 = 由它的池子解析。 */
+    accountId?: string;
+  }) => Promise<void>;
 }
 
 export default function CreateTaskDialog({
@@ -69,6 +74,10 @@ export default function CreateTaskDialog({
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
   const [accountId, setAccountId] = useState("");
+  /** autonomy 的账号池（与上面的 `accounts` 是两个池子）：只在「交给 autonomy」入口用。 */
+  const [autonomyAccounts, setAutonomyAccounts] = useState<AutonomyAccount[]>([]);
+  const [autonomyAccountsError, setAutonomyAccountsError] = useState<string | null>(null);
+  const [autonomyAccountId, setAutonomyAccountId] = useState("");
   const [envDefault, setEnvDefault] = useState("cursor");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [resolved, setResolved] = useState<string | undefined>();
@@ -89,6 +98,7 @@ export default function CreateTaskDialog({
     setProvider(projectDefaultProvider ?? "");
     setModel(projectDefaultModel ?? "");
     setAccountId("");
+    setAutonomyAccountId("");
     setError(null);
     // 只留新入口时（TASK_ENTRY=autonomy）直接落在新入口上。
     setEntryMode(entry === "autonomy" ? "autonomy" : "gateway");
@@ -99,6 +109,18 @@ export default function CreateTaskDialog({
     void api.listAccounts({ enabled: true }).then((r) => {
       setAccounts(r.accounts);
     }).catch(() => setAccounts([]));
+    // autonomy 的池子：读不到就只是「这个下拉没内容」（读是 best-effort），
+    // 页面照旧能建任务（不传账号 = 交给它的池子解析）。
+    void api
+      .autonomyAccounts()
+      .then((r) => {
+        setAutonomyAccounts(r.accounts ?? []);
+        setAutonomyAccountsError(r.available ? null : (r.error ?? "读不到 autonomy 的账号池"));
+      })
+      .catch((e) => {
+        setAutonomyAccounts([]);
+        setAutonomyAccountsError(errorText(e));
+      });
   }, [open, projectDefaultProvider, projectDefaultModel, projectId, entry]);
 
   const effectiveProvider =
@@ -134,12 +156,26 @@ export default function CreateTaskDialog({
   /** 入口选择器里「交给 autonomy」按钮用（JSX 里名字短一点好读）。 */
   const autoMode0 = autonomyMode;
   const autonomyDown = autonomy != null && !autonomy.available;
+  /** 选中的那条 autonomy 账号（下拉的「留空」= 交给它的池子解析）。 */
+  const chosenAutonomyAccount = autonomyAccounts.find(
+    (a) => a.accountId === autonomyAccountId,
+  );
   const autonomyHint = autonomyMode
     ? autonomyDown
       ? `autonomy 不可达：${autonomy?.error ?? "未配置"} —— 先修好它，或改用「本机 agent」入口。`
-      : `任务由 autonomy 的 agent 执行：Provider / Model 由 autonomy 进程决定（当前 ${
-          autonomy?.backend ?? "未知"
-        }${autonomy?.model ? ` / ${autonomy.model}` : ""}），类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。`
+      : `任务由 autonomy 的 agent 执行，类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。${
+          chosenAutonomyAccount
+            ? `这条任务跑在 ${chosenAutonomyAccount.harness}/${
+                chosenAutonomyAccount.vendor
+              } · model ${
+                chosenAutonomyAccount.model || "harness 默认"
+              } · 工作目录 ${
+                chosenAutonomyAccount.agentRootWorkspace || "运行时默认"
+              }。`
+            : `账号留空 = 由它的账号池解析（该 harness 的默认账号；进程当前 ${
+                autonomy?.backend ?? "未知"
+              }${autonomy?.model ? ` / ${autonomy.model}` : ""}）。`
+        }`
     : "";
   const canSubmit =
     description.trim().length > 0 && !saving && !(autonomyMode && autonomyDown);
@@ -163,8 +199,11 @@ export default function CreateTaskDialog({
     try {
       if (autonomyMode) {
         if (!onCreateAutonomy) throw new Error("autonomy 入口未接线");
-        // 只交描述 + 项目上下文：类型/目标/provider/model 都不适用（契约第 2 节 A2）。
-        await onCreateAutonomy({ description: description.trim() });
+        // 描述 + 项目上下文 + 可选的账号：类型/目标/provider/model 都不适用（契约第 2 节 A2）。
+        await onCreateAutonomy({
+          description: description.trim(),
+          accountId: autonomyAccountId.trim() || undefined,
+        });
       } else {
         await onCreate({
           title: titleOrFallback(),
@@ -392,6 +431,37 @@ export default function CreateTaskDialog({
             </select>
           </label>
         </div>
+        )}
+        {autonomyMode && (
+          <label className="runtime-field runtime-field-wide">
+            <span className="runtime-field-label">
+              账号{" "}
+              <span className="intent-hint">
+                （autonomy 的账号池：决定它那边用哪个 harness / vendor / model）
+              </span>
+            </span>
+            <select
+              className="runtime-select"
+              value={autonomyAccountId}
+              onChange={(e) => setAutonomyAccountId(e.target.value)}
+            >
+              <option value="">由 autonomy 的账号池解析（该 harness 的默认账号）</option>
+              {autonomyAccounts.map((a) => (
+                <option key={a.accountId} value={a.accountId}>
+                  {`${a.harness} / ${a.vendor}`}
+                  {a.model ? ` · ${a.model}` : ""}
+                  {` — ${a.label}`}
+                  {a.isDefault ? "（默认）" : ""}
+                  {a.enabled ? "" : "（已停用）"}
+                </option>
+              ))}
+            </select>
+            {autonomyAccountsError && (
+              <span className="intent-hint">
+                读不到 autonomy 的账号池：{autonomyAccountsError}（留空仍可建任务，交给它的池子解析）
+              </span>
+            )}
+          </label>
         )}
         {autonomyMode && autonomyHint && (
           <div className="intent-hint">{autonomyHint}</div>

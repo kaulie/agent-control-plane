@@ -131,6 +131,30 @@ function fakeAutonomy(over = {}) {
         }
       );
     },
+    /** 它的账号池（`GET /api/accounts`）：只有掩码，没有 key 原文。 */
+    async listAccounts() {
+      calls.push(["listAccounts"]);
+      if (over.accounts) return over.accounts;
+      return {
+        available: true,
+        url: "http://127.0.0.1:4300",
+        fetchedAt: "2026-09-21T00:00:00.000Z",
+        accounts: [
+          {
+            accountId: "acct-1",
+            harness: "cline",
+            vendor: "deepseek",
+            label: "deepseek keyA",
+            model: "deepseek-v4-flash",
+            agentRootWorkspace: "/tmp/agent-workspaces/a",
+            enabled: true,
+            isDefault: true,
+            apiKeyMasked: "sk-1…06d2",
+            hasKey: true,
+          },
+        ],
+      };
+    },
   };
 }
 
@@ -366,6 +390,90 @@ const json = async (res) => JSON.parse(res.body);
 {
   const res = await post("/api/autonomy/tasks", { description: "x", projectId: PROJECT_ID });
   assert.equal(res.statusCode, 404, "任务统一走 POST /api/tasks（+ agentPath）");
+}
+
+// ---- 8) autonomy 的账号池：只代理（读 best-effort）+ 选了账号就带进交接 ----
+{
+  const pool = await app.inject({ method: "GET", url: "/api/autonomy/accounts" });
+  assert.equal(pool.statusCode, 200, "读是 best-effort：不可达也只是 available:false，不是 500");
+  const body = await json(pool);
+  assert.equal(body.available, true);
+  assert.equal(body.entry, "both");
+  assert.equal(body.accounts[0].accountId, "acct-1");
+  assert.equal(body.accounts[0].harness, "cline");
+  assert.equal(body.accounts[0].isDefault, true);
+  assert.equal(body.accounts[0].apiKeyMasked, "sk-1…06d2", "只有掩码");
+  assert.equal("apiKey" in body.accounts[0], false, "key 原文不该出现在响应里");
+  assert.equal(autonomy.calls.filter((c) => c[0] === "listAccounts").length, 1);
+
+  // 选了账号 → 交接带上它（决定这条任务在 autonomy 那边用哪个 harness / vendor / model / 工作目录）
+  const withAccount = await post("/api/tasks", {
+    description: "跑在 deepseek 上",
+    projectId: PROJECT_ID,
+    agentPath: "autonomy",
+    autonomyAccountId: "  acct-1  ",
+  });
+  assert.equal(withAccount.statusCode, 201);
+  const said = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
+  assert.deepEqual(
+    said,
+    { description: "跑在 deepseek 上", projectId: PROJECT_ID, accountId: "acct-1" },
+    "账号 id trim 后带过去",
+  );
+
+  // 不选账号 → 请求里**没有** accountId（= 交给它的池子解析，而不是「传个空字符串」）
+  const without = await post("/api/tasks", {
+    description: "不指定账号",
+    projectId: PROJECT_ID,
+    agentPath: "autonomy",
+  });
+  assert.equal(without.statusCode, 201);
+  const said2 = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
+  assert.equal("accountId" in said2, false, "没选就不发这个字段");
+
+  // autonomy 拒了（账号不在池里）→ 4xx + 原文，任务保留并标 error（绝不静默换一个账号跑）
+  const refused = Fastify({ logger: false });
+  const fake = fakeAutonomy({
+    create: {
+      ok: false,
+      httpStatus: 400,
+      error: "account acct-nope is not in the pool: add it at /accounts",
+    },
+  });
+  await registerRoutes(refused, gateway, providers, {
+    dataDir,
+    appVersion: APP_VERSION,
+    autonomy: fake,
+    taskEntry: "both",
+  });
+  const denied = await refused.inject({
+    method: "POST",
+    url: "/api/tasks",
+    headers: uiHeaders,
+    payload: {
+      description: "x",
+      projectId: PROJECT_ID,
+      agentPath: "autonomy",
+      autonomyAccountId: "acct-nope",
+    },
+  });
+  assert.equal(denied.statusCode, 400);
+  assert.match((await json(denied)).error, /not in the pool/, "把 autonomy 的原文带出来");
+  assert.equal(
+    fake.calls.filter((c) => c[0] === "createTask").at(-1)[1].accountId,
+    "acct-nope",
+    "交出去的正是选的那个（而不是悄悄换一个）",
+  );
+
+  // 账号是 autonomy 池子的概念：本机路径带它 = 400（不静默丢掉这个选择）
+  const mismatched = await post("/api/tasks", {
+    description: "x",
+    projectId: PROJECT_ID,
+    agentPath: "control-plane",
+    autonomyAccountId: "acct-1",
+  });
+  assert.equal(mismatched.statusCode, 400);
+  assert.match((await json(mismatched)).error, /agentPath=autonomy/);
 }
 
 console.log(

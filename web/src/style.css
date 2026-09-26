@@ -574,6 +574,55 @@ body {
   background: var(--bg);
 }
 
+/* ---- 主区**两套模板**：本地执行的 agent 与「执行方 autonomy」代理的 ------------------------
+ *
+ * 这条任务是谁在执行，一眼就要看得出来，所以两套模板在**底色 / 色带 / 结构**上都拉开：
+ *
+ *   .main-local    本地执行：原样（平铺的块 + 事件流）。
+ *   .main-executor 执行方 autonomy：左边一条自己的色带、底色更深一点（让 --bg-2 的卡片浮出来），
+ *                  顶上一条 .exec-banner 徽标，块都是卡片。
+ *
+ * 规则只有一处：`taskDetailBlocks`（web/src/autonomy.ts）给 flavour，App 把它挂到 <main> 上。 */
+.main-executor {
+  background: #0c0e13;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* 本地执行：默认那套（平铺的块 + 事件流）。写上它的名字，和上面那套对照着读。 */
+.main-local {
+  background: var(--bg);
+}
+
+/* 代理那侧的基础信息条也换底色，和本地那侧的中性条分开。 */
+.main-executor .task-ids {
+  background: var(--bg-3);
+}
+
+.exec-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 16px 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(76, 141, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(76, 141, 255, 0.1);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.exec-banner-badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(76, 141, 255, 0.22);
+  color: #9cc6ff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.exec-banner-text b {
+  color: var(--text);
+}
+
 .empty {
   flex: 1;
   display: flex;

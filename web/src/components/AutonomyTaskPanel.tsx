@@ -85,6 +85,15 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
 
   return (
     <>
+      {/* 这条任务的「哪一套模板」的徽标：agent 由 autonomy 创建并执行，本机只代理。
+          它是这套模板的一部分（色带 + 徽标 + 卡片化的块），样式见 style.css 的 .exec-banner。 */}
+      <div className="exec-banner" role="note">
+        <span className="exec-banner-badge">autonomy</span>
+        <span className="exec-banner-text">
+          这条任务的 agent 由 <b>autonomy</b> 创建并执行 —— 状态、进展、对话都在它那边，这里只代理。
+        </span>
+      </div>
+
       {/* 四态条：主界面第一眼要看到的东西（依据也写在这一行里） */}
       <ExecutorPhaseBar detail={detail} loaded={detail !== null || error !== null} />
 

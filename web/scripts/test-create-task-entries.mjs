@@ -618,9 +618,21 @@ const render = (props) =>
 // ---- 11) 事件流只画给「我们自己执行」的任务：autonomy 任务连它那几行折叠/保留控制一起不画 ----
 {
   const { taskDetailBlocks } = await import("../src/autonomy.ts");
-  assert.deepEqual(taskDetailBlocks("autonomy"), { eventStream: false }, "agent 由 autonomy 创建：不画事件流");
-  assert.deepEqual(taskDetailBlocks("control-plane"), { eventStream: true }, "本地 agent：照旧画");
-  assert.deepEqual(taskDetailBlocks(undefined), { eventStream: true }, "没标路径的老行：照旧画");
+  assert.deepEqual(
+    taskDetailBlocks("autonomy"),
+    { eventStream: false, flavour: "executor" },
+    "agent 由 autonomy 创建：不画事件流，走「代理」那套模板"
+  );
+  assert.deepEqual(
+    taskDetailBlocks("control-plane"),
+    { eventStream: true, flavour: "local" },
+    "本地 agent：照旧画事件流，走「本地执行」那套模板"
+  );
+  assert.deepEqual(
+    taskDetailBlocks(undefined),
+    { eventStream: true, flavour: "local" },
+    "没标路径的老行：按本地执行"
+  );
 
   const fs = await import("node:fs");
   const path = await import("node:path");
@@ -636,6 +648,33 @@ const render = (props) =>
   for (const control of ["自动折叠执行细节", "自动折叠思考和执行过程", "保留最后一条连续 assistant", "Load earlier events"]) {
     assert.ok(!app.includes(control), `App 里不该有第二份控制：${control}`);
   }
+
+  // 两套主界面模板：类挂在 <main> 上，样式在 CSS 里各有一套（本地执行 vs 执行方 autonomy）。
+  assert.ok(app.includes("main main-${detailBlocks.flavour}"), "主区按模板挂类");
+  const css = fs.readFileSync(path.join(here, "../src/style.css"), "utf8");
+  for (const rule of [".main-local", ".main-executor", ".main-executor .task-ids", ".exec-banner", ".exec-banner-badge"]) {
+    assert.ok(css.includes(rule), `两套模板的样式里要有 ${rule}`);
+  }
+  // 代理那侧顶上的徽标横幅：它是这套模板自己的东西，随 ExecutorTaskBody 一起出现。
+  const bannerRow = localTaskToRow(
+    {
+      taskId: "task-banner",
+      projectId: "project-59c41b54",
+      title: "代理那侧",
+      createdAt: "2026-09-21T00:00:00.000Z",
+      status: "active",
+      workspace: "",
+      provider: "autonomy",
+      taskType: "general",
+      agentPath: "autonomy",
+    },
+    { executorStatus: "running", executorTurns: 1 }
+  );
+  const bannerHtml = renderToStaticMarkup(
+    React.createElement(ExecutorTaskBody, { taskId: bannerRow.taskId, row: bannerRow })
+  );
+  assert.ok(bannerHtml.includes("exec-banner"), "代理那侧顶上有自己的徽标横幅");
+  assert.ok(bannerHtml.includes("这里只代理"), "徽标写明本机只代理");
 }
 
 console.log(

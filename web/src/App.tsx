@@ -30,6 +30,7 @@ import {
   autonomyTaskToRow,
   localTaskToRow,
   mergeTaskRows,
+  taskDetailBlocks,
 } from "./autonomy";
 import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
@@ -769,6 +770,18 @@ export default function App() {
     [taskRows, selectedId],
   );
 
+  /**
+   * 这条任务的详情走**哪一套模板**、画哪些块：`taskDetailBlocks`（见 src/autonomy.ts）—— 事件流说的是
+   * **我们自己执行**的 agent，agent 由 autonomy 创建的任务就不画；两套模板的名字（`main-local` /
+   * `main-executor`）也由它给，样式在 style.css 里。先看列表行、再看详情：详情还没读回来时也不该闪
+   * 一下「另一套模板」。
+   */
+  const detailBlocks = useMemo(
+    () => taskDetailBlocks(detail?.task.agentPath ?? selectedRow?.agentPath),
+    [detail, selectedRow],
+  );
+
+
   /** 选中那行所属的项目（组织 id 从我们自己的项目库取，和本地详情同一口径）。 */
   const selectedRowProject = projects.find(
     (project) => project.projectId === selectedRow?.projectId,
@@ -1198,7 +1211,9 @@ export default function App() {
           onSelect={selectRow}
           onCreate={() => void openCreateTask()}
         />
-        <main className="main">
+        {/* 主区两套模板：本地执行的 agent 与「执行方 autonomy」代理的（`main-local` /
+            `main-executor`，见 style.css）—— 一眼要能分出这条任务是哪种。 */}
+        <main className={`main main-${detailBlocks.flavour}`}>
           {selectedIsExtraRow && selectedId ? (
             /* 我们没建过、只在 autonomy 那边存在的行：同一个主区、同一个 TaskIdsBar，纯代理。 */
             <AutonomyTaskPanel
@@ -1257,19 +1272,23 @@ export default function App() {
                   />
                 </>
               )}
-              <Timeline
-                events={events}
-                running={running}
-                queueLength={queueLength}
-                queuedRunIds={detail.runs
-                  .filter((r) => r.status === "queued")
-                  .map((r) => r.runId)}
-                hasMore={hasMore}
-                loadingMore={loadingMore}
-                onLoadMore={() => void loadMore()}
-                onCancelQueued={(runId) => void cancelQueued(runId)}
-                cancellingQueuedRunId={cancellingQueuedRunId}
-              />
+              {/* 事件流（交互细节 + 它的折叠/保留控制）只对**我们自己执行**的任务有意义：
+                  agent 由 autonomy 创建的任务没有本地 run，就不画（规则见 taskDetailBlocks）。 */}
+              {detailBlocks.eventStream ? (
+                <Timeline
+                  events={events}
+                  running={running}
+                  queueLength={queueLength}
+                  queuedRunIds={detail.runs
+                    .filter((r) => r.status === "queued")
+                    .map((r) => r.runId)}
+                  hasMore={hasMore}
+                  loadingMore={loadingMore}
+                  onLoadMore={() => void loadMore()}
+                  onCancelQueued={(runId) => void cancelQueued(runId)}
+                  cancellingQueuedRunId={cancellingQueuedRunId}
+                />
+              ) : null}
               {pendingPlanQuestions && (
                 <PlanQuestionsWizard
                   batch={pendingPlanQuestions}

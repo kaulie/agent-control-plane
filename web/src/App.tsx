@@ -30,6 +30,7 @@ import {
   autonomyTaskToRow,
   localTaskToRow,
   mergeTaskRows,
+  taskDetailBlocks,
 } from "./autonomy";
 import AgentTimelinePage from "./components/AgentTimelinePage";
 import { AgentRuntimePage } from "./components/AgentRuntimePage";
@@ -769,6 +770,17 @@ export default function App() {
     [taskRows, selectedId],
   );
 
+  /**
+   * 这条任务的详情画哪些块：事件流（每轮 thinking / 工具调用 / 消息 + 它的「自动折叠…」控制）说的是
+   * **我们自己执行**的 agent，agent 由 autonomy 创建的任务就不画 —— 规则只有一处，见
+   * `taskDetailBlocks`。先看列表行、再看详情：详情还没读回来时也不该闪一下那条流。
+   */
+  const detailBlocks = useMemo(
+    () => taskDetailBlocks(detail?.task.agentPath ?? selectedRow?.agentPath),
+    [detail, selectedRow],
+  );
+
+
   /** 选中那行所属的项目（组织 id 从我们自己的项目库取，和本地详情同一口径）。 */
   const selectedRowProject = projects.find(
     (project) => project.projectId === selectedRow?.projectId,
@@ -1257,19 +1269,23 @@ export default function App() {
                   />
                 </>
               )}
-              <Timeline
-                events={events}
-                running={running}
-                queueLength={queueLength}
-                queuedRunIds={detail.runs
-                  .filter((r) => r.status === "queued")
-                  .map((r) => r.runId)}
-                hasMore={hasMore}
-                loadingMore={loadingMore}
-                onLoadMore={() => void loadMore()}
-                onCancelQueued={(runId) => void cancelQueued(runId)}
-                cancellingQueuedRunId={cancellingQueuedRunId}
-              />
+              {/* 事件流（交互细节 + 它的折叠/保留控制）只对**我们自己执行**的任务有意义：
+                  agent 由 autonomy 创建的任务没有本地 run，就不画（规则见 taskDetailBlocks）。 */}
+              {detailBlocks.eventStream ? (
+                <Timeline
+                  events={events}
+                  running={running}
+                  queueLength={queueLength}
+                  queuedRunIds={detail.runs
+                    .filter((r) => r.status === "queued")
+                    .map((r) => r.runId)}
+                  hasMore={hasMore}
+                  loadingMore={loadingMore}
+                  onLoadMore={() => void loadMore()}
+                  onCancelQueued={(runId) => void cancelQueued(runId)}
+                  cancellingQueuedRunId={cancellingQueuedRunId}
+                />
+              ) : null}
               {pendingPlanQuestions && (
                 <PlanQuestionsWizard
                   batch={pendingPlanQuestions}

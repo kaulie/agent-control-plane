@@ -615,6 +615,29 @@ const render = (props) =>
   assert.equal(planViews({ plans: [{ id: 7, steps: [] }] })[0].planId, 7);
 }
 
+// ---- 11) 事件流只画给「我们自己执行」的任务：autonomy 任务连它那几行折叠/保留控制一起不画 ----
+{
+  const { taskDetailBlocks } = await import("../src/autonomy.ts");
+  assert.deepEqual(taskDetailBlocks("autonomy"), { eventStream: false }, "agent 由 autonomy 创建：不画事件流");
+  assert.deepEqual(taskDetailBlocks("control-plane"), { eventStream: true }, "本地 agent：照旧画");
+  assert.deepEqual(taskDetailBlocks(undefined), { eventStream: true }, "没标路径的老行：照旧画");
+
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const app = fs.readFileSync(path.join(here, "../src/App.tsx"), "utf8");
+  const timelines = app.split("<Timeline").length - 1;
+  assert.equal(timelines, 1, "详情里只有一个 <Timeline>（别处不许再画一份流）");
+  const before = app.slice(0, app.indexOf("<Timeline"));
+  assert.ok(before.includes("detailBlocks.eventStream"), "事件流被这条规则守着，不是无条件渲染");
+  assert.ok(app.includes("taskDetailBlocks("), "规则只有一处：autonomy.ts 的 taskDetailBlocks");
+  // 「自动折叠执行细节 / 自动折叠思考和执行过程 / 保留最后一条连续 assistant 信息 / Load earlier events」
+  // 都长在 Timeline 的工具栏里 —— 不画那条流，它们也就一起消失；App 里不该有第二份。
+  for (const control of ["自动折叠执行细节", "自动折叠思考和执行过程", "保留最后一条连续 assistant", "Load earlier events"]) {
+    assert.ok(!app.includes(control), `App 里不该有第二份控制：${control}`);
+  }
+}
+
 console.log(
   "PASS: agent 创建路径（老入口不变 / 一个列表一个外壳 / 拿不到就不显示 / 无独立页面）"
 );

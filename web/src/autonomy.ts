@@ -1,4 +1,5 @@
 import type {
+  AgentPath,
   AutonomyTaskDetail,
   AutonomyTaskSummary,
   Task,
@@ -84,6 +85,19 @@ export function localTaskToRow(
     ...(executorStatus ? { status: executorStatus } : {}),
     ...(opts.executorTurns != null ? { turns: opts.executorTurns } : {}),
   };
+}
+
+/**
+ * 详情里画哪些块 —— 这是「**谁创建了 agent**」这条轴唯一的可见性规则，只有这一处说了算。
+ *
+ * - `eventStream`：本地 run 的事件流（`<Timeline>`：每轮 thinking / 工具调用 / 消息，以及它工具栏上的
+ *   「自动折叠执行细节」「自动折叠思考和执行过程」「保留最后一条连续 assistant 信息」「Load earlier
+ *   events」这些控制）。它说的是**我们自己执行的 agent** 的交互细节；agent 由 autonomy 创建的任务没有
+ *   本地 run —— 那条流里只有我们这边的交接记账，交互细节在它那边。所以这类任务**不画**（也就不该有
+ *   那些控制），要看得去 autonomy 自己的界面看。
+ */
+export function taskDetailBlocks(agentPath: AgentPath | undefined): { eventStream: boolean } {
+  return { eventStream: (agentPath ?? "control-plane") !== "autonomy" };
 }
 
 /**

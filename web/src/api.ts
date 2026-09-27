@@ -3,6 +3,8 @@ import type {
   ProviderAccount,
   AutonomyAccountList,
   AutonomyMeta,
+  AutonomyTarget,
+  AutonomyTargets,
   AutonomyTaskDetail,
   AutonomyTaskList,
   AgentBoardScope,
@@ -242,8 +244,14 @@ export const api = {
   // 数据源全是 autonomy；控制面只转发、不改写、不缓存业务状态。
 
   /** autonomy 可用性 / 版本 / LLM 后端 + 入口开关（不可达时 available:false，不是 500）。 */
-  autonomyMeta: () =>
-    fetch(`${BASE}/autonomy/meta`).then((r) => j<AutonomyMeta>(r)),
+  autonomyMeta: (target?: AutonomyTarget) => {
+    const q = target ? `?target=${encodeURIComponent(target)}` : "";
+    return fetch(`${BASE}/autonomy/meta${q}`).then((r) => j<AutonomyMeta>(r));
+  },
+
+  /** 本机 + 海外两台 autonomy 的可用性（创建对话框选哪一台）。 */
+  autonomyTargets: () =>
+    fetch(`${BASE}/autonomy/targets`).then((r) => j<AutonomyTargets>(r)),
 
   /** autonomy 任务列表（可按当前 project 过滤）。 */
   autonomyTasks: (projectId?: string) => {
@@ -264,8 +272,12 @@ export const api = {
    * 注意：这是 **autonomy 的**池子（决定它那边用哪个 harness / vendor / model），
    * 与 `listAccounts`（控制面自己的池子，给本机 agent 用）不是一个。
    */
-  autonomyAccounts: () =>
-    fetch(`${BASE}/autonomy/accounts`).then((r) => j<AutonomyAccountList>(r)),
+  autonomyAccounts: (target?: AutonomyTarget) => {
+    const q = target ? `?target=${encodeURIComponent(target)}` : "";
+    return fetch(`${BASE}/autonomy/accounts${q}`).then((r) =>
+      j<AutonomyAccountList>(r),
+    );
+  },
 
   /**
    * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读（控制面代理）。
@@ -305,6 +317,11 @@ export const api = {
      * 决定这条任务在它那边用哪个 harness / vendor / model / 工作目录。不传 = 由它的池子解析。
      */
     autonomyAccountId?: string;
+    /**
+     * 哪一台 autonomy：`local`（本机）/ `remote`（海外）。
+     * 只在 `agentPath=autonomy` 时有意义；不传 = 本机。
+     */
+    autonomyTarget?: AutonomyTarget;
   }) => write<Task>("/tasks", { method: "POST", body }),
 
   /**

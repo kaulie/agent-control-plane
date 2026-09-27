@@ -3,6 +3,11 @@ import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { isAgentPath, normalizeAgentPath, type AgentPath } from "../agent-path.js";
+import {
+  isAutonomyTarget,
+  normalizeAutonomyTarget,
+  type AutonomyTarget,
+} from "../autonomy-target.js";
 import type {
   AgentEvent,
   AgentRunSample,
@@ -117,6 +122,8 @@ interface TaskRow {
   /** 执行方（autonomy）那侧的 task / agent id。 */
   executor_task_id: string | null;
   executor_agent_id: string | null;
+  /** 哪一台 autonomy：local / remote（NULL = 老任务 = local）。 */
+  autonomy_target: string | null;
   /** 选用的 provider 账号（NULL = 老任务，创建时还没有账号池）。 */
   account_id: string | null;
 }
@@ -372,6 +379,9 @@ export class Store {
     }
     if (!taskCols.some((c) => c.name === "account_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN account_id TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "autonomy_target")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN autonomy_target TEXT`);
     }
     if (!taskCols.some((c) => c.name === "last_user_input_at")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
@@ -1250,6 +1260,8 @@ export class Store {
      * 缺省 / 非法 → 老行为（控制面）。
      */
     agentPath?: string;
+    /** 哪一台 autonomy（只在 agentPath=autonomy 时有意义）。 */
+    autonomyTarget?: string;
     /** 选用的 provider 账号（控制面本机 agent 用它的 key + 工作区根）。 */
     accountId?: string;
   }): Task {
@@ -1281,14 +1293,17 @@ export class Store {
       lastUserInputAt: now,
       ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
       ...(normalizeAgentPath(input.agentPath) === "autonomy"
-        ? { agentPath: "autonomy" as const }
+        ? {
+            agentPath: "autonomy" as const,
+            autonomyTarget: normalizeAutonomyTarget(input.autonomyTarget),
+          }
         : {}),
       ...(input.accountId?.trim() ? { accountId: input.accountId.trim() } : {}),
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, system_prompt, last_user_input_at, forked_from, agent_path, account_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, system_prompt, last_user_input_at, forked_from, agent_path, account_id, autonomy_target)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -1310,6 +1325,7 @@ export class Store {
         task.forkedFrom ?? null,
         task.agentPath ?? null,
         task.accountId ?? null,
+        task.autonomyTarget ?? null,
       );
     return task;
   }
@@ -1600,6 +1616,13 @@ export class Store {
       ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),
       // 老任务 agent_path 为 NULL → 不带字段（读出来 = 控制面，老行为）。
       ...(isAgentPath(r.agent_path) ? { agentPath: r.agent_path.trim() as AgentPath } : {}),
+      ...(r.agent_path?.trim() === "autonomy"
+        ? {
+            autonomyTarget: (isAutonomyTarget(r.autonomy_target)
+              ? r.autonomy_target.trim()
+              : "local") as AutonomyTarget,
+          }
+        : {}),
       ...(r.executor_task_id ? { executorTaskId: r.executor_task_id } : {}),
       ...(r.executor_agent_id ? { executorAgentId: r.executor_agent_id } : {}),
       ...(r.account_id ? { accountId: r.account_id } : {}),

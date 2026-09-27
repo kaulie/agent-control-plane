@@ -201,6 +201,11 @@ export interface Task {
    * 老任务读到 NULL → 不带这个字段（= 控制面，老行为）。
    */
   agentPath?: AgentPath;
+  /**
+   * 哪一台 autonomy（`agentPath=autonomy` 时）：`local` 本机 / `remote` 海外机。
+   * 老任务没有这一列 → 当 `local`。
+   */
+  autonomyTarget?: "local" | "remote";
   /** 执行方（autonomy）那侧的 task id；`agentPath=autonomy` 时才有。 */
   executorTaskId?: string;
   /** 执行方那侧的 agent id（M2 拼它的事件流用）；`agentPath=autonomy` 时才有。 */

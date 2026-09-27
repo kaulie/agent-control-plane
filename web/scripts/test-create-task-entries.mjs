@@ -104,6 +104,14 @@ const render = (props) =>
   assert.ok(html.includes("autonomy 的账号池"), "写明这是 autonomy 的池子");
   assert.ok(html.includes("由 autonomy 的账号池解析"), "默认项 = 交给它的池子解析");
   assert.ok(html.includes("账号留空 = 由它的账号池解析"), "提示里写清留空意味着什么");
+  assert.ok(html.includes("执行位置"), "新入口要选本机还是远端");
+  assert.ok(html.includes(">本机<") || html.includes("本机</button>"), "本机 chip");
+  assert.ok(html.includes(">远端<") || html.includes("远端</button>"), "远端 chip");
+  assert.match(
+    html,
+    /intent-type-chip selected[^>]*>\s*本机/,
+    "默认选中本机 autonomy",
+  );
 }
 
 // ---- 4) autonomy 不可达：置灰 + 写明原因 ----
@@ -212,6 +220,19 @@ const render = (props) =>
     "没选就不发这个字段"
   );
 
+  const remoteTask = await api.createTask({
+    description: "海外跑",
+    projectId: "project-59c41b54",
+    agentPath: "autonomy",
+    autonomyTarget: "remote",
+  });
+  assert.equal(remoteTask.agentPath, "autonomy");
+  assert.equal(
+    JSON.parse(calls.filter((c) => c.init.method === "POST").at(-1).init.body).autonomyTarget,
+    "remote",
+    "选远端就随创建下发 autonomyTarget",
+  );
+
   // 账号池（下拉的数据源）：读它自己的代理路由，不是控制面的 /api/accounts。
   const { api: apiAgain } = await import("../src/api.ts");
   globalThis.fetch = async (url) => {
@@ -244,6 +265,15 @@ const render = (props) =>
   assert.equal(calls.at(-1).url, "/api/autonomy/accounts", "账号池走它自己的代理路由");
   assert.equal(pool.accounts[0].accountId, "acct-1");
   assert.equal(pool.accounts[0].apiKeyMasked, "sk-1…06d2", "只有掩码");
+
+  await apiAgain.autonomyAccounts("remote");
+  assert.equal(
+    calls.at(-1).url,
+    "/api/autonomy/accounts?target=remote",
+    "选远端时账号池带 target",
+  );
+  await apiAgain.autonomyTargets();
+  assert.equal(calls.at(-1).url, "/api/autonomy/targets", "两台可用性走 /api/autonomy/targets");
 }
 
 // ---- 6) 适配层：autonomy 任务 → 和老任务同一个行模型（区别只有 agentPath）----

@@ -15,14 +15,14 @@
 - **交接失败不假装成功**：任务已建 → autonomy 拒绝（4xx）或不可达（503）时，任务**保留**、状态标 `error`、原文写进时间线（`executor_failed`），并把它一起返回给前端。**绝不**回落成本机 agent 执行。
 - **但界面上是同一个列表**：`agentPath = autonomy` 的任务会并进侧栏那个 Tasks 列表（展示层适配，数据实时来自代理），详情也渲染在同一个主区外壳里 —— 用户看到的是一套任务，只有「agent 由谁创建」这一处不同。**「不落库」是数据层约束，不是「单独开一个页面」的理由**；反过来，界面上合并也**不**意味着控制面存了这些行（见第 5 节测试：每次代理调用都断言库里计数不变）。
 - **拿不到就留空**：autonomy 接口暂时给不了的字段（provider、组织、仓库、计划步骤、时间线 / 对话消息、用量…）在界面上**不渲染、不写占位**；等它的接口补齐（M2）再往同一个位置加，版式不变。
-- **控制面只做代理**：前端 → 控制面（`/api/autonomy/*`）→ autonomy（`/api/*`）。控制面不改写、不缓存业务状态（仅短暂可用性缓存）。指向哪一台 autonomy 只看 `AUTONOMY_API_URL`（进程环境，启动时读一次）：本机 `http://127.0.0.1:4300`，海外机 agent-oversea `http://43.162.117.240:4300`（`ssh agent-oversea`，端口 4300 已在 4200–4400 放行）。换 URL 后走部署平台重启控制面，不要在本进程里同步 restart。服务中心已登记该海外实例（与本机 `127.0.0.1:4300` 并存）。
+- **控制面只做代理**：前端 → 控制面（`/api/autonomy/*`）→ autonomy（`/api/*`）。控制面不改写、不缓存业务状态（仅短暂可用性缓存）。本机与海外是**两台** runtime：`AUTONOMY_API_URL`（本机，默认 `http://127.0.0.1:4300`）和 `AUTONOMY_REMOTE_API_URL`（海外机 agent-oversea，默认 `http://43.162.117.240:4300`，`ssh agent-oversea`，端口 4300 已在 4200–4400 放行）。创建任务时选「本机 / 远端」，选中的值落在 `Task.autonomyTarget`，后续 executor / 追加指令都打那一台。未设 `AUTONOMY_REMOTE_API_URL` 时默认海外 IP；显式空 / `0` 关掉远端入口。换 URL 后走部署平台重启控制面，不要在本进程里同步 restart。服务中心已登记该海外实例（与本机 `127.0.0.1:4300` 并存）。
 - **失败语义**：autonomy 不可达/超时 → 控制面返回 `503` + 原文（**不**静默回落成本机 agent 执行）；`4xx` 的 `message` 原样带出给用户。
 - **错误形态**：按 autonomy 既有约定 `{"error": "…"}`（实测 404/400 一致）。
 
 ## 1. 端到端数据流
 
 ```
-创建：前端（创建对话框选「由 autonomy 创建 agent」）→ POST 控制面 /api/tasks { description, projectId, agentPath: "autonomy" }
+创建：前端（创建对话框选「交给 autonomy」+ 本机/远端）→ POST 控制面 /api/tasks { description, projectId, agentPath: "autonomy", autonomyTarget: "local"|"remote" }
       → 控制面**先落库**（我们的 task id；provider=autonomy；不建本地工作区、不预分配本地 agent）
       → POST autonomy /api/tasks { description, context_ref: { project } }
       → 202 { task_id, agent_id, status, message_id, queued }
@@ -550,6 +550,7 @@ curl -s -X POST http://127.0.0.1:4300/api/tasks/<task_id>/stop
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v2.13 | 2026-09-27 | 创建任务可选本机 / 远端 autonomy（`autonomyTarget` + `AUTONOMY_REMOTE_API_URL`；后续代理打落库的那一台） |
 | v2.12 | 2026-09-27 | 海外机 autonomy：`AUTONOMY_API_URL=http://43.162.117.240:4300`（agent-oversea，与本机 `:4300` 并存；换 URL 后平台重启控制面） |
 | v2.11 | 2026-09-21 | autonomy 任务状态轮询 **5s → 10s**（列表 `App.tsx` 与详情 `AutonomyTaskPanel.tsx` 共用 `AUTONOMY_TASK_REFRESH_MS`，不再各写一个数）。10s 的来由：状态是给人看的、一轮决策动辄几分钟，5s 只是更频繁地读到同一个值；手动动作（投递 / 重试 / 切任务）仍走**立刻重读**，不等计时到点 |
 | v2.10 | 2026-09-21 | 新增「**验证**」section（A10.3）：把引擎那一侧的判定单独铺开 —— cycle 1 钉住的契约（判据原文 + 证据槽 + 期望）与每次判定（结果 / 问的谁 / 期望 vs 实际 / reason）。三种「没有」分开说、只有全 pass 才算数、判据原文照抄。数据来自 autonomy #139 的 `verification` 字段；四态条的 unverified 提示现在指到这一节 |

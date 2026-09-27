@@ -189,6 +189,7 @@ const json = async (res) => JSON.parse(res.body);
   assert.ok(task.executorTaskId, "记下执行方那侧的 task id");
   assert.equal(task.executorAgentId, "10001", "记下执行方那侧的 agent id");
   assert.equal(task.description, "写个 demo", "描述 trim 后落库");
+  assert.equal(task.autonomyTarget, "local", "没选执行位置 → 默认本机");
 
   const after = counts();
   assert.equal(after.tasks, before.tasks + 1, "任务**落在我们库里**（这是要点）");
@@ -476,6 +477,116 @@ const json = async (res) => JSON.parse(res.body);
   assert.match((await json(mismatched)).error, /agentPath=autonomy/);
 }
 
+// ---- 9) 本机 / 远端：创建时选一台，后续代理打那一台 ----
+{
+  const dual = Fastify({ logger: false });
+  const local = fakeAutonomy();
+  const remote = fakeAutonomy();
+  remote.url = "http://43.162.117.240:4300";
+  await registerRoutes(dual, gateway, providers, {
+    dataDir,
+    appVersion: APP_VERSION,
+    autonomy: local,
+    autonomyRemote: remote,
+    taskEntry: "both",
+  });
+
+  const targets = await json(await dual.inject({ method: "GET", url: "/api/autonomy/targets" }));
+  assert.equal(targets.local.configured, true);
+  assert.equal(targets.remote.configured, true);
+  assert.equal(targets.local.target, "local");
+  assert.equal(targets.remote.target, "remote");
+
+  const remoteMeta = await json(
+    await dual.inject({ method: "GET", url: "/api/autonomy/meta?target=remote" }),
+  );
+  assert.equal(remoteMeta.target, "remote");
+  assert.ok(remote.calls.some((c) => c[0] === "status"), "meta?target=remote 打海外那台");
+
+  const remotePool = await json(
+    await dual.inject({ method: "GET", url: "/api/autonomy/accounts?target=remote" }),
+  );
+  assert.equal(remotePool.target, "remote");
+  assert.ok(remote.calls.some((c) => c[0] === "listAccounts"));
+
+  const rem = await dual.inject({
+    method: "POST",
+    url: "/api/tasks",
+    headers: uiHeaders,
+    payload: {
+      description: "海外跑",
+      projectId: PROJECT_ID,
+      agentPath: "autonomy",
+      autonomyTarget: "remote",
+    },
+  });
+  assert.equal(rem.statusCode, 201);
+  const remTask = await json(rem);
+  assert.equal(remTask.autonomyTarget, "remote");
+  assert.equal(remote.calls.filter((c) => c[0] === "createTask").length, 1, "交接打海外");
+  assert.equal(local.calls.filter((c) => c[0] === "createTask").length, 0, "本机那台没被叫");
+
+  const exec = await dual.inject({
+    method: "GET",
+    url: `/api/tasks/${remTask.taskId}/executor`,
+  });
+  assert.equal(exec.statusCode, 200);
+  assert.ok(
+    remote.calls.some((c) => c[0] === "getTask" && c[1] === remTask.executorTaskId),
+    "后续 executor 仍打创建时选的那台",
+  );
+
+  const bad = await dual.inject({
+    method: "POST",
+    url: "/api/tasks",
+    headers: uiHeaders,
+    payload: {
+      description: "x",
+      projectId: PROJECT_ID,
+      agentPath: "autonomy",
+      autonomyTarget: "mars",
+    },
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.match((await json(bad)).error, /autonomyTarget/);
+
+  const onLocalPath = await dual.inject({
+    method: "POST",
+    url: "/api/tasks",
+    headers: uiHeaders,
+    payload: {
+      description: "x",
+      projectId: PROJECT_ID,
+      agentPath: "control-plane",
+      autonomyTarget: "remote",
+    },
+  });
+  assert.equal(onLocalPath.statusCode, 400);
+  assert.match((await json(onLocalPath)).error, /agentPath=autonomy/);
+
+  const noRemote = Fastify({ logger: false });
+  await registerRoutes(noRemote, gateway, providers, {
+    dataDir,
+    appVersion: APP_VERSION,
+    autonomy: fakeAutonomy(),
+    taskEntry: "both",
+  });
+  const denied = await noRemote.inject({
+    method: "POST",
+    url: "/api/tasks",
+    headers: uiHeaders,
+    payload: {
+      description: "x",
+      projectId: PROJECT_ID,
+      agentPath: "autonomy",
+      autonomyTarget: "remote",
+    },
+  });
+  assert.equal(denied.statusCode, 503);
+  assert.match((await json(denied)).error, /AUTONOMY_REMOTE_API_URL/);
+  assert.equal((await json(denied)).task.autonomyTarget, "remote", "失败任务仍记下选的是远端");
+}
+
 console.log(
-  "PASS: 任务由控制面创建 + 执行交给 autonomy（交接留痕 / 不静默降级 / 老路径不变）"
+  "PASS: 任务由控制面创建 + 执行交给 autonomy（交接留痕 / 不静默降级 / 老路径不变 / 本机远端可选）"
 );

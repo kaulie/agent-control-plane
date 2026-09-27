@@ -834,6 +834,8 @@ export class AgentGateway {
      * `autonomy`（**执行**交给 autonomy：仍在我们库里建任务，但不建本地工作区、不预分配本地 agent）。
      */
     agentPath?: string;
+    /** 哪一台 autonomy（本机 / 海外）；只在 agentPath=autonomy 时有意义。 */
+    autonomyTarget?: string;
     /** 选用的账号（provider + vendor + key）。不传则用该 provider 的默认账号。 */
     accountId?: string;
     /** Cline 账号的厂商过滤（deepseek / minimax）；有 accountId 时以账号为准。 */
@@ -862,6 +864,7 @@ export class AgentGateway {
         taskType: normalizeTaskType(input.taskType),
         goal: normalizeTaskGoal(input.goal),
         agentPath: "autonomy",
+        autonomyTarget: input.autonomyTarget,
       });
       this.publish({ type: "task_created", task });
       return task;

@@ -263,6 +263,11 @@ export interface Task {
    * 老任务没有这个字段 → 当 `control-plane`。
    */
   agentPath?: AgentPath;
+  /**
+   * 哪一台 autonomy（`agentPath=autonomy` 时）：`local` 本机 / `remote` 海外机。
+   * 老任务没有 → 当 `local`。
+   */
+  autonomyTarget?: AutonomyTarget;
   /** 执行方（autonomy）那侧的 task id；`agentPath=autonomy` 时才有。 */
   executorTaskId?: string;
   /** 执行方那侧的 agent id（详情里的 Agent chip 用它）。 */
@@ -278,6 +283,9 @@ export interface Task {
  * - `autonomy`：由 autonomy 的 runtime 创建并执行（控制面只代理它的状态/进展，不落库）。
  */
 export type AgentPath = "control-plane" | "autonomy";
+
+/** 哪一台 autonomy：本机 `AUTONOMY_API_URL` / 海外 `AUTONOMY_REMOTE_API_URL`。 */
+export type AutonomyTarget = "local" | "remote";
 
 /**
  * 侧栏 Tasks 列表的一行：本地任务（Task），或「agent 由 autonomy 创建」的任务
@@ -695,6 +703,20 @@ export interface AutonomyMeta {
   error?: string;
   fetchedAt: string;
   entry: TaskEntry;
+  /** 探的是哪一台；缺省 local。 */
+  target?: AutonomyTarget;
+}
+
+/** `GET /api/autonomy/targets`：本机 + 海外各一份可用性。 */
+export interface AutonomyTargetStatus extends AutonomyMeta {
+  configured: boolean;
+  target: AutonomyTarget;
+}
+
+export interface AutonomyTargets {
+  entry: TaskEntry;
+  local: AutonomyTargetStatus;
+  remote: AutonomyTargetStatus;
 }
 
 /** `GET /api/autonomy/tasks` 的一行（字段来自 autonomy）。 */
@@ -747,6 +769,7 @@ export interface AutonomyAccountList {
   error?: string;
   fetchedAt: string;
   entry: TaskEntry;
+  target?: AutonomyTarget;
 }
 
 /** `POST /api/autonomy/tasks` 的 202（autonomy 已受理）。 */

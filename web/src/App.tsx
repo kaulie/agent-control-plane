@@ -750,7 +750,11 @@ export default function App() {
    * 同时把原文抛给对话框显示。
    */
   const createAutonomyTask = useCallback(
-    async (input: { description: string; accountId?: string }) => {
+    async (input: {
+      description: string;
+      accountId?: string;
+      autonomyTarget?: "local" | "remote";
+    }) => {
       if (!selectedProjectId) return;
       try {
         const task = await api.createTask({
@@ -759,6 +763,7 @@ export default function App() {
           agentPath: "autonomy",
           // 选了 autonomy 池子里的哪条账号（不选 = 交给它的池子解析）。
           autonomyAccountId: input.accountId,
+          autonomyTarget: input.autonomyTarget,
         });
         await refreshTasks(selectedProjectId);
         await loadAutonomy();

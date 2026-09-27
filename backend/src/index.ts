@@ -254,11 +254,19 @@ await registerRoutes(app, gateway, providers, {
     baseUrl: config.organizationApiUrl,
     timeoutMs: config.organizationTimeoutMs,
   }),
-  // 「交给 autonomy」入口：控制面只代理它的接口（不落库）；入口开关也一起传下去。
+  // 「交给 autonomy」入口：本机 + 可选海外机，创建时选一台；控制面只代理、不落库。
   autonomy: new AutonomyClient({
     baseUrl: config.autonomyApiUrl,
     timeoutMs: config.autonomyTimeoutMs,
   }),
+  ...(config.autonomyRemoteApiUrl
+    ? {
+        autonomyRemote: new AutonomyClient({
+          baseUrl: config.autonomyRemoteApiUrl,
+          timeoutMs: config.autonomyTimeoutMs,
+        }),
+      }
+    : {}),
   taskEntry: config.taskEntry,
 });
 app.log.info(

@@ -81,9 +81,10 @@ export function resolveServiceRegistryTimeoutMs(
 }
 
 /**
- * Base URL of the **autonomy** runtime (`AUTONOMY_API_URL`, `~/runtime/autonomy`, 契约端口 4300)：
+ * Base URL of the **autonomy** runtime (`AUTONOMY_API_URL`, 契约端口 4300)：
  * 新建任务的第二个入口（「交给 autonomy」）把指令 POST 到它的 `POST /api/tasks`，由 autonomy
  * 自己的 agent 执行（见 `./autonomy.ts` 与 `docs/autonomy-integration.md`）。
+ * 本机默认 `http://127.0.0.1:4300`。海外机 agent-oversea：`http://43.162.117.240:4300`。
  */
 export const DEFAULT_AUTONOMY_API_URL = "http://127.0.0.1:4300";
 

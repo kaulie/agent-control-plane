@@ -659,7 +659,12 @@ export class ClineProvider implements AgentProvider {
       enableSpawnAgent: false,
       enableAgentTeams: false,
       mode,
-      systemPrompt: this.systemPrompt,
+      // 初始化 system prompt（两块 prompt 的**系统那半**）：provider 基线（`DEFAULT_SYSTEM_PROMPT`
+      // 或 `CLINE_SYSTEM_PROMPT`）+ 这条 task 自己的那份（模板生成 / 面板改过）。
+      // 只在**建会话**时生效：改了它，当前会话要等重建 / 轮转。
+      systemPrompt: [this.systemPrompt, input.systemPrompt?.trim()]
+        .filter((part): part is string => Boolean(part))
+        .join("\n\n"),
       sessionId,
       // 上下文压缩：opt-in 的能力，不显式打开等于没有（探针见 config.ts）。
       compaction: {

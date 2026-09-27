@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { errorText } from "../api";
-import type { Task, TaskGoal, TaskType } from "../types";
+import type { Task, TaskGoal, TaskPromptPreview, TaskType } from "../types";
 import {
   DEFAULT_TASK_TYPE,
   TASK_TYPE_OPTIONS,
@@ -16,6 +16,15 @@ interface Props {
    * 面板上直接显示"需求已投递 / 排队中"，用户不用去翻时间线。
    */
   delivery?: { at: string; queued: boolean };
+  /**
+   * 两份 prompt 的**生效文本**（`GET /api/tasks/:id/prompts`）：拿不到就不显示 system prompt 那块。
+   */
+  prompts?: TaskPromptPreview | null;
+  /**
+   * **单独保存初始化 system prompt**（`null` = 恢复模板）。
+   * 与下面的 `onSave`（task prompt 那条轴）**互不影响** —— 这是「两块分开独立管理」在面板上的落点。
+   */
+  onSaveSystemPrompt?: (text: string | null) => Promise<void>;
   /** 保存修改（App 负责调 PATCH 并刷新详情/列表）；抛错则面板内显示。 */
   onSave: (patch: {
     title?: string;
@@ -32,7 +41,13 @@ interface Props {
  * 显示 类型 + 目标 + 标题 + 描述（需求原文），并支持就地编辑（创建后理解变清晰时修正）。
  * 折叠态只占一行，不抢聊天区的空间。
  */
-export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
+export default function TaskIntentPanel({
+  task,
+  delivery,
+  prompts,
+  onSaveSystemPrompt,
+  onSave,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
@@ -44,6 +59,11 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
   const [goal, setGoal] = useState<TaskGoal | null>(task.goal ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 初始化 system prompt 那块：自己的展开 / 编辑 / 草稿 / 保存态（和上面那套**各自独立**）。
+  const [sysEditing, setSysEditing] = useState(false);
+  const [sysText, setSysText] = useState("");
+  const [sysSaving, setSysSaving] = useState(false);
+  const [sysError, setSysError] = useState<string | null>(null);
 
   // 切换任务 / 服务端有更新时，重置草稿与编辑态（不然会拿旧草稿覆盖别的任务）。
   useEffect(() => {
@@ -53,7 +73,16 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
     setGoal(task.goal ?? null);
     setEditing(false);
     setError(null);
+    // 切任务时 system prompt 那块的草稿也重置（不拿旧草稿覆盖别的任务）。
+    setSysEditing(false);
+    setSysError(null);
   }, [task.taskId, task.title, task.description, task.taskType, task.goal]);
+
+  // 生效文本变了（保存成功 / 换任务）→ 草稿跟着走；正在编辑时**不动**它（别覆盖用户输入）。
+  useEffect(() => {
+    if (!prompts || sysEditing) return;
+    setSysText(prompts.systemPrompt.text);
+  }, [prompts, sysEditing]);
 
   const option = taskTypeOption(taskType);
   const dirty =
@@ -79,6 +108,21 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
       setError(errorText(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** 只保存**初始化 system prompt** 这一块（`null` = 恢复模板）。 */
+  const saveSystemPrompt = async (text: string | null): Promise<void> => {
+    if (!onSaveSystemPrompt) return;
+    setSysSaving(true);
+    setSysError(null);
+    try {
+      await onSaveSystemPrompt(text);
+      setSysEditing(false);
+    } catch (e) {
+      setSysError(errorText(e));
+    } finally {
+      setSysSaving(false);
     }
   };
 
@@ -120,9 +164,9 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
           className="intent-btn"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          title={expanded ? "折叠描述" : "展开描述"}
+          title={expanded ? "折叠提示词" : "展开提示词（task prompt / 初始化 system prompt）"}
         >
-          {expanded ? "▴ 描述" : "▾ 描述"}
+          {expanded ? "▴ 提示词" : "▾ 提示词"}
         </button>
         <button
           type="button"
@@ -139,14 +183,102 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
 
       {!editing ? (
         <div className={`task-intent-body ${expanded ? "" : "collapsed"}`}>
-          {task.description ? (
-            <p className="task-intent-desc">{task.description}</p>
-          ) : (
-            <p className="task-intent-desc is-empty">
-              这个任务还没有描述（老任务）。补上描述后，agent
-              在下次会话里就能直接看到需求。
-            </p>
-          )}
+          {/* ---- ① task prompt（任务相关提示词：需求原文）---- */}
+          <div className="prompt-block">
+            <div className="prompt-block-head">
+              <span className="prompt-block-name">task prompt</span>
+              <span className="prompt-block-hint">
+                任务相关：需求原文 + 最近历史，新会话开始时随用户消息送出
+              </span>
+            </div>
+            {task.description ? (
+              <p className="task-intent-desc">{task.description}</p>
+            ) : (
+              <p className="task-intent-desc is-empty">
+                这个任务还没有描述（老任务）。补上描述后，agent
+                在下次会话里就能直接看到需求。
+              </p>
+            )}
+          </div>
+
+          {/* ---- ② 初始化 system prompt（协议那半）：单独一块、单独保存 ---- */}
+          {prompts ? (
+            <div className="prompt-block">
+              <div className="prompt-block-head">
+                <span className="prompt-block-name">初始化 system prompt</span>
+                <span className="prompt-block-hint">
+                  只讲协议（怎么干活 / 怎么交付），不含这条 task 的具体信息 · 来源：
+                  {prompts.systemPrompt.source === "task" ? "这条 task 自己的" : "模板生成"}
+                </span>
+              </div>
+              {!sysEditing ? (
+                <>
+                  <pre className="prompt-preview">{prompts.systemPrompt.text}</pre>
+                  {onSaveSystemPrompt ? (
+                    <div className="prompt-block-actions">
+                      <button
+                        type="button"
+                        className="intent-btn"
+                        onClick={() => {
+                          setSysText(prompts.systemPrompt.text);
+                          setSysError(null);
+                          setSysEditing(true);
+                        }}
+                      >
+                        ✎ 改这一块
+                      </button>
+                      {prompts.systemPrompt.source === "task" ? (
+                        <button
+                          type="button"
+                          className="intent-btn"
+                          disabled={sysSaving}
+                          title="丢掉这条 task 自己的那份，回到模板生成"
+                          onClick={() => void saveSystemPrompt(null)}
+                        >
+                          {sysSaving ? "恢复中…" : "恢复模板"}
+                        </button>
+                      ) : null}
+                      <span className="prompt-block-meta">
+                        {prompts.systemPrompt.chars} 字符（上限 {prompts.systemPrompt.maxChars}）· 改了只影响新会话
+                      </span>
+                    </div>
+                  ) : null}
+                  {sysError && <div className="modal-error">{sysError}</div>}
+                </>
+              ) : (
+                <>
+                  <textarea
+                    className="intent-textarea"
+                    value={sysText}
+                    rows={12}
+                    onChange={(e) => setSysText(e.target.value)}
+                  />
+                  <div className="intent-hint">
+                    这里只存这一块（初始化 system prompt）：保存它不会动上面的 task prompt。
+                    生效时机是开会话 —— 当前会话要等重建 / 轮转 / fork 才用上。
+                  </div>
+                  {sysError && <div className="modal-error">{sysError}</div>}
+                  <div className="modal-actions">
+                    <button
+                      type="button"
+                      className="modal-cancel"
+                      onClick={() => setSysEditing(false)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-save"
+                      disabled={sysSaving}
+                      onClick={() => void saveSystemPrompt(sysText.trim() || null)}
+                    >
+                      {sysSaving ? "保存中…" : "保存这一块"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="task-intent-editor">
@@ -194,7 +326,8 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
           </label>
           <label className="runtime-field runtime-field-wide">
             <span className="runtime-field-label">
-              任务描述 <b className="intent-required">必填</b>
+              task prompt · 任务相关（需求原文）{" "}
+              <b className="intent-required">必填</b>
             </span>
             <textarea
               className="intent-textarea"

@@ -16,6 +16,7 @@ import path from "node:path";
 import Fastify from "fastify";
 import {
   bootstrapEventPayload,
+  MAX_BOOTSTRAP_CHARS,
   buildTaskBootstrap,
   buildTaskBootstrapText,
 } from "../src/task-context.ts";
@@ -73,7 +74,7 @@ const long = buildTaskBootstrap({
   events: Array.from({ length: 20 }, (_, i) => userEvent(i)),
   runs: Array.from({ length: 10 }, (_, i) => run(i)),
 });
-assert.ok(long.chars <= 7500, `简报不能超过 7500 字符（实际 ${long.chars}）`);
+assert.ok(long.chars <= MAX_BOOTSTRAP_CHARS, `简报不能超过上限（实际 ${long.chars}）`);
 assert.ok(long.text.includes("### Recent run outcomes"), "run 结论段落必须保住（老 bug 就是它被整段砍）");
 assert.ok(long.kept.runResults >= 4, `run 结论至少要留下几条（实际 ${long.kept.runResults}）`);
 assert.ok(long.text.includes("result-09"), "最新的 run 结论必须在");

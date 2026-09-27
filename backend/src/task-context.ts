@@ -8,7 +8,13 @@ import type {
 import { normalizeTaskType, taskTypeLabel } from "./task-types.js";
 import { taskGoalInfo } from "./task-goals.js";
 
-const MAX_BOOTSTRAP_CHARS = 7500;
+/**
+ * 两块 prompt（初始化 system prompt + task prompt）**加起来**的字符上限。
+ *
+ * 7500 是"只有一块"时的老口径；分成两块后固定开销变大了（协议那半 ~3KB），所以提到 10000，
+ * 让历史段能留下的量级与老口径一致（见 `backend/scripts/test-transparency.mjs` 的保尾部断言）。
+ */
+export const MAX_BOOTSTRAP_CHARS = 10000;
 /** 简报里最多逐个列几个仓库（骨架预算有限；超出的折成一句「还有 N 个」）。 */
 const MAX_INJECTED_REPOS = 12;
 const MAX_USER_MESSAGES = 20;
@@ -20,6 +26,11 @@ const MAX_ATTACHMENT_LINES = 20;
  * 太长会把 History 挤没（旧的 bug 就是把最近历史裁掉了）。超出截断并注明。
  */
 const MAX_DESCRIPTION_CHARS = 2000;
+/**
+ * **初始化 system prompt**（`task.systemPrompt`）的上限：它是人工写的文本（换行保留，不折叠），
+ * 但也不能把会话预算吃光。超了截断并注明（路由层还会先按这个值拒一次 400）。
+ */
+export const MAX_SYSTEM_PROMPT_CHARS = 8000;
 
 /** 历史段预算的分配（骨架先占，剩下来的按这个比例分给两段）。 */
 const RUN_RESULTS_SHARE = 0.4;
@@ -75,12 +86,30 @@ export interface TaskBootstrap {
   carried?: { taskId: string; userMessages: number; runResults: number };
   /** 用了模型生成的摘要时，说明来源/字符数/模型（透明化）。 */
   digestMeta?: { sourceTaskId: string; chars: number; at: string; model?: string };
+  /**
+   * 两块 prompt 的体检（**分开记**）：system 那半用的是**这条 task 自己存的**（`task`）还是
+   * **模板生成**的（`template`），以及两半各多少字符。
+   */
+  prompts?: {
+    system: { source: "task" | "template"; chars: number };
+    task: { chars: number };
+  };
 }
 
 function clip(text: string, max: number): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * 只截长度、**不动换行**的截断（prompt 正文不能像 `clip` 那样把换行压掉）。
+ * 注明那句话也算在 `max` 里 —— 返回的文本绝不超上限（路由层按同一个上限拒 400，两边口径一致）。
+ */
+function clipChars(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const note = `…（已截断：初始化 system prompt 上限 ${max} 字符）`;
+  return `${text.slice(0, Math.max(0, max - note.length))}${note}`;
 }
 
 function collectUserMessages(events: AgentEvent[], tag = ""): string[] {
@@ -141,6 +170,7 @@ function injectedRepoLines(orgServices?: OrgServiceList): string[] {
   const shown = repos.slice(0, MAX_INJECTED_REPOS);
   const hidden = repos.length - shown.length;
   return [
+    "## 注入的仓库（origin 候选）",
     `- **Injected git repositories (origin candidates, from the service registry · org ${orgLabel}):**`,
     ...shown.map((s) => {
       const note = s.description ? ` — ${clip(s.description, 120)}` : "";
@@ -148,122 +178,98 @@ function injectedRepoLines(orgServices?: OrgServiceList): string[] {
     }),
     ...(hidden > 0 ? [`  - …另有 ${hidden} 个服务（完整清单见服务中心）`] : []),
     `- 来源：服务中心 \`GET /v1/orgs/${orgId}/services\`（组织 ${orgLabel}；由 project 的所属组织解析）。项目配置里**没有**仓库地址字段，origin 只认上面这些。`,
-    "- Clone **the repo this task actually changes** into the task workspace, then follow [`BRANCHING.md`](BRANCHING.md): branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
-    "- Persist the PR URL on the task (`prUrl`). Do not invent a different remote unless the user explicitly overrides it.",
   ];
 }
 
-/** 固定骨架（任务身份 / 隔离规则 / 代理 / 角色）—— 不参与裁剪。 */
-function skeletonSections(
-  task: Task,
-  project: Project | undefined,
-  orgServices?: OrgServiceList,
-): string[] {
-  const taskType = normalizeTaskType(task.taskType);
-  const description = task.description?.trim() ?? "";
-  // 类型是纯标签：只在**非 general** 时写一行（历史任务全是 general，
-  // 保持它们的简报逐字节不变）。
-  const typeLines =
-    taskType === "general"
-      ? []
-      : [`- type: ${taskTypeLabel(taskType)} (${taskType})`];
-  // 目标**会改变 agent 的动作**（做到哪一步算交付完成）；老任务没有目标 →
-  // 不写这一行，也不改下面那句「不要 merge / 不要部署」，老行为逐字节不变。
-  const goalInfo = taskGoalInfo(task.goal);
-  const goalLines = goalInfo
-    ? [`- goal: ${goalInfo.label} (${goalInfo.id})`]
-    : [];
-  const mergePolicy =
-    goalInfo?.id === "merge"
-      ? "**Delivery goal = 合入主分支 (merge):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and stop there (do not deploy). If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first."
-      : goalInfo?.id === "deploy"
-        ? "**Delivery goal = 合入主分支并部署上线 (merge + deploy):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and then deploy it. If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first."
-        : "Do not merge the PR and do not deploy unless the user asks.";
-  // 描述是"需求原文"：会话被重建（重启 / 轮转 / fork）后必须还在，
-  // 所以进骨架而不是只依赖事件流（事件会被简报的"保尾部"裁掉）。
-  const descriptionLines = description
-    ? [
-        "",
-        "## 任务描述",
-        description.length > MAX_DESCRIPTION_CHARS
-          ? `${description.slice(0, MAX_DESCRIPTION_CHARS)}…（已截断，完整见 \`GET /api/tasks/${task.taskId}\`）`
-          : description,
-      ]
-    : [];
-  const injected = injectedRepoLines(orgServices);
+/** 固定骨架的开头一行（保留老文案：agent 靠它认出「这不是用户消息」）。 */
+const SYSTEM_PROMPT_HEADER =
+  "[Web Cursor task bootstrap — injected once on agent create; not a user message]";
+
+/** 两个 prompt 各自体检后的文本（`source` 说清它从哪来）。 */
+export interface TaskPromptHalf {
+  text: string;
+  /** `task` = 这条 task 自己存的那份（`task.systemPrompt`）；`template` = 按模板生成。 */
+  source: "task" | "template";
+}
+
+/** 一条 task 的**两份 prompt**：初始化用那份 + 任务相关那份，各管各的。 */
+export interface TaskPrompts {
+  /** **初始化 system prompt**：开会话时给模型的系统提示词（provider 有 system 通道就走那条）。 */
+  system: TaskPromptHalf;
+  /** **task prompt**：任务相关（需求原文 + 历史 + 本轮用户消息的引导尾）。 */
+  task: { text: string };
+  /** 模板生成的那份 system prompt：UI 上「恢复模板」/「看默认长什么样」用。 */
+  template: { system: string };
+  /** 体检数据 + **合成文本**（`system` + 分隔 + `task`）：provider 没有 system 通道时送它。 */
+  bootstrap: TaskBootstrap;
+}
+
+/**
+ * **初始化 system prompt**（模板）：一个 task 的 agent 开会话时给模型的**系统提示词**。
+ *
+ * **只讲协议，不含这条 task 的任何具体信息** —— 身份（taskId / title / workspace / goal / prUrl）、
+ * 注入的仓库清单、需求原文、历史**全部在 task prompt 那一块**（`buildTaskPromptText`）。
+ * 所以这份模板**对所有 task 都一样**：`task.systemPrompt` 设了就用那份覆盖（见 `buildTaskPrompts`）。
+ *
+ * 两块**分开独立管理**：这里给模板默认值；面板上两块各改各的，改一块不动另一块。
+ */
+export function buildInitSystemPrompt(): string {
   return [
-    "[Web Cursor task bootstrap — injected once on agent create; not a user message]",
-    "",
-    "## Task identity",
-    `- taskId: ${task.taskId}`,
-    `- title: ${task.title}`,
-    ...typeLines,
-    ...goalLines,
-    `- project: ${project?.name ?? task.projectId} (${task.projectId})`,
-    `- workspace: ${task.workspace}`,
-    `- createdAt: ${task.createdAt}`,
-    ...descriptionLines,
-    "",
-    "## Workspace isolation",
-    `- workspace: ${task.workspace}`,
-    injected.length
-      ? [
-          ...injected,
-          `- ${mergePolicy} The app itself has **no** deploy entry point: after the PR is merged into \`main\`, every deploy goes through the **deployment platform** (\`~/runtime/agent-control-plane-deployment\`, \`:4220\` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.`,
-        ].join("\n")
-      : [
-          "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
-          "- Prefer not to edit the shared deploy worktree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks.",
-        ].join("\n"),
-    task.prUrl
-      ? `- **Existing pull request:** ${task.prUrl} (do not open a duplicate PR).`
-      : "",
-    "- Do not edit other tasks' directories, and never edit `/Users/gaolei/runtime/**`.",
-    "",
+    SYSTEM_PROMPT_HEADER,
+    "## 这份提示词是什么（协议）",
+    "- 一个 task 的提示词**分两块独立管理**：这一块是**初始化 system prompt** —— 只讲协议（怎么干活、怎么交付），**不含这条 task 的任何具体信息**；身份 / 工作区 / 仓库清单 / 需求原文 / 历史都在 **task prompt** 那一块里（新会话开始时随用户消息给出）。",
+    "- 具体信息以 task prompt 为准；协议以这一块为准。",
+    "## Your role",
+    "- Your lifecycle is this task: you exist to solve problems for this task until it is completed or closed.",
+    "- Stay focused on this task's context; do not treat yourself as a generic unbound agent.",
+    "- Prefer answering from this briefing + conversation; look up the DB only if needed.",
+    "## Workspace isolation（协议）",
+    "- 工作区就是 task prompt 里给的 `workspace`：只在那里开发；要 clone 就 clone 进去（或它的子目录）。",
+    "- Clone the repo you need into that directory (or a subfolder), then develop only there.",
+    "- 不要编辑别的 task 的目录，**永远不要**动 `/Users/gaolei/runtime/**`（那是运行目录，不是代码目录）。",
+    "- Prefer not to edit the shared deploy worktree `/Users/gaolei/Projects/deepseek_web_cursor` unless the user explicitly asks.",
+    "## Repository / PR（协议）",
+    "- 能当 origin 的仓库地址**只有 task prompt 里列的那些**（来自服务中心）；不要自己发明别的 remote。",
+    "- 要改哪个仓库就 clone 它进工作区，然后 follow [`BRANCHING.md`](BRANCHING.md): branch `feature|fix|issue/<taskId>`, develop only there, then `git commit`, `git push -u origin HEAD`, and open a PR with `gh pr create` (or `POST /api/tasks/<taskId>/pull-request`).",
+    "- 把 PR URL 记回这条 task（`prUrl`）；task prompt 里已经给了 PR URL 时**不要**开重复的 PR。",
     "## Git / network proxy (explicit control)",
     "- Gateway may inject HTTP(S)_PROXY when `GIT_VIA_PROXY_SHELL=1` (Shell/`gh` then use the proxy).",
     "- When MCP is on (`GIT_VIA_PROXY_MCP=1`), prefer `git_with_proxy` / `run_with_proxy` for one-shot proxied fetch/pull/push/clone/`gh`.",
     "- Local-only git (status/diff/log/commit) can use normal Shell. Empty `GIT_VIA_PROXY_URL` disables all proxy features.",
     "- Capability-path choices (e.g. MCP proxied vs Shell ambient/direct) are recorded on the timeline as `agent_decision` events — not only in your prose.",
-    "",
-    "## Your role",
-    "- Your lifecycle is this task: you exist to solve problems for this task until it is completed or closed.",
-    "- Stay focused on this task's context; do not treat yourself as a generic unbound agent.",
-    "- Prefer answering from this briefing + conversation; look up the DB only if needed.",
-    "",
-  ];
-}
-
-const TAIL = [
-  "## Current user message",
-  "The text after this block is the user's actual message for this turn.",
-].join("\n");
-
-/**
- * 从**最新往回**装行，保证最近的内容一定留下（这是原来那个 bug：
- * 之前是整段 `slice(0, MAX)`，超预算时先把 `### Recent run outcomes` 整段砍掉）。
- */
-function fitLines(lines: string[], budget: number): { kept: string[]; used: number } {
-  const kept: string[] = [];
-  let used = 0;
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i]!;
-    if (used + line.length + 1 > budget) break;
-    kept.unshift(line);
-    used += line.length + 1;
-  }
-  return { kept, used };
+    "## Delivery goal（协议）",
+    "- 交付目标写在 task prompt 的 `goal` 行里，规则只有这几种：",
+    "  - `merge` — **Delivery goal = 合入主分支 (merge):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and stop there (do not deploy).",
+    "  - `deploy` — **Delivery goal = 合入主分支并部署上线 (merge + deploy):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and then deploy it.",
+    "  - 没有 `goal` 行 — Do not merge the PR and do not deploy unless the user asks.",
+    "- If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first.",
+    "## Deploy（协议）",
+    "- The app itself has **no** deploy entry point: after the PR is merged into `main`, every deploy goes through the **deployment platform** (`~/runtime/agent-control-plane-deployment`, `:4220` — its UI / pipeline), which packages the merged commit and restarts the service gracefully. **Never** run a deploy/restart script synchronously inside this agent process — that kills the gateway mid-shell.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 /**
- * Build the one-shot briefing injected only when a session is actually created
- * (not shown in the Web Cursor timeline).
+ * **task prompt**（任务相关那半）：**这一单的具体信息** —— 任务身份（taskId / title / type / goal /
+ * project / workspace / createdAt / PR URL）+ 服务中心给的仓库清单 + 需求原文（`task.description`）+ 历史
+ * 摘要 + 本轮用户消息的引导尾。
  *
- * Budget: 固定骨架先占，剩下的按 3:2 分给「用户消息 / run 结论」，两段都**保尾部**；
- * 丢了多少行会写进 `TaskBootstrap.dropped`（由 provider 记进 `run_started` 事件）。
+ * 新开会话时它作为**用户消息**送出；`buildInitSystemPrompt` 那半走 session 的 system 通道（provider
+ * 支持的话）。两块内容不重叠：改这块不动那块，反之亦然（`task.description` vs `task.systemPrompt`）。
  */
-export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
-  const { task, project, events, runs } = input;
+export function buildTaskPromptText(
+  input: TaskBootstrapInput,
+  opts?: { reserveChars?: number },
+): {
+  text: string;
+  keptUserMessages: number;
+  keptRunResults: number;
+  droppedUserMessages: number;
+  droppedRunResults: number;
+  carriedKept?: { taskId: string; userMessages: number; runResults: number };
+} {
+  const { task, events, runs } = input;
   const digest = input.digest;
   // 有模型摘要时，carried 的原始行不再塞进简报（摘要就是压缩后的它）。
   const carried = digest ? undefined : input.carried;
@@ -279,15 +285,57 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
     ...collectRunResults(runs),
   ];
 
-  const skeleton = skeletonSections(task, project, input.orgServices)
-    .filter((s) => s !== "")
-    .join("\n");
+  // ---- 这一单的**具体信息**：system 那半只讲协议，身份 / 仓库清单 / 需求原文全在这里 ----
+  const taskType = normalizeTaskType(task.taskType);
+  // 类型是纯标签：只在**非 general** 时写一行（历史任务全是 general，保持一致）。
+  const typeLines =
+    taskType === "general"
+      ? []
+      : [`- type: ${taskTypeLabel(taskType)} (${taskType})`];
+  // 目标**会改变 agent 的动作**（做到哪一步算交付完成）：协议在 system 那半，这里只写这一单选的值。
+  const goalInfo = taskGoalInfo(task.goal);
+  const goalLines = goalInfo ? [`- goal: ${goalInfo.label} (${goalInfo.id})`] : [];
+  const identityLines = [
+    "## Task identity",
+    `- taskId: ${task.taskId}`,
+    `- title: ${task.title}`,
+    ...typeLines,
+    ...goalLines,
+    `- project: ${input.project?.name ?? task.projectId} (${task.projectId})`,
+    `- workspace: ${task.workspace}`,
+    `- createdAt: ${task.createdAt}`,
+    ...(task.prUrl
+      ? [`- **Existing pull request:** ${task.prUrl} (do not open a duplicate PR).`]
+      : []),
+  ];
+  // 服务中心给的仓库清单（origin 候选）：协议在 system 那半（"origin 只认这些"），这里给的是清单本身。
+  const repoLines = injectedRepoLines(input.orgServices);
+  const fixedText = [...identityLines, ...repoLines].join("\n");
+
+  // 描述是"需求原文"：会话被重建（重启 / 轮转 / fork）后必须还在，
+  // 所以进这里而不是只依赖事件流（事件会被简报的"保尾部"裁掉）。
+  const description = task.description?.trim() ?? "";
+  const descriptionText = description
+    ? [
+        "## 任务描述",
+        description.length > MAX_DESCRIPTION_CHARS
+          ? `${description.slice(0, MAX_DESCRIPTION_CHARS)}…（已截断，完整见 \`GET /api/tasks/${task.taskId}\`）`
+          : description,
+      ].join("\n")
+    : "";
   const attachmentText = attachments.length
     ? ["### Attachments (ids only)", ...attachments].join("\n")
     : "";
+  // 上限是**两块加起来**的：这里减掉 system 那半（`reserveChars`）与描述段，才是历史段的额度。
   const budget = Math.max(
     0,
-    MAX_BOOTSTRAP_CHARS - skeleton.length - TAIL.length - attachmentText.length - 80,
+    MAX_BOOTSTRAP_CHARS -
+      (opts?.reserveChars ?? 0) -
+      fixedText.length -
+      descriptionText.length -
+      TAIL.length -
+      attachmentText.length -
+      80,
   );
 
   // run 结论更稀缺（每轮一条），先给它 40%，用户消息拿剩下的。
@@ -295,7 +343,12 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   const fittedRuns = fitLines(runResults, runBudget);
   const fittedUsers = fitLines(userMsgs, Math.max(0, budget - fittedRuns.used));
 
-  const parts: string[] = [skeleton, "## History summary"];
+  const parts: string[] = [
+    ...identityLines,
+    ...repoLines,
+    ...(descriptionText ? [descriptionText] : []),
+    "## History summary",
+  ];
   if (digest) {
     parts.push(
       `## Session digest（模型生成摘要 · 源 ${digest.sourceTaskId} · ${digest.at}` +
@@ -320,23 +373,6 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
   }
   parts.push(TAIL);
 
-  let text = parts.filter((s) => s !== "").join("\n");
-  let truncated = false;
-  if (text.length > MAX_BOOTSTRAP_CHARS) {
-    // 最后一道保险（正常不会走到：上面已经按预算装了）。
-    text = `${text.slice(0, MAX_BOOTSTRAP_CHARS - 1)}…`;
-    truncated = true;
-  }
-  const droppedUserMessages = userMsgs.length - fittedUsers.kept.length;
-  const droppedRunResults = runResults.length - fittedRuns.kept.length;
-  const digestMeta = digest
-    ? {
-        sourceTaskId: digest.sourceTaskId,
-        chars: digest.text.length,
-        at: digest.at,
-        ...(digest.model ? { model: digest.model } : {}),
-      }
-    : undefined;
   const carriedKept = carried
     ? {
         taskId: carried.taskId,
@@ -345,19 +381,117 @@ export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
       }
     : undefined;
   return {
-    text,
-    chars: text.length,
-    truncated: truncated || droppedUserMessages > 0 || droppedRunResults > 0,
-    dropped: { userMessages: droppedUserMessages, runResults: droppedRunResults },
-    kept: { userMessages: fittedUsers.kept.length, runResults: fittedRuns.kept.length },
-    ...(carriedKept ? { carried: carriedKept } : {}),
-    ...(digestMeta ? { digestMeta } : {}),
+    text: parts.filter((s) => s !== "").join("\n"),
+    keptUserMessages: fittedUsers.kept.length,
+    keptRunResults: fittedRuns.kept.length,
+    droppedUserMessages: userMsgs.length - fittedUsers.kept.length,
+    droppedRunResults: runResults.length - fittedRuns.kept.length,
+    ...(carriedKept ? { carriedKept } : {}),
   };
+}
+
+const TAIL = [
+  "## Current user message",
+  "The text after this block is the user's actual message for this turn.",
+].join("\n");
+
+/**
+ * 从**最新往回**装行，保证最近的内容一定留下（这是原来那个 bug：
+ * 之前是整段 `slice(0, MAX)`，超预算时先把 `### Recent run outcomes` 整段砍掉）。
+ */
+function fitLines(lines: string[], budget: number): { kept: string[]; used: number } {
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]!;
+    if (used + line.length + 1 > budget) break;
+    kept.unshift(line);
+    used += line.length + 1;
+  }
+  return { kept, used };
+}
+
+/** 两块 prompt 之间的分隔（也是「任务相关的那块从这里开始」的标记）。 */
+export const PROMPT_SEPARATOR = "\n\n---\n\n";
+
+/**
+ * 一条 task 的**两份 prompt** —— 各管各的，互不影响：
+ *
+ * | | 存哪 | 默认从哪来 | 送哪 |
+ * |---|---|---|---|
+ * | **初始化 system prompt** | `task.systemPrompt` | `buildInitSystemPrompt`（模板） | session 的 system 通道（provider 支持时；cursor 没有 → 前置成本轮消息的第一块） |
+ * | **task prompt** | `task.description` | 用户创建时填的「需求原文」 | 用户消息（`buildTaskPromptText` + 本轮的 user text） |
+ *
+ * 体检数据（`bootstrap.systemPrompt.source/chars`）会写进 `run_started`：于是"这次会话到底用的模板
+ * 还是这条 task 自己的那份"是可查的。
+ */
+export function buildTaskPrompts(input: TaskBootstrapInput): TaskPrompts {
+  const templateSystem = buildInitSystemPrompt();
+  const own = (input.task.systemPrompt ?? "").trim();
+  const system: TaskPromptHalf = own
+    ? { text: clipChars(own, MAX_SYSTEM_PROMPT_CHARS), source: "task" }
+    : { text: templateSystem, source: "template" };
+  const task = buildTaskPromptText(input, {
+    reserveChars: system.text.length + PROMPT_SEPARATOR.length,
+  });
+  let text = composeTaskPrompts(system.text, task.text);
+  let truncated = task.droppedUserMessages > 0 || task.droppedRunResults > 0;
+  if (text.length > MAX_BOOTSTRAP_CHARS) {
+    // 最后一道保险（正常不会走到：上面已经按预算装了）。
+    text = `${text.slice(0, MAX_BOOTSTRAP_CHARS - 1)}…`;
+    truncated = true;
+  }
+  const digestMeta = input.digest
+    ? {
+        sourceTaskId: input.digest.sourceTaskId,
+        chars: input.digest.text.length,
+        at: input.digest.at,
+        ...(input.digest.model ? { model: input.digest.model } : {}),
+      }
+    : undefined;
+  return {
+    system,
+    task: { text: task.text },
+    template: { system: templateSystem },
+    bootstrap: {
+      text,
+      chars: text.length,
+      truncated,
+      dropped: { userMessages: task.droppedUserMessages, runResults: task.droppedRunResults },
+      kept: { userMessages: task.keptUserMessages, runResults: task.keptRunResults },
+      prompts: {
+        system: { source: system.source, chars: system.text.length },
+        task: { chars: task.text.length },
+      },
+      ...(task.carriedKept ? { carried: task.carriedKept } : {}),
+      ...(digestMeta ? { digestMeta } : {}),
+    },
+  };
+}
+
+/** 兼容旧调用：合成文本 + 体检数据（两块分开管理见 `buildTaskPrompts`）。 */
+export function buildTaskBootstrap(input: TaskBootstrapInput): TaskBootstrap {
+  return buildTaskPrompts(input).bootstrap;
 }
 
 /** 兼容旧调用：只要文本。 */
 export function buildTaskBootstrapText(input: TaskBootstrapInput): string {
-  return buildTaskBootstrap(input).text;
+  return buildTaskPrompts(input).bootstrap.text;
+}
+
+/**
+ * 两块 prompt 合成**一段文本**（provider 没有 system 通道时送它；有通道的 provider 只用 task 那半，
+ * system 那半走 session 的 system 参数）。
+ */
+export function composeTaskPrompts(
+  systemText: string | undefined,
+  taskText: string | undefined,
+): string {
+  const system = systemText?.trim() ?? "";
+  const task = taskText?.trim() ?? "";
+  if (!system) return task;
+  if (!task) return system;
+  return `${system}${PROMPT_SEPARATOR}${task}`;
 }
 
 export function composePromptWithBootstrap(
@@ -372,6 +506,10 @@ export function composePromptWithBootstrap(
  * 简报要写进 `run_started` 的字段（透明化 PR-5）：体检数据 + 原文。
  * 只在**真的新开会话**时记，所以量很小（每个会话一次，≤7.5KB），但能回答
  * "这个会话的模型到底看到了什么"。
+ *
+ * 两块 prompt 分开记：`initSystemPrompt*` 是**初始化 system prompt**（`source=task` 表示用的是这条
+ * task 自己存的那份）、`taskPromptChars` 是 **task prompt** 那半；`bootstrapText` 仍是**两块合成**的
+ * 全文（= 这个会话的模型实际看到的那段）。
  */
 export function bootstrapEventPayload(
   bootstrap: TaskBootstrap | undefined,
@@ -384,6 +522,13 @@ export function bootstrapEventPayload(
     bootstrapKeptRunResults: bootstrap.kept.runResults,
     bootstrapDroppedUserMessages: bootstrap.dropped.userMessages,
     bootstrapDroppedRunResults: bootstrap.dropped.runResults,
+    ...(bootstrap.prompts
+      ? {
+          initSystemPromptSource: bootstrap.prompts.system.source,
+          initSystemPromptChars: bootstrap.prompts.system.chars,
+          taskPromptChars: bootstrap.prompts.task.chars,
+        }
+      : {}),
     bootstrapText: bootstrap.text,
     ...(bootstrap.digestMeta
       ? {

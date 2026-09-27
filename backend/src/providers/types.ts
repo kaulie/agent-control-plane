@@ -61,11 +61,19 @@ export interface RunInput {
    */
   mode?: "agent" | "plan";
   /**
-   * Task briefing prepended only when this run actually creates a new session
-   * (first bind, resume-fail recreate, or busy-fallback fresh agent).
+   * **task prompt** 那半（需求原文 / 历史 / 本轮用户消息的引导尾），prepended only when this run
+   * actually creates a new session (first bind, resume-fail recreate, or busy-fallback fresh agent)。
    * Not shown in the Web Cursor timeline.
    */
   bootstrapText?: string;
+  /**
+   * **初始化 system prompt** 那半（这条 task 自己存的，或模板生成）：会话初始化时给模型的系统提示词。
+   *
+   * 有 system 通道的 provider（Cline）走 `systemPrompt` 参数（只在**建会话**时生效）；没有的
+   * （Cursor SDK 的 `AgentOptions` 没有这个字段）把它当作一个独立块前置在 task prompt 前面。
+   * 两块分开独立管理，见 `../../task-context.js` 的 `buildTaskPrompts`。
+   */
+  systemPrompt?: string;
   /**
    * 简报的体检数据（字符数 / 有没有因超预算丢历史行）。
    * provider 会把它写进 `run_started` 事件，页面/接口因此能回答"模型到底看到了什么"。

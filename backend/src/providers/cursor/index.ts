@@ -6,7 +6,11 @@ import { buildCost, type SdkCostLike } from "../../usage/cost.js";
 import { normalizeTokenUsage } from "../../usage/tokens.js";
 import { newId } from "../../store/db.js";
 import type { BillingService } from "../../billing/service.js";
-import { bootstrapEventPayload, composePromptWithBootstrap } from "../../task-context.js";
+import {
+  bootstrapEventPayload,
+  composePromptWithBootstrap,
+  composeTaskPrompts,
+} from "../../task-context.js";
 import { shouldRotateContext } from "../../context/index.js";
 import { classifyRunError, isRetryableSilentAbort } from "../../run-errors.js";
 import { isBenignSdkClosedStreamError } from "../../process-errors.js";
@@ -272,8 +276,13 @@ export class CursorProvider implements AgentProvider {
     input: RunInput,
     prependBootstrap: boolean,
   ): string | SDKUserMessage {
+    // Cursor SDK 的 AgentOptions 没有 system 通道 → 两块 prompt 在这里**按顺序拼**在一起送：
+    // 先是初始化 system prompt（这条 task 自己那份 / 模板），再是 task prompt。
     const text = prependBootstrap
-      ? composePromptWithBootstrap(input.bootstrapText, input.prompt.text)
+      ? composePromptWithBootstrap(
+          composeTaskPrompts(input.systemPrompt, input.bootstrapText),
+          input.prompt.text,
+        )
       : input.prompt.text;
     if (!input.prompt.images?.length) return text;
     return {

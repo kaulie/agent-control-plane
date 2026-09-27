@@ -242,10 +242,17 @@ export interface Task {
   /** 交付目标（会改变 agent 的动作，见 `./task-goals.ts`）；老任务没有。 */
   goal?: TaskGoal;
   /**
-   * 任务描述（需求原文）。新建时必填；创建后可在「任务意图」面板上修改。
+   * **task prompt**（任务相关提示词：需求原文）。新建时必填；创建后可在「任务意图」面板上修改。
    * 老任务可能没有。
+   *
+   * ⚠️ 和 `systemPrompt`（**初始化 system prompt**）是**两块分开独立管理**的东西：改这块不动那块。
    */
   description?: string;
+  /**
+   * **初始化 system prompt**（这条 task 自己那份；空 = 用模板生成）。
+   * 面板上单独一块、单独保存（`GET/PATCH /api/tasks/:id/prompts`）。
+   */
+  systemPrompt?: string;
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt?: string;
   /** 从哪个 task fork 而来（上下文将满时分流）。 */
@@ -543,6 +550,21 @@ export interface TaskContextSize {
   avgGrowthTokens?: number;
   estimatedRunsLeft?: number;
   thresholds: { warn: number; alert: number };
+}
+
+/**
+ * `GET /api/tasks/:id/prompts`：这条 task 的**两份 prompt**（分开独立管理）。
+ * `systemPrompt.source`：`task` = 面板上改过的那份；`template` = 协议模板生成的。
+ */
+export interface TaskPromptPreview {
+  systemPrompt: {
+    text: string;
+    source: "task" | "template";
+    chars: number;
+    template: string;
+    maxChars: number;
+  };
+  taskPrompt: { text: string; description: string; chars: number };
 }
 
 export interface TaskDetail {

@@ -40,7 +40,11 @@ export const OPENAPI_TAGS: Array<{ name: string; description: string }> = [
   { name: "accounts", description: "Provider 账号池（Cursor / Cline vendor 多把 key）" },
   { name: "projects", description: "项目与项目设置" },
   { name: "org", description: "组织：部门目录（organization 服务）" },
-  { name: "tasks", description: "任务：创建 / 详情 / 事件 / 消息 / 停止 / fork / PR / 附件" },
+  {
+    name: "tasks",
+    description:
+      "任务：创建 / 详情 / 事件 / 消息 / 停止 / fork / PR / 附件 / 两份提示词（task prompt × 初始化 system prompt）",
+  },
   { name: "agents", description: "Agent 看板与时间线" },
   { name: "billing", description: "计费规则（峰谷价目与时段）" },
   { name: "usage", description: "用量统计" },
@@ -231,8 +235,20 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     tags: ["tasks"],
   },
   "PATCH /api/tasks/{taskId}": {
-    summary: "改任务意图（标题 / 类型 / 目标 / 描述）或回写 PR 链接",
+    summary: "改任务意图（标题 / 类型 / 目标 / 描述 / 初始化 system prompt）或回写 PR 链接",
     tags: ["tasks"],
+    description:
+      "两条 prompt 分开独立管理：`description` 改的是 **task prompt**（任务相关：需求原文），" +
+      "`systemPrompt` 改的是 **初始化 system prompt**（只讲协议，不含这条 task 的具体信息；" +
+      "`null` / 空串 = 清掉覆盖、回到模板）。两个字段各带各的，互不覆盖。见 `docs/prompts.md`。",
+  },
+  "GET /api/tasks/{taskId}/prompts": {
+    summary: "这条 task 的两份 prompt（初始化 system prompt + task prompt）的生效文本",
+    tags: ["tasks"],
+    description:
+      "两份**分开管理**的 prompt：`systemPrompt` = 初始化 system prompt（`source`：`task` = 这条 task 自己的、" +
+      "`template` = 模板生成；`template` 字段给面板「恢复模板」用），`taskPrompt` = 任务相关那半" +
+      "（需求原文 + 历史）。规则与真正开会话时同一套（同一个 `buildTaskPrompts`）。见 `docs/prompts.md`。",
   },
   "GET /api/tasks/{taskId}/events": {
     summary: "任务事件时间线（after= 增量拉取）",

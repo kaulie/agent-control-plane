@@ -48,7 +48,8 @@ import {
   type StoredImageRef,
 } from "../attachments.js";
 import {
-  buildTaskBootstrap,
+  buildTaskPrompts,
+  MAX_SYSTEM_PROMPT_CHARS,
   type TaskBootstrapCarried,
   type TaskBootstrapDigest,
 } from "../task-context.js";
@@ -1007,6 +1008,8 @@ export class AgentGateway {
       /** 传 `null` = 清掉目标（回到老行为）；非法值同样视为清掉。 */
       goal?: string | null;
       description?: string;
+      /** **初始化 system prompt**：空 / `null` = 清掉覆盖（回到模板生成）。 */
+      systemPrompt?: string | null;
     },
   ): Task | undefined {
     const before = this.store.getTask(taskId);
@@ -1024,6 +1027,8 @@ export class AgentGateway {
       ...(patch.goal !== undefined ? { goal: nextGoal ?? null } : {}),
       // 描述必填：只接受非空修改，空 = 不改（routes 会在真正传了空值时拦 400）。
       ...(description ? { description } : {}),
+      // 初始化 system prompt 允许清空（回到模板）：所以这里**显式**区分「没传」与「传了空」。
+      ...(patch.systemPrompt !== undefined ? { systemPrompt: patch.systemPrompt } : {}),
     });
     if (!updated) return undefined;
 
@@ -1043,6 +1048,16 @@ export class AgentGateway {
       );
     }
     if (description && description !== before.description) changes.push("描述已更新");
+    const systemPromptChanged =
+      patch.systemPrompt !== undefined &&
+      (patch.systemPrompt?.trim() || "") !== (before.systemPrompt ?? "");
+    if (systemPromptChanged) {
+      changes.push(
+        patch.systemPrompt?.trim()
+          ? "初始化 system prompt 已更新"
+          : "初始化 system prompt 已清除（回到模板）",
+      );
+    }
     if (changes.length) {
       const lastRun = this.store.listRuns(taskId).slice(-1)[0];
       const note: AgentEvent = {
@@ -1055,11 +1070,14 @@ export class AgentGateway {
         payload: {
           status: "task_intent_updated",
           message:
-            `任务意图已更新（${changes.join("，")}）。当前会话已开始，看不到新描述；` +
-            `下一次会话（重启 / 轮转 / fork）会带上最新描述。`,
+            `任务意图已更新（${changes.join("，")}）。当前会话已开始，看不到这次改动；` +
+            `下一次会话（重启 / 轮转 / fork）会带上最新内容。`,
           taskType: updated.taskType,
           ...(updated.goal ? { goal: updated.goal } : {}),
           ...(updated.description ? { description: updated.description } : {}),
+          // 两条 prompt 各记各的：描述那条轴与初始化 system prompt 那条轴分开（面板上也是两块）。
+          ...(updated.systemPrompt ? { systemPrompt: updated.systemPrompt } : {}),
+          systemPromptSource: updated.systemPrompt ? "task" : "template",
         },
       };
       this.store.appendEvent(note);
@@ -1067,6 +1085,56 @@ export class AgentGateway {
     }
     this.publish({ type: "task_updated", task: updated });
     return updated;
+  }
+
+  /**
+   * 「这条 task 的两份 prompt 现在长什么样」—— 面板的 prompt 管理块用它（显示 + 编辑 + 恢复模板）。
+   *
+   * 规则与真正开会话时**同一套**（同一个 `buildTaskPrompts`），所以看到的就是模型会拿到的那份：
+   * **初始化 system prompt**（`source=task` = 面板改过的那份；`template` = 模板生成的）+ **task prompt**
+   * （描述 + 最近历史的预览）。两块分开独立管理，互不影响。
+   */
+  async taskPromptPreview(taskId: string): Promise<
+    | {
+        systemPrompt: {
+          text: string;
+          source: "task" | "template";
+          chars: number;
+          template: string;
+          maxChars: number;
+        };
+        taskPrompt: { text: string; description: string; chars: number };
+      }
+    | undefined
+  > {
+    const task = this.store.getTask(taskId);
+    if (!task) return undefined;
+    const project = this.store.getProject(task.projectId);
+    const orgServices = await this.orgServicesFor(project);
+    const { events } = this.store.listEvents(taskId, { limit: 200 });
+    const carried = this.carriedForTask(task);
+    const prompts = buildTaskPrompts({
+      task,
+      ...(project ? { project } : {}),
+      events,
+      runs: this.store.listRuns(taskId),
+      ...(orgServices ? { orgServices } : {}),
+      ...(carried ? { carried } : {}),
+    });
+    return {
+      systemPrompt: {
+        text: prompts.system.text,
+        source: prompts.system.source,
+        chars: prompts.system.text.length,
+        template: prompts.template.system,
+        maxChars: MAX_SYSTEM_PROMPT_CHARS,
+      },
+      taskPrompt: {
+        text: prompts.task.text,
+        description: task.description ?? "",
+        chars: prompts.task.text.length,
+      },
+    };
   }
 
   /**
@@ -2770,7 +2838,8 @@ export class AgentGateway {
         Boolean(this.config.contextDigest) &&
         (Boolean(carried) || shouldRotateContext({ ...sessionContext }).rotate);
       const digest = digestWanted ? await this.contextDigestFor(task) : undefined;
-      const bootstrap = buildTaskBootstrap({
+      // 这条 task 的**两份 prompt**（分开独立管理）：system 那半走 system 通道，task 那半进用户消息。
+      const prompts = buildTaskPrompts({
         task,
         project,
         events: historyEvents,
@@ -2779,6 +2848,7 @@ export class AgentGateway {
         ...(carried ? { carried } : {}),
         ...(digest ? { digest } : {}),
       });
+      const bootstrap = prompts.bootstrap;
 
       // No plan-mode guidance is injected into the conversation: read-only
       // restrictions come solely from the provider's own `mode` parameter on
@@ -2802,7 +2872,10 @@ export class AgentGateway {
         ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
         ...(account?.vendor ? { vendor: account.vendor } : {}),
         ...(account?.baseUrl ? { baseUrl: account.baseUrl } : {}),
-        bootstrapText: bootstrap.text,
+        // task prompt 那半：新开会话时作为用户消息送出。
+        bootstrapText: prompts.task.text,
+        // 初始化 system prompt：provider 有 system 通道就走那条（否则拼在 task 前面）。
+        systemPrompt: prompts.system.text,
         bootstrap,
         sessionContext,
         agentName: task.title,

@@ -181,6 +181,15 @@ export interface Task {
    * - 同时注入会话简报骨架，保证会话被重建（重启 / 轮转 / fork）后需求不丢。
    */
   description?: string;
+  /**
+   * **初始化 system prompt**（这条 task 自己的那份）：
+   * 空/未设 = 用模板（`task-context.buildInitSystemPrompt`）生成。
+   *
+   * ⚠️ 和 `description`（**task prompt**：任务相关提示词）是**两件独立管理的东西**：
+   * 各自存储、各自编辑、互不影响 —— 见 `task-context.buildTaskPrompts`。
+   * 生效时机是**开会话**（session create）：改了它，当前会话要等重建 / 轮转才用上。
+   */
+  systemPrompt?: string;
   /** ISO time of the latest user message; drives sidebar sort. */
   lastUserInputAt: string;
   /** 从哪个 task fork 而来（上下文将满时分流；页面显示"fork 自 #xxx"）。 */

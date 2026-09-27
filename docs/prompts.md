@@ -32,6 +32,20 @@
 
 ## 2. 管理入口（两处都分得开）
 
+**模板住在文件里**
+
+| 那一份 | 存在哪 | 怎么改 |
+|---|---|---|
+| **初始化 system prompt 的模板** | `backend/src/agent_policy/PROTOCOL.md`（**文件**，3032 字符；`npm run build` 会拷进 `backend/dist/agent_policy/`） | 直接改文件：每次渲染都**读盘、没有缓存** → **下一次会话**生效，不用重启（部署上改 `dist/agent_policy/PROTOCOL.md` 也一样） |
+| **task prompt 的内容** | `tasks.description`（DB 里的需求原文）+ 运行时拼的身份 / 仓库清单 / 历史 | 面板上改描述（`PATCH { description }`） |
+| 某条 task 自己那份**覆盖** | `tasks.system_prompt`（DB） | 面板上「改这一块」/「恢复模板」 |
+
+- 读法在 `backend/src/prompt-files.ts` 的 `loadPromptFile`：**相对模块自己所在目录**（dev = `src/`、部署 = `dist/`）→ 读盘 → 裁掉尾部换行。
+- 构建必须把它拷进产物（`npm run build` → `copy:prompts` → `scripts/copy-agent-policy.mjs`）：**部署里只有 `dist/`**，没有 `src/`。
+- **读不到的后果**：模板是**必需资产** —— 缺文件 / 空文件**大声失败**（报错带绝对路径），**不**退回一份藏在代码里的旧文案。
+- `PROMPT_FILES_ROOT` 可以把基点指到别处（测试、别的打包布局用；默认 = 模块自己所在目录）。
+- 面板的「恢复模板」= 读这个文件（`GET /api/tasks/:id/prompts` 的 `systemPrompt.template` 就是它）。
+
 **接口**
 
 | 方法 | 路径 | 作用 |

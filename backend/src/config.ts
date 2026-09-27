@@ -88,6 +88,9 @@ export function resolveServiceRegistryTimeoutMs(
  */
 export const DEFAULT_AUTONOMY_API_URL = "http://127.0.0.1:4300";
 
+/** 海外机 agent-oversea 上的 autonomy。设空或 `0` 关掉「远端」入口。 */
+export const DEFAULT_AUTONOMY_REMOTE_API_URL = "http://43.162.117.240:4300";
+
 /**
  * How long we wait for autonomy before degrading to 「不可达」.
  *
@@ -126,6 +129,20 @@ export function resolveAutonomyApiUrl(
 ): string {
   const raw = env.AUTONOMY_API_URL?.trim();
   return (raw || DEFAULT_AUTONOMY_API_URL).replace(/\/+$/, "");
+}
+
+/**
+ * 海外 autonomy。未设环境变量 → 默认海外机；显式空 / `0` → 不配远端（创建时选 remote 会 400）。
+ */
+export function resolveAutonomyRemoteApiUrl(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (!Object.prototype.hasOwnProperty.call(env, "AUTONOMY_REMOTE_API_URL")) {
+    return DEFAULT_AUTONOMY_REMOTE_API_URL.replace(/\/+$/, "");
+  }
+  const raw = env.AUTONOMY_REMOTE_API_URL?.trim() ?? "";
+  if (!raw || raw === "0") return "";
+  return raw.replace(/\/+$/, "");
 }
 
 /** Timeout for autonomy calls; invalid values fall back to default. */
@@ -320,8 +337,10 @@ export interface Config {
   serviceRegistryApiUrl: string;
   /** Timeout for service-registry calls (ms). */
   serviceRegistryTimeoutMs: number;
-  /** autonomy runtime 的 base URL（「交给 autonomy」入口用）。 */
+  /** 本机 autonomy runtime 的 base URL（「交给 autonomy · 本机」）。 */
   autonomyApiUrl: string;
+  /** 海外 autonomy；空字符串 = 未配置远端入口。 */
+  autonomyRemoteApiUrl: string;
   /** autonomy 调用超时（毫秒）。 */
   autonomyTimeoutMs: number;
   /** 新建任务入口开关：both（默认）/ autonomy / gateway。 */
@@ -461,6 +480,7 @@ export function loadConfig(): Config {
     serviceRegistryApiUrl: resolveServiceRegistryApiUrl(process.env),
     serviceRegistryTimeoutMs: resolveServiceRegistryTimeoutMs(process.env),
     autonomyApiUrl: resolveAutonomyApiUrl(process.env),
+    autonomyRemoteApiUrl: resolveAutonomyRemoteApiUrl(process.env),
     autonomyTimeoutMs: resolveAutonomyTimeoutMs(process.env),
     taskEntry: resolveTaskEntry(process.env),
     maxConcurrentRuns: resolveMaxConcurrentRuns(process.env),

@@ -6,6 +6,12 @@ import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js"
 import type { BillingRuleInput } from "../billing/index.js";
 import type { TaskEntry } from "../config.js";
 import { AGENT_PATHS, isAgentPath, normalizeAgentPath } from "../agent-path.js";
+import {
+  AUTONOMY_TARGETS,
+  isAutonomyTarget,
+  normalizeAutonomyTarget,
+  type AutonomyTarget,
+} from "../autonomy-target.js";
 import type {
   AutonomyAccountListResult,
   AutonomyCreateResult,
@@ -36,6 +42,25 @@ import {
 } from "../task-goals.js";
 import { parseExecutorInputMode } from "../executor-input-mode.js";
 
+/** 一台 autonomy runtime 的代理面（本机 / 海外各一份）。 */
+type AutonomyProxy = {
+  url: string;
+  status(opts?: { refresh?: boolean }): Promise<AutonomyStatus>;
+  listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
+  listAccounts(): Promise<AutonomyAccountListResult>;
+  getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
+  createTask(input: {
+    description: string;
+    projectId?: string;
+    accountId?: string;
+  }): Promise<AutonomyCreateResult>;
+  addInstruction(input: {
+    taskId: string;
+    message: string;
+    mode?: "chat" | "command";
+  }): Promise<AutonomyInstructionResult>;
+};
+
 export async function registerRoutes(
   app: FastifyInstance,
   gateway: AgentGateway,
@@ -62,26 +87,9 @@ export async function registerRoutes(
      * autonomy runtime（「交给 autonomy」入口）。只用来**代理**它的接口：
      * 控制面不落库、不缓存业务状态（见 docs/autonomy-integration.md）。
      */
-    autonomy?: {
-      url: string;
-      status(opts?: { refresh?: boolean }): Promise<AutonomyStatus>;
-      listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
-      /** 它的账号池：新建「交给 autonomy」任务时选账号的下拉（key 只回掩码）。 */
-      listAccounts(): Promise<AutonomyAccountListResult>;
-      getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
-      createTask(input: {
-        description: string;
-        projectId?: string;
-        /** 它的池子里的账号 id（不传 = 由它的池子解析）。 */
-        accountId?: string;
-      }): Promise<AutonomyCreateResult>;
-      /** chat 输入：给**已存在**的执行方任务追加一条指令（忙则排队）。 */
-      addInstruction(input: {
-        taskId: string;
-        message: string;
-        mode?: "chat" | "command";
-      }): Promise<AutonomyInstructionResult>;
-    };
+    autonomy?: AutonomyProxy;
+    /** 海外 autonomy；未配则创建时不能选 remote。 */
+    autonomyRemote?: AutonomyProxy;
     /** 新建任务入口开关（`TASK_ENTRY`）：both（默认）/ autonomy / gateway。 */
     taskEntry?: TaskEntry;
   },
@@ -375,35 +383,110 @@ export async function registerRoutes(
   // - 读：best-effort，不可达 → 200 + `available:false`（页面显示「autonomy 不可达」，不是 500）；
   // - 写：绝不静默降级 —— 按 autonomy 的状态码转 4xx / 503，并把它的原文带出给用户。
   const autonomy = opts.autonomy;
+  const autonomyRemote = opts.autonomyRemote;
   /** 入口开关只决定前端显示哪个入口；接口本身不因开关被拒（内部任务仍走 /api/tasks）。 */
   const taskEntry: TaskEntry = opts.taskEntry ?? "both";
 
-  app.get("/api/autonomy/meta", async () => {
-    const status: AutonomyStatus = autonomy
-      ? await autonomy.status()
-      : {
-          available: false,
-          url: "",
-          error: "autonomy 未配置（AUTONOMY_API_URL）",
-          fetchedAt: new Date().toISOString(),
-        };
-    return { ...status, entry: taskEntry };
+  const clientFor = (target: unknown): AutonomyProxy | undefined =>
+    normalizeAutonomyTarget(target) === "remote" ? autonomyRemote : autonomy;
+
+  const missingClientError = (target: AutonomyTarget): string =>
+    target === "remote"
+      ? "远端 autonomy 未配置（AUTONOMY_REMOTE_API_URL）"
+      : "autonomy 未配置（AUTONOMY_API_URL）";
+
+  const missingStatus = (target: AutonomyTarget): AutonomyStatus => ({
+    available: false,
+    url: "",
+    error: missingClientError(target),
+    fetchedAt: new Date().toISOString(),
   });
 
-  app.get<{ Querystring: { projectId?: string } }>(
+  app.get<{ Querystring: { target?: string } }>("/api/autonomy/meta", async (req) => {
+    if (req.query.target !== undefined && !isAutonomyTarget(req.query.target)) {
+      return {
+        ...missingStatus("local"),
+        entry: taskEntry,
+        error: `unknown autonomyTarget "${req.query.target}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+      };
+    }
+    const target = normalizeAutonomyTarget(req.query.target);
+    const client = clientFor(target);
+    const status: AutonomyStatus = client ? await client.status() : missingStatus(target);
+    return { ...status, entry: taskEntry, target };
+  });
+
+  app.get("/api/autonomy/targets", async () => {
+    const local = autonomy ? await autonomy.status() : missingStatus("local");
+    const remote = autonomyRemote
+      ? await autonomyRemote.status()
+      : missingStatus("remote");
+    return {
+      entry: taskEntry,
+      local: { configured: Boolean(autonomy), target: "local" as const, ...local },
+      remote: {
+        configured: Boolean(autonomyRemote),
+        target: "remote" as const,
+        ...remote,
+      },
+    };
+  });
+
+  const lookupAutonomyTask = async (taskId: string) => {
+    const clients = [autonomy, autonomyRemote].filter(
+      (c): c is AutonomyProxy => Boolean(c),
+    );
+    if (clients.length === 0) {
+      return {
+        client: undefined,
+        result: {
+          available: false as const,
+          status: 503,
+          error: missingClientError("local"),
+          fetchedAt: new Date().toISOString(),
+        },
+      };
+    }
+    let last: AutonomyTaskDetailResult = {
+      available: false,
+      status: 503,
+      error: "autonomy 不可达",
+      fetchedAt: new Date().toISOString(),
+    };
+    for (const client of clients) {
+      const result = await client.getTask(taskId);
+      if (result.available && result.task) return { client, result };
+      last = result;
+    }
+    return { client: undefined, result: last };
+  };
+
+  app.get<{ Querystring: { projectId?: string; target?: string } }>(
     "/api/autonomy/tasks",
     async (req) => {
+      if (req.query.target !== undefined && !isAutonomyTarget(req.query.target)) {
+        return {
+          available: false,
+          tasks: [],
+          url: "",
+          error: `unknown autonomyTarget "${req.query.target}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+          fetchedAt: new Date().toISOString(),
+          entry: taskEntry,
+        };
+      }
+      const target = normalizeAutonomyTarget(req.query.target);
+      const client = clientFor(target);
       const projectId = req.query.projectId?.trim() || undefined;
-      const result: AutonomyTaskListResult = autonomy
-        ? await autonomy.listTasks({ projectId })
+      const result: AutonomyTaskListResult = client
+        ? await client.listTasks({ projectId })
         : {
             available: false,
             tasks: [],
             url: "",
-            error: "autonomy 未配置（AUTONOMY_API_URL）",
+            error: missingClientError(target),
             fetchedAt: new Date().toISOString(),
           };
-      return { ...result, entry: taskEntry };
+      return { ...result, entry: taskEntry, target };
     },
   );
 
@@ -415,26 +498,35 @@ export async function registerRoutes(
    * 的（决定它那边用哪个 harness / vendor / model / 凭据）。口径与其它读一致：best-effort，
    * 不可达 → 200 + `available:false`（页面显示「读不到」，不是 500）；key 只有掩码。
    */
-  app.get("/api/autonomy/accounts", async () => {
-    const result: AutonomyAccountListResult = autonomy
-      ? await autonomy.listAccounts()
+  app.get<{ Querystring: { target?: string } }>("/api/autonomy/accounts", async (req) => {
+    if (req.query.target !== undefined && !isAutonomyTarget(req.query.target)) {
+      return {
+        available: false,
+        accounts: [],
+        url: "",
+        error: `unknown autonomyTarget "${req.query.target}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+        fetchedAt: new Date().toISOString(),
+        entry: taskEntry,
+      };
+    }
+    const target = normalizeAutonomyTarget(req.query.target);
+    const client = clientFor(target);
+    const result: AutonomyAccountListResult = client
+      ? await client.listAccounts()
       : {
           available: false,
           accounts: [],
           url: "",
-          error: "autonomy 未配置（AUTONOMY_API_URL）",
+          error: missingClientError(target),
           fetchedAt: new Date().toISOString(),
         };
-    return { ...result, entry: taskEntry };
+    return { ...result, entry: taskEntry, target };
   });
 
   app.get<{ Params: { taskId: string } }>(
     "/api/autonomy/tasks/:taskId",
     async (req, reply) => {
-      if (!autonomy) {
-        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
-      }
-      const result = await autonomy.getTask(req.params.taskId);
+      const { result } = await lookupAutonomyTask(req.params.taskId);
       if (result.available && result.task) {
         return { ...result.task, fetchedAt: result.fetchedAt };
       }
@@ -459,9 +551,6 @@ export async function registerRoutes(
     Params: { taskId: string };
     Body: { message?: string; images?: IncomingImage[]; mode?: string };
   }>("/api/autonomy/tasks/:taskId/messages", async (req, reply) => {
-    if (!autonomy) {
-      return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
-    }
     const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
     const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
     if (rawImages && rawImages.length > 0) {
@@ -477,18 +566,18 @@ export async function registerRoutes(
       return reply.code(400).send({ error: parsedMode.error });
     }
     const executorTaskId = req.params.taskId.trim();
-    const known = await autonomy.getTask(executorTaskId);
-    if (!known.available) {
+    const found = await lookupAutonomyTask(executorTaskId);
+    if (!found.client || !found.result.available) {
       return reply
-        .code(known.status === 404 ? 404 : 503)
+        .code(found.result.status === 404 ? 404 : 503)
         .send({
           error:
-            known.status === 404
+            found.result.status === 404
               ? `autonomy 没有这条任务（${executorTaskId}）：没有投递`
-              : (known.error ?? "autonomy 不可达"),
+              : (found.result.error ?? "autonomy 不可达"),
         });
     }
-    const sent = await autonomy.addInstruction({
+    const sent = await found.client.addInstruction({
       taskId: executorTaskId,
       message,
       mode: parsedMode.mode,
@@ -802,6 +891,11 @@ export async function registerRoutes(
        * 是两个池子、两个字段，故意不共用一个名字。不传 = 交给 autonomy 的池子解析。
        */
       autonomyAccountId?: string;
+      /**
+       * 哪一台 autonomy：`local`（本机 `AUTONOMY_API_URL`）/ `remote`（海外
+       * `AUTONOMY_REMOTE_API_URL`）。只在 `agentPath=autonomy` 时有意义；缺省 `local`。
+       */
+      autonomyTarget?: string;
     };
   }>("/api/tasks", async (req, reply) => {
     const body = req.body ?? {};
@@ -845,6 +939,18 @@ export async function registerRoutes(
           "autonomyAccountId 只在 agentPath=autonomy 时有意义（本机 agent 的账号用 accountId）",
       });
     }
+    if (body.autonomyTarget !== undefined && !isAutonomyTarget(body.autonomyTarget)) {
+      return reply.code(400).send({
+        error: `unknown autonomyTarget "${body.autonomyTarget}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+      });
+    }
+    if (body.autonomyTarget !== undefined && agentPath !== "autonomy") {
+      return reply.code(400).send({
+        error:
+          "autonomyTarget 只在 agentPath=autonomy 时有意义（本机 agent 不走 autonomy）",
+      });
+    }
+    const autonomyTarget = normalizeAutonomyTarget(body.autonomyTarget);
     try {
       const task = gateway.createTask({
         title: body.title,
@@ -859,17 +965,19 @@ export async function registerRoutes(
         // 没传 = 用默认目标（合入主分支），保证新建的任务都有明确交付目标。
         goal: body.goal ?? DEFAULT_TASK_GOAL,
         agentPath,
+        autonomyTarget,
       });
       if (agentPath === "autonomy") {
-        // 任务已在我们库里建好 → **执行**交给 autonomy（agent 由它的 runtime 创建）。
+        // 任务已在我们库里建好 → **执行**交给选定的那一台 autonomy（本机或海外）。
         // 交接失败时任务**保留**并标 error + 原文（不静默消失、也不回落成本机执行）。
-        const handed = autonomy
-          ? await autonomy.createTask({
+        const client = clientFor(autonomyTarget);
+        const handed = client
+          ? await client.createTask({
               description,
               ...(task.projectId ? { projectId: task.projectId } : {}),
               ...(autonomyAccountId ? { accountId: autonomyAccountId } : {}),
             })
-          : { ok: false as const, error: "autonomy 未配置（AUTONOMY_API_URL）" };
+          : { ok: false as const, error: missingClientError(autonomyTarget) };
         if (!handed.ok) {
           gateway.recordTaskExecutorFailure(task.taskId, handed.error);
           const status =
@@ -927,10 +1035,13 @@ export async function registerRoutes(
           error: "这条任务的 agent 不是 autonomy 创建的（没有执行方记录）",
         });
       }
-      if (!autonomy) {
-        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      const client = clientFor(task.autonomyTarget);
+      if (!client) {
+        return reply
+          .code(503)
+          .send({ error: missingClientError(normalizeAutonomyTarget(task.autonomyTarget)) });
       }
-      const result = await autonomy.getTask(executorTaskId);
+      const result = await client.getTask(executorTaskId);
       if (result.available && result.task) {
         return {
           ...result.task,
@@ -1213,10 +1324,13 @@ export async function registerRoutes(
           error: "这条任务的 agent 不是 autonomy 创建的（没有执行方记录）",
         });
       }
-      if (!autonomy) {
-        return reply.code(503).send({ error: "autonomy 未配置（AUTONOMY_API_URL）" });
+      const client = clientFor(detail.task.autonomyTarget);
+      if (!client) {
+        return reply.code(503).send({
+          error: missingClientError(normalizeAutonomyTarget(detail.task.autonomyTarget)),
+        });
       }
-      const known = await autonomy.getTask(executorTaskId);
+      const known = await client.getTask(executorTaskId);
       if (!known.available) {
         return reply
           .code(known.status === 404 ? 404 : 503)
@@ -1227,7 +1341,7 @@ export async function registerRoutes(
                 : (known.error ?? "autonomy 不可达"),
           });
       }
-      const sent = await autonomy.addInstruction({
+      const sent = await client.addInstruction({
         taskId: executorTaskId,
         message: text,
         mode: parsedMode.mode,

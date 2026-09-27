@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import type {
   AutonomyAccount,
+  AutonomyTarget,
+  AutonomyTargets,
   ModelInfo,
   ProviderAccount,
   ProviderInfo,
@@ -51,6 +53,8 @@ interface Props {
     description: string;
     /** autonomy 账号池里的账号 id；不传 = 由它的池子解析。 */
     accountId?: string;
+    /** 本机 / 海外；缺省本机。 */
+    autonomyTarget?: AutonomyTarget;
   }) => Promise<void>;
 }
 
@@ -78,6 +82,11 @@ export default function CreateTaskDialog({
   const [autonomyAccounts, setAutonomyAccounts] = useState<AutonomyAccount[]>([]);
   const [autonomyAccountsError, setAutonomyAccountsError] = useState<string | null>(null);
   const [autonomyAccountId, setAutonomyAccountId] = useState("");
+  /** 本机 / 海外：只在「交给 autonomy」时有意义，默认本机。 */
+  const [autonomyTarget, setAutonomyTarget] = useState<AutonomyTarget>("local");
+  const [autonomyTargets, setAutonomyTargets] = useState<AutonomyTargets | null>(
+    null,
+  );
   const [envDefault, setEnvDefault] = useState("cursor");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [resolved, setResolved] = useState<string | undefined>();
@@ -99,6 +108,7 @@ export default function CreateTaskDialog({
     setModel(projectDefaultModel ?? "");
     setAccountId("");
     setAutonomyAccountId("");
+    setAutonomyTarget("local");
     setError(null);
     // 只留新入口时（TASK_ENTRY=autonomy）直接落在新入口上。
     setEntryMode(entry === "autonomy" ? "autonomy" : "gateway");
@@ -109,10 +119,17 @@ export default function CreateTaskDialog({
     void api.listAccounts({ enabled: true }).then((r) => {
       setAccounts(r.accounts);
     }).catch(() => setAccounts([]));
-    // autonomy 的池子：读不到就只是「这个下拉没内容」（读是 best-effort），
-    // 页面照旧能建任务（不传账号 = 交给它的池子解析）。
     void api
-      .autonomyAccounts()
+      .autonomyTargets()
+      .then(setAutonomyTargets)
+      .catch(() => setAutonomyTargets(null));
+  }, [open, projectDefaultProvider, projectDefaultModel, projectId, entry]);
+
+  useEffect(() => {
+    if (!open) return;
+    // 选哪一台，就读那一台的账号池（两个池子、两套账号）。
+    void api
+      .autonomyAccounts(autonomyTarget)
       .then((r) => {
         setAutonomyAccounts(r.accounts ?? []);
         setAutonomyAccountsError(r.available ? null : (r.error ?? "读不到 autonomy 的账号池"));
@@ -121,7 +138,7 @@ export default function CreateTaskDialog({
         setAutonomyAccounts([]);
         setAutonomyAccountsError(errorText(e));
       });
-  }, [open, projectDefaultProvider, projectDefaultModel, projectId, entry]);
+  }, [open, autonomyTarget]);
 
   const effectiveProvider =
     provider || projectDefaultProvider || envDefault || "cursor";
@@ -155,15 +172,31 @@ export default function CreateTaskDialog({
   const autonomyMode = entryMode === "autonomy";
   /** 入口选择器里「交给 autonomy」按钮用（JSX 里名字短一点好读）。 */
   const autoMode0 = autonomyMode;
-  const autonomyDown = autonomy != null && !autonomy.available;
+  const selectedTargetMeta =
+    autonomyTarget === "remote"
+      ? autonomyTargets?.remote
+      : (autonomyTargets?.local ??
+        (autonomy
+          ? { available: autonomy.available, error: autonomy.error }
+          : null));
+  const autonomyDown = selectedTargetMeta != null && !selectedTargetMeta.available;
   /** 选中的那条 autonomy 账号（下拉的「留空」= 交给它的池子解析）。 */
   const chosenAutonomyAccount = autonomyAccounts.find(
     (a) => a.accountId === autonomyAccountId,
   );
+  const selectedBackend =
+    autonomyTarget === "remote"
+      ? autonomyTargets?.remote?.llmBackend
+      : (autonomyTargets?.local?.llmBackend ?? autonomy?.backend);
+  const selectedModel =
+    autonomyTarget === "remote"
+      ? autonomyTargets?.remote?.llmModel
+      : (autonomyTargets?.local?.llmModel ?? autonomy?.model);
+  const targetLabel = autonomyTarget === "remote" ? "远端（海外机）" : "本机";
   const autonomyHint = autonomyMode
     ? autonomyDown
-      ? `autonomy 不可达：${autonomy?.error ?? "未配置"} —— 先修好它，或改用「本机 agent」入口。`
-      : `任务由 autonomy 的 agent 执行，类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。${
+      ? `${targetLabel} autonomy 不可达：${selectedTargetMeta?.error ?? "未配置"} —— 先修好它，或改选另一台 / 「本机 agent」入口。`
+      : `任务由${targetLabel} autonomy 的 agent 执行，类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。${
           chosenAutonomyAccount
             ? `这条任务跑在 ${chosenAutonomyAccount.harness}/${
                 chosenAutonomyAccount.vendor
@@ -173,8 +206,8 @@ export default function CreateTaskDialog({
                 chosenAutonomyAccount.agentRootWorkspace || "运行时默认"
               }。`
             : `账号留空 = 由它的账号池解析（该 harness 的默认账号；进程当前 ${
-                autonomy?.backend ?? "未知"
-              }${autonomy?.model ? ` / ${autonomy.model}` : ""}）。`
+                selectedBackend ?? "未知"
+              }${selectedModel ? ` / ${selectedModel}` : ""}）。`
         }`
     : "";
   const canSubmit =
@@ -203,6 +236,7 @@ export default function CreateTaskDialog({
         await onCreateAutonomy({
           description: description.trim(),
           accountId: autonomyAccountId.trim() || undefined,
+          autonomyTarget,
         });
       } else {
         await onCreate({
@@ -267,6 +301,48 @@ export default function CreateTaskDialog({
               {autoMode0
                 ? autonomyHint
                 : "在本项目里建任务，由控制面的 agent 执行（现有入口，行为与以前一致）。"}
+            </span>
+          </div>
+        )}
+        {autonomyMode && (
+          <div className="runtime-field runtime-field-wide">
+            <span className="runtime-field-label">执行位置</span>
+            <div className="intent-type-chips">
+              <button
+                type="button"
+                className={`intent-type-chip ${
+                  autonomyTarget === "local" ? "selected" : ""
+                }`}
+                title="本机 autonomy（AUTONOMY_API_URL，默认 127.0.0.1:4300）"
+                onClick={() => {
+                  setAutonomyTarget("local");
+                  setAutonomyAccountId("");
+                }}
+              >
+                本机
+              </button>
+              <button
+                type="button"
+                className={`intent-type-chip ${
+                  autonomyTarget === "remote" ? "selected" : ""
+                }`}
+                title={
+                  autonomyTargets && !autonomyTargets.remote.configured
+                    ? "远端 autonomy 未配置（AUTONOMY_REMOTE_API_URL）"
+                    : "海外机 autonomy（AUTONOMY_REMOTE_API_URL）"
+                }
+                onClick={() => {
+                  setAutonomyTarget("remote");
+                  setAutonomyAccountId("");
+                }}
+              >
+                远端
+              </button>
+            </div>
+            <span className="intent-hint">
+              {autonomyTarget === "remote"
+                ? "任务交给海外机上的 autonomy 执行（与本机是两台 runtime、两套账号池）。"
+                : "任务交给本机 autonomy 执行。"}
             </span>
           </div>
         )}

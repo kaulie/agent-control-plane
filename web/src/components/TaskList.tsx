@@ -141,6 +141,11 @@ export default function TaskList({
               </div>
               <div className="task-meta">
                 #{t.taskId.slice(-6)} · {agentPathLabel(t.agentPath)}
+                {t.agentPath === "autonomy" && t.autonomyTarget === "remote"
+                  ? " · 远端"
+                  : t.agentPath === "autonomy" && t.autonomyTarget === "local"
+                    ? " · 本机"
+                    : ""}
                 {/* provider/model：autonomy 侧拿不到就不显示这一段（留空，不写占位）。 */}
                 {t.provider ? ` · ${t.provider}${t.model ? `/${t.model}` : ""}` : ""}
                 {" · "}

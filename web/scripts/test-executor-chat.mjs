@@ -1,8 +1,8 @@
 /**
  * 「autonomy 创建的 agent 也要能 chat」的界面口径：
  *
- * 1. 输入框在（同一个 ChatInput），但**只收文字**：不出现附件、不出现 Plan/Agent 模式
- *    （执行方没有这些概念 → 不置灰、不占位）；
+ * 1. 输入框在（同一个 ChatInput），但**只收文字**：不出现附件、不出现 Plan/Agent
+ *    （执行方是 Chat/Command，没有 Plan/Agent → 不置灰、不占位）；
  * 2. 执行方忙的时候措辞是「排队」（它就是排队，不会被拒）；没有停止按钮（这轮没接停止）；
  * 3. 投递回执只写接口真给了的：`message_id` / 「前面还有几条」/ 状态；拿不到的不写行。
  *
@@ -42,14 +42,16 @@ assert.equal(
   "它没给 id / 排队数 / 状态就都不写（不占位）"
 );
 
-// ---- 3) 输入框：文字-only、没有模式选择、没有停止、忙时说排队 ----
+// ---- 3) 输入框：文字-only、Chat/Command（不是 Plan/Agent）、没有停止、忙时说排队 ----
 {
   const idle = render({ status: "stopped" });
   assert.ok(idle.includes("发给执行方"), "写明这消息是投给执行方的");
   assert.ok(idle.includes("<textarea"), "有输入框");
   assert.ok(idle.includes("send") || idle.includes("Send"), "有发送按钮");
   assert.ok(!idle.includes("btn-attach"), "不显示附件（执行方只收文字）");
-  assert.ok(!idle.includes("mode-select"), "不显示 Plan/Agent 模式（它没有这个模式）");
+  assert.ok(idle.includes("mode-select"), "执行方有 Chat/Command 下拉");
+  assert.ok(idle.includes('value="command"') && idle.includes('value="chat"'), "选项是 Chat/Command");
+  assert.ok(!idle.includes('value="agent"') && !idle.includes('value="plan"'), "不显示 Plan/Agent（它没有这个模式）");
   assert.ok(!idle.includes("btn-stop"), "没有停止按钮（不置灰）");
   assert.ok(idle.includes("发一条指令给执行方"), "空闲时的措辞");
 
@@ -73,5 +75,5 @@ assert.equal(
 }
 
 console.log(
-  "PASS: 执行方 chat 输入框（只收文字 / 忙则排队 / 回执只写真拿到的 / 首帧不占位）"
+  "PASS: 执行方 chat 输入框（只收文字 / Chat·Command / 忙则排队 / 回执只写真拿到的 / 首帧不占位）"
 );

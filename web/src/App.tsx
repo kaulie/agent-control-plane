@@ -1319,6 +1319,7 @@ export default function App() {
                 orgId={detailProject?.department?.departmentId}
                 orgName={detailProject?.department?.departmentName}
                 agentPath={detail.task.agentPath ?? "control-plane"}
+                autonomyTarget={detail.task.autonomyTarget}
               />
               {/* agent 由 autonomy 创建：读它的状态/进展（代理）；跑不了的本地块一概不画。 */}
               {detail.task.agentPath === "autonomy" ? (

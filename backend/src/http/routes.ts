@@ -416,6 +416,16 @@ export async function registerRoutes(
     return { ...status, entry: taskEntry, target };
   });
 
+  app.get<{ Params: { target: string } }>("/api/autonomy/:target/meta", async (req, reply) => {
+    const parsed = parseTargetRequired(req.params.target);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    const client = clientFor(parsed.target);
+    const status: AutonomyStatus = client
+      ? await client.status()
+      : missingStatus(parsed.target);
+    return { ...status, entry: taskEntry, target: parsed.target };
+  });
+
   app.get("/api/autonomy/targets", async () => {
     const local = autonomy ? await autonomy.status() : missingStatus("local");
     const remote = autonomyRemote
@@ -444,6 +454,18 @@ export async function registerRoutes(
     return { ok: true, target: normalizeAutonomyTarget(raw) };
   };
 
+  const parseTargetRequired = (
+    raw: string | undefined,
+  ): { ok: true; target: AutonomyTarget } | { ok: false; error: string } => {
+    if (!isAutonomyTarget(raw)) {
+      return {
+        ok: false,
+        error: `unknown autonomyTarget "${raw ?? ""}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+      };
+    }
+    return { ok: true, target: raw.trim() as AutonomyTarget };
+  };
+
   /** 对账行按**指定的那一台**查，绝不本机优先再扫海外（切开后两边可能有同一批 id）。 */
   const lookupAutonomyTask = async (taskId: string, target: AutonomyTarget) => {
     const client = clientFor(target);
@@ -461,6 +483,39 @@ export async function registerRoutes(
     return { client, result: await client.getTask(taskId) };
   };
 
+  const listAutonomyTasks = async (target: AutonomyTarget, projectId?: string) => {
+    const client = clientFor(target);
+    const result: AutonomyTaskListResult = client
+      ? await client.listTasks({ projectId: projectId?.trim() || undefined })
+      : {
+          available: false,
+          tasks: [],
+          url: "",
+          error: missingClientError(target),
+          fetchedAt: new Date().toISOString(),
+        };
+    return {
+      ...result,
+      entry: taskEntry,
+      target,
+      tasks: result.tasks.map((task) => ({ ...task, autonomyTarget: target })),
+    };
+  };
+
+  const accountsFor = async (target: AutonomyTarget) => {
+    const client = clientFor(target);
+    const result: AutonomyAccountListResult = client
+      ? await client.listAccounts()
+      : {
+          available: false,
+          accounts: [],
+          url: "",
+          error: missingClientError(target),
+          fetchedAt: new Date().toISOString(),
+        };
+    return { ...result, entry: taskEntry, target };
+  };
+
   app.get<{ Querystring: { projectId?: string; target?: string } }>(
     "/api/autonomy/tasks",
     async (req) => {
@@ -474,19 +529,16 @@ export async function registerRoutes(
           entry: taskEntry,
         };
       }
-      const target = normalizeAutonomyTarget(req.query.target);
-      const client = clientFor(target);
-      const projectId = req.query.projectId?.trim() || undefined;
-      const result: AutonomyTaskListResult = client
-        ? await client.listTasks({ projectId })
-        : {
-            available: false,
-            tasks: [],
-            url: "",
-            error: missingClientError(target),
-            fetchedAt: new Date().toISOString(),
-          };
-      return { ...result, entry: taskEntry, target };
+      return listAutonomyTasks(normalizeAutonomyTarget(req.query.target), req.query.projectId);
+    },
+  );
+
+  app.get<{ Params: { target: string }; Querystring: { projectId?: string } }>(
+    "/api/autonomy/:target/tasks",
+    async (req, reply) => {
+      const parsed = parseTargetRequired(req.params.target);
+      if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+      return listAutonomyTasks(parsed.target, req.query.projectId);
     },
   );
 
@@ -510,17 +562,13 @@ export async function registerRoutes(
       };
     }
     const target = normalizeAutonomyTarget(req.query.target);
-    const client = clientFor(target);
-    const result: AutonomyAccountListResult = client
-      ? await client.listAccounts()
-      : {
-          available: false,
-          accounts: [],
-          url: "",
-          error: missingClientError(target),
-          fetchedAt: new Date().toISOString(),
-        };
-    return { ...result, entry: taskEntry, target };
+    return accountsFor(target);
+  });
+
+  app.get<{ Params: { target: string } }>("/api/autonomy/:target/accounts", async (req, reply) => {
+    const parsed = parseTargetRequired(req.params.target);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    return accountsFor(parsed.target);
   });
 
   app.get<{ Params: { taskId: string }; Querystring: { target?: string } }>(
@@ -532,9 +580,32 @@ export async function registerRoutes(
       }
       const { result } = await lookupAutonomyTask(req.params.taskId, parsed.target);
       if (result.available && result.task) {
-        return { ...result.task, fetchedAt: result.fetchedAt };
+        return {
+          ...result.task,
+          fetchedAt: result.fetchedAt,
+          autonomyTarget: parsed.target,
+        };
       }
       // 404（没有这条 task）原样透传；不可达 / 超时 → 503。
+      return reply
+        .code(result.status === 404 ? 404 : 503)
+        .send({ error: result.error ?? "autonomy 不可达" });
+    },
+  );
+
+  app.get<{ Params: { target: string; taskId: string } }>(
+    "/api/autonomy/:target/tasks/:taskId",
+    async (req, reply) => {
+      const parsed = parseTargetRequired(req.params.target);
+      if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+      const { result } = await lookupAutonomyTask(req.params.taskId, parsed.target);
+      if (result.available && result.task) {
+        return {
+          ...result.task,
+          fetchedAt: result.fetchedAt,
+          autonomyTarget: parsed.target,
+        };
+      }
       return reply
         .code(result.status === 404 ? 404 : 503)
         .send({ error: result.error ?? "autonomy 不可达" });
@@ -551,11 +622,14 @@ export async function registerRoutes(
    * 口径与另一条完全一致：只收文字（带图 400 且不投递）、投递前先确认它真有这条 task（未知 id 会被
    * autonomy 当成**新建**任务）、不可达 / 被拒 → 4xx/5xx + 原文、**我方库一行都不写**（纯代理）。
    */
-  app.post<{
-    Params: { taskId: string };
-    Querystring: { target?: string };
-    Body: { message?: string; images?: IncomingImage[]; mode?: string; target?: string };
-  }>("/api/autonomy/tasks/:taskId/messages", async (req, reply) => {
+  const postAutonomyMessage = async (
+    req: {
+      params: { taskId: string };
+      body?: { message?: string; images?: IncomingImage[]; mode?: string };
+    },
+    reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+    target: AutonomyTarget,
+  ) => {
     const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
     const rawImages = Array.isArray(req.body?.images) ? req.body.images : undefined;
     if (rawImages && rawImages.length > 0) {
@@ -571,11 +645,7 @@ export async function registerRoutes(
       return reply.code(400).send({ error: parsedMode.error });
     }
     const executorTaskId = req.params.taskId.trim();
-    const parsed = parseTargetQuery(req.query.target ?? req.body?.target);
-    if (!parsed.ok) {
-      return reply.code(400).send({ error: parsed.error });
-    }
-    const found = await lookupAutonomyTask(executorTaskId, parsed.target);
+    const found = await lookupAutonomyTask(executorTaskId, target);
     if (!found.client || !found.result.available) {
       return reply
         .code(found.result.status === 404 ? 404 : 503)
@@ -600,12 +670,36 @@ export async function registerRoutes(
     return {
       executor: true as const,
       executorTaskId: sent.taskId,
+      autonomyTarget: target,
       ...(sent.agentId != null ? { executorAgentId: sent.agentId } : {}),
       ...(sent.status ? { executorStatus: sent.status } : {}),
       ...(sent.messageId != null ? { messageId: sent.messageId } : {}),
       ...(sent.queued != null ? { queueAhead: sent.queued } : {}),
       inputMode: parsedMode.mode,
     };
+  };
+
+  app.post<{
+    Params: { taskId: string };
+    Querystring: { target?: string };
+    Body: { message?: string; images?: IncomingImage[]; mode?: string; target?: string };
+  }>("/api/autonomy/tasks/:taskId/messages", async (req, reply) => {
+    const parsed = parseTargetQuery(req.query.target ?? req.body?.target);
+    if (!parsed.ok) {
+      return reply.code(400).send({ error: parsed.error });
+    }
+    return postAutonomyMessage(req, reply, parsed.target);
+  });
+
+  app.post<{
+    Params: { target: string; taskId: string };
+    Body: { message?: string; images?: IncomingImage[]; mode?: string };
+  }>("/api/autonomy/:target/tasks/:taskId/messages", async (req, reply) => {
+    const parsed = parseTargetRequired(req.params.target);
+    if (!parsed.ok) {
+      return reply.code(400).send({ error: parsed.error });
+    }
+    return postAutonomyMessage(req, reply, parsed.target);
   });
 
   // ---- settings ----
@@ -1055,6 +1149,7 @@ export async function registerRoutes(
         return {
           ...result.task,
           executorTaskId,
+          autonomyTarget: normalizeAutonomyTarget(task.autonomyTarget),
           ...(task.executorAgentId ? { executorAgentId: task.executorAgentId } : {}),
           fetchedAt: result.fetchedAt,
         };
@@ -1364,6 +1459,7 @@ export async function registerRoutes(
       return {
         executor: true as const,
         executorTaskId: sent.taskId,
+        autonomyTarget: normalizeAutonomyTarget(detail.task.autonomyTarget),
         ...(sent.agentId != null ? { executorAgentId: sent.agentId } : {}),
         ...(sent.status ? { executorStatus: sent.status } : {}),
         ...(sent.messageId != null ? { messageId: sent.messageId } : {}),

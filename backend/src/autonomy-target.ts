@@ -25,3 +25,13 @@ export function isAutonomyTarget(value: unknown): value is AutonomyTarget {
 export function normalizeAutonomyTarget(value: unknown): AutonomyTarget {
   return isAutonomyTarget(value) ? (value.trim() as AutonomyTarget) : DEFAULT_AUTONOMY_TARGET;
 }
+
+/** 页面 / 回包上的短名：本地 = 本机 autonomy，海外 = agent-oversea。 */
+export const AUTONOMY_TARGET_LABEL: Record<AutonomyTarget, string> = {
+  local: "本地",
+  remote: "海外",
+};
+
+export function autonomyTargetLabel(value: unknown): string {
+  return AUTONOMY_TARGET_LABEL[normalizeAutonomyTarget(value)];
+}

@@ -386,10 +386,11 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   const send = (url, payload) =>
     dual.inject({ method: "POST", url, headers: uiHeaders, payload });
 
-  const rem = await send("/api/autonomy/tasks/task-exec-1/messages?target=remote", {
+  const rem = await send("/api/autonomy/remote/tasks/task-exec-1/messages", {
     message: "海外接着干",
   });
   assert.equal(rem.statusCode, 202);
+  assert.equal((await json(rem)).autonomyTarget, "remote");
   assert.equal(local.calls.filter((c) => c[0] === "addInstruction").length, 0, "不打本机");
   assert.deepEqual(remote.calls.filter((c) => c[0] === "addInstruction").at(-1)[1], {
     taskId: "task-exec-1",

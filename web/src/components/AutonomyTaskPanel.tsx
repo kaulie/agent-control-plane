@@ -15,6 +15,7 @@ import ExecutorPhaseBar from "./ExecutorPhaseBar";
 import ExecutorBlockedPanel from "./ExecutorBlockedPanel";
 import TaskIdsBar from "./TaskIdsBar";
 import type { AutonomyMeta, AutonomyTarget, TaskListRow } from "../types";
+import { autonomyTargetLabel } from "../autonomy-target";
 
 /**
  * 「agent 由 autonomy 创建」那部分数据的展示件（和老任务共用同一套版式）。
@@ -59,7 +60,7 @@ export function ExecutorTaskBody({
       const next =
         via === "task"
           ? await api.taskExecutor(taskId)
-          : await api.autonomyTask(taskId, autonomyTarget);
+          : await api.autonomyTask(taskId, autonomyTarget ?? "local");
       dispatch({ type: "ok", detail: next });
     } catch (e) {
       // 读失败**不清内容**：保留上一次成功读到的 detail，只记下原因；页面继续显示已有内容，
@@ -101,7 +102,7 @@ export function ExecutorTaskBody({
       <div className="exec-banner" role="note">
         <span className="exec-banner-badge">autonomy</span>
         <span className="exec-banner-text">
-          这条任务的 agent 由 <b>autonomy</b> 创建并执行 —— 状态、进展、对话都在它那边，这里只代理。
+          这条任务的 agent 由 <b>autonomy（{autonomyTargetLabel(autonomyTarget ?? row?.autonomyTarget)}）</b> 创建并执行 —— 状态、进展、对话都在它那边，这里只代理。
         </span>
       </div>
 
@@ -191,7 +192,7 @@ export function ExecutorTaskBody({
           key={`${autonomyTarget ?? "local"}:${taskId}`}
           via="executor"
           taskId={taskId}
-          autonomyTarget={autonomyTarget}
+          autonomyTarget={autonomyTarget ?? "local"}
           status={status}
           onDelivered={() => void load()}
         />
@@ -229,6 +230,7 @@ export default function AutonomyTaskPanel({
         {...(orgId ? { orgId } : {})}
         {...(orgName ? { orgName } : {})}
         agentPath="autonomy"
+        autonomyTarget={autonomyTarget ?? row?.autonomyTarget}
       />
       <ExecutorTaskBody
         taskId={taskId}

@@ -132,6 +132,18 @@ function fakeAutonomy(over = {}) {
       );
     },
     /** 它的账号池（`GET /api/accounts`）：只有掩码，没有 key 原文。 */
+    async listAccountModels(opts) {
+      calls.push(["listAccountModels", opts]);
+      if (over.models) return over.models;
+      return {
+        available: true,
+        harness: opts.harness,
+        vendor: opts.vendor,
+        models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        url: "http://127.0.0.1:4300",
+        fetchedAt: "2026-09-21T00:00:00.000Z",
+      };
+    },
     async listAccounts() {
       calls.push(["listAccounts"]);
       if (over.accounts) return over.accounts;
@@ -423,6 +435,34 @@ const json = async (res) => JSON.parse(res.body);
     { description: "跑在 deepseek 上", projectId: PROJECT_ID, accountId: "acct-1" },
     "账号 id trim 后带过去",
   );
+
+  const withModel = await post("/api/tasks", {
+    description: "指定模型",
+    projectId: PROJECT_ID,
+    agentPath: "autonomy",
+    autonomyAccountId: "acct-1",
+    model: "  deepseek-v4-pro  ",
+  });
+  assert.equal(withModel.statusCode, 201);
+  const saidModel = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
+  assert.equal(saidModel.model, "deepseek-v4-pro", "model trim 后带过去");
+  assert.equal((await json(withModel)).model, "deepseek-v4-pro", "我们的任务行也记下选中的 model");
+
+  const catalogue = await app.inject({
+    method: "GET",
+    url: "/api/autonomy/local/accounts/models?harness=cline&vendor=deepseek&accountId=acct-1",
+  });
+  assert.equal(catalogue.statusCode, 200);
+  const cat = await json(catalogue);
+  assert.equal(cat.available, true);
+  assert.equal(cat.target, "local");
+  assert.deepEqual(cat.models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+  const listed = autonomy.calls.filter((c) => c[0] === "listAccountModels").at(-1)[1];
+  assert.deepEqual(listed, {
+    harness: "cline",
+    vendor: "deepseek",
+    accountId: "acct-1",
+  });
 
   // 不选账号 → 请求里**没有** accountId（= 交给它的池子解析，而不是「传个空字符串」）
   const without = await post("/api/tasks", {

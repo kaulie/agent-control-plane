@@ -2,6 +2,7 @@ import type {
   AgentBoard,
   ProviderAccount,
   AutonomyAccountList,
+  AutonomyAccountModels,
   AutonomyMeta,
   AutonomyTarget,
   AutonomyTargets,
@@ -274,6 +275,24 @@ export const api = {
     fetch(`${BASE}/autonomy/${target}/accounts`).then((r) =>
       j<AutonomyAccountList>(r),
     ),
+
+  /**
+   * autonomy 某个 harness / vendor 的模型目录 —— 「交给 autonomy」选完 provider
+   * 后 Model 下拉的数据源。不可达时 `available:false`，不是 500。
+   */
+  autonomyAccountModels: (
+    target: AutonomyTarget = "local",
+    filter: { harness: string; vendor?: string; accountId?: string },
+  ) => {
+    const params = new URLSearchParams();
+    if (filter.harness) params.set("harness", filter.harness);
+    if (filter.vendor) params.set("vendor", filter.vendor);
+    if (filter.accountId) params.set("accountId", filter.accountId);
+    const q = params.toString() ? `?${params.toString()}` : "";
+    return fetch(`${BASE}/autonomy/${target}/accounts/models${q}`).then((r) =>
+      j<AutonomyAccountModels>(r),
+    );
+  },
 
   /**
    * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读（控制面代理）。

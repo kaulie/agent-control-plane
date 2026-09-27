@@ -780,6 +780,19 @@ export interface AutonomyAccountList {
   target?: AutonomyTarget;
 }
 
+/** `GET /api/autonomy/{target}/accounts/models`：选完 provider 后的模型目录。 */
+export interface AutonomyAccountModels {
+  available: boolean;
+  harness: string;
+  vendor?: string;
+  models: string[];
+  url: string;
+  error?: string;
+  fetchedAt: string;
+  entry?: TaskEntry;
+  target?: AutonomyTarget;
+}
+
 /** `POST /api/autonomy/tasks` 的 202（autonomy 已受理）。 */
 export interface AutonomyAccepted {
   taskId: string;

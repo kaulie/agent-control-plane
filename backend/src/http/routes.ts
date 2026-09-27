@@ -14,6 +14,7 @@ import {
 } from "../autonomy-target.js";
 import type {
   AutonomyAccountListResult,
+  AutonomyAccountModelsResult,
   AutonomyCreateResult,
   AutonomyInstructionResult,
   AutonomyStatus,
@@ -48,11 +49,17 @@ type AutonomyProxy = {
   status(opts?: { refresh?: boolean }): Promise<AutonomyStatus>;
   listTasks(opts?: { projectId?: string }): Promise<AutonomyTaskListResult>;
   listAccounts(): Promise<AutonomyAccountListResult>;
+  listAccountModels(opts: {
+    harness: string;
+    vendor?: string;
+    accountId?: string;
+  }): Promise<AutonomyAccountModelsResult>;
   getTask(taskId: string): Promise<AutonomyTaskDetailResult>;
   createTask(input: {
     description: string;
     projectId?: string;
     accountId?: string;
+    model?: string;
   }): Promise<AutonomyCreateResult>;
   addInstruction(input: {
     taskId: string;
@@ -571,6 +578,59 @@ export async function registerRoutes(
     return accountsFor(parsed.target);
   });
 
+  const modelsFor = async (
+    target: AutonomyTarget,
+    query: { harness?: string; vendor?: string; accountId?: string },
+  ): Promise<AutonomyAccountModelsResult & { entry: TaskEntry; target: AutonomyTarget }> => {
+    const harness = query.harness?.trim() ?? "";
+    const client = clientFor(target);
+    const result: AutonomyAccountModelsResult = client
+      ? await client.listAccountModels({
+          harness,
+          ...(query.vendor?.trim() ? { vendor: query.vendor.trim() } : {}),
+          ...(query.accountId?.trim() ? { accountId: query.accountId.trim() } : {}),
+        })
+      : {
+          available: false,
+          harness,
+          models: [],
+          url: "",
+          error: missingClientError(target),
+          fetchedAt: new Date().toISOString(),
+        };
+    return { ...result, entry: taskEntry, target };
+  };
+
+  /**
+   * 某个 harness / vendor 的模型目录 —— 「交给 autonomy」选完 provider（账号）后
+   * 那个 Model 下拉的数据源。口径与账号池一致：best-effort，不可达 → 200 + available:false。
+   */
+  app.get<{
+    Querystring: { target?: string; harness?: string; vendor?: string; accountId?: string };
+  }>("/api/autonomy/accounts/models", async (req) => {
+    if (req.query.target !== undefined && !isAutonomyTarget(req.query.target)) {
+      return {
+        available: false,
+        harness: req.query.harness?.trim() ?? "",
+        models: [],
+        url: "",
+        error: `unknown autonomyTarget "${req.query.target}". Supported: ${AUTONOMY_TARGETS.join(", ")}`,
+        fetchedAt: new Date().toISOString(),
+        entry: taskEntry,
+      };
+    }
+    return modelsFor(normalizeAutonomyTarget(req.query.target), req.query);
+  });
+
+  app.get<{
+    Params: { target: string };
+    Querystring: { harness?: string; vendor?: string; accountId?: string };
+  }>("/api/autonomy/:target/accounts/models", async (req, reply) => {
+    const parsed = parseTargetRequired(req.params.target);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    return modelsFor(parsed.target, req.query);
+  });
+
   app.get<{ Params: { taskId: string }; Querystring: { target?: string } }>(
     "/api/autonomy/tasks/:taskId",
     async (req, reply) => {
@@ -1074,11 +1134,13 @@ export async function registerRoutes(
         // 任务已在我们库里建好 → **执行**交给选定的那一台 autonomy（本机或海外）。
         // 交接失败时任务**保留**并标 error + 原文（不静默消失、也不回落成本机执行）。
         const client = clientFor(autonomyTarget);
+        const autonomyModel = body.model?.trim() ?? "";
         const handed = client
           ? await client.createTask({
               description,
               ...(task.projectId ? { projectId: task.projectId } : {}),
               ...(autonomyAccountId ? { accountId: autonomyAccountId } : {}),
+              ...(autonomyModel ? { model: autonomyModel } : {}),
             })
           : { ok: false as const, error: missingClientError(autonomyTarget) };
         if (!handed.ok) {

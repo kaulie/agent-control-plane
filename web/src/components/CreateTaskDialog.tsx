@@ -48,11 +48,15 @@ interface Props {
     model?: string;
     error?: string;
   } | null;
-  /** 「交给 autonomy」入口：只传描述 + 可选的账号（provider/model/类型/目标都不适用，见契约）。 */
+  /** 「交给 autonomy」入口：描述 + 可选的账号 / provider / model（类型/目标不适用）。 */
   onCreateAutonomy?: (input: {
     description: string;
     /** autonomy 账号池里的账号 id；不传 = 由它的池子解析。 */
     accountId?: string;
+    /** 选中的 harness（cursor / cline / codex / claude）；给控制面任务行记一笔。 */
+    provider?: string;
+    /** 覆盖该账号默认模型；不传 = 用账号自己的 model。 */
+    model?: string;
     /** 本机 / 海外；缺省本机。 */
     autonomyTarget?: AutonomyTarget;
   }) => Promise<void>;
@@ -82,6 +86,13 @@ export default function CreateTaskDialog({
   const [autonomyAccounts, setAutonomyAccounts] = useState<AutonomyAccount[]>([]);
   const [autonomyAccountsError, setAutonomyAccountsError] = useState<string | null>(null);
   const [autonomyAccountId, setAutonomyAccountId] = useState("");
+  /** autonomy 的 provider（harness）：选完才能拉模型目录。 */
+  const [autonomyProvider, setAutonomyProvider] = useState("");
+  const [autonomyModel, setAutonomyModel] = useState("");
+  const [autonomyModels, setAutonomyModels] = useState<string[]>([]);
+  const [autonomyModelsError, setAutonomyModelsError] = useState<string | null>(
+    null,
+  );
   /** 本机 / 海外：只在「交给 autonomy」时有意义，默认本机。 */
   const [autonomyTarget, setAutonomyTarget] = useState<AutonomyTarget>("local");
   const [autonomyTargets, setAutonomyTargets] = useState<AutonomyTargets | null>(
@@ -108,6 +119,10 @@ export default function CreateTaskDialog({
     setModel(projectDefaultModel ?? "");
     setAccountId("");
     setAutonomyAccountId("");
+    setAutonomyProvider("");
+    setAutonomyModel("");
+    setAutonomyModels([]);
+    setAutonomyModelsError(null);
     setAutonomyTarget("local");
     setError(null);
     // 只留新入口时（TASK_ENTRY=autonomy）直接落在新入口上。
@@ -139,6 +154,58 @@ export default function CreateTaskDialog({
         setAutonomyAccountsError(errorText(e));
       });
   }, [open, autonomyTarget]);
+
+  const AUTONOMY_HARNESSES = ["cursor", "cline", "codex", "claude"] as const;
+  const autonomyProviders = Array.from(
+    new Set([
+      ...autonomyAccounts.map((a) => a.harness).filter(Boolean),
+      ...AUTONOMY_HARNESSES,
+    ]),
+  );
+  const chosenAutonomyAccount = autonomyAccounts.find(
+    (a) => a.accountId === autonomyAccountId,
+  );
+  const autonomyHarness =
+    chosenAutonomyAccount?.harness || autonomyProvider || "";
+  const autonomyAccountsForProvider = autonomyProvider
+    ? autonomyAccounts.filter((a) => a.harness === autonomyProvider)
+    : autonomyAccounts;
+
+  useEffect(() => {
+    if (!open || entryMode !== "autonomy") return;
+    const harness = autonomyHarness;
+    if (!harness) {
+      setAutonomyModels([]);
+      setAutonomyModelsError(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .autonomyAccountModels(autonomyTarget, {
+        harness,
+        ...(chosenAutonomyAccount?.vendor
+          ? { vendor: chosenAutonomyAccount.vendor }
+          : {}),
+        ...(chosenAutonomyAccount?.accountId
+          ? { accountId: chosenAutonomyAccount.accountId }
+          : {}),
+      })
+      .then((r) => {
+        if (cancelled) return;
+        setAutonomyModels(r.models ?? []);
+        setAutonomyModelsError(
+          r.available ? null : (r.error ?? "读不到 autonomy 的模型目录"),
+        );
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setAutonomyModels([]);
+        setAutonomyModelsError(errorText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, entryMode, autonomyTarget, autonomyHarness, chosenAutonomyAccount]);
 
   const effectiveProvider =
     provider || projectDefaultProvider || envDefault || "cursor";
@@ -180,10 +247,6 @@ export default function CreateTaskDialog({
           ? { available: autonomy.available, error: autonomy.error }
           : null));
   const autonomyDown = selectedTargetMeta != null && !selectedTargetMeta.available;
-  /** 选中的那条 autonomy 账号（下拉的「留空」= 交给它的池子解析）。 */
-  const chosenAutonomyAccount = autonomyAccounts.find(
-    (a) => a.accountId === autonomyAccountId,
-  );
   const selectedBackend =
     autonomyTarget === "remote"
       ? autonomyTargets?.remote?.llmBackend
@@ -201,7 +264,7 @@ export default function CreateTaskDialog({
             ? `这条任务跑在 ${chosenAutonomyAccount.harness}/${
                 chosenAutonomyAccount.vendor
               } · model ${
-                chosenAutonomyAccount.model || "harness 默认"
+                autonomyModel || chosenAutonomyAccount.model || "harness 默认"
               } · 工作目录 ${
                 chosenAutonomyAccount.agentRootWorkspace || "运行时默认"
               }。`
@@ -232,10 +295,23 @@ export default function CreateTaskDialog({
     try {
       if (autonomyMode) {
         if (!onCreateAutonomy) throw new Error("autonomy 入口未接线");
-        // 描述 + 项目上下文 + 可选的账号：类型/目标/provider/model 都不适用（契约第 2 节 A2）。
+        const pickedAccountId =
+          autonomyAccountId.trim() ||
+          (autonomyProvider
+            ? (autonomyAccounts.find(
+                (a) =>
+                  a.harness === autonomyProvider && a.enabled && a.isDefault,
+              ) ??
+              autonomyAccounts.find(
+                (a) => a.harness === autonomyProvider && a.enabled,
+              )
+            )?.accountId
+            : undefined);
         await onCreateAutonomy({
           description: description.trim(),
-          accountId: autonomyAccountId.trim() || undefined,
+          accountId: pickedAccountId || undefined,
+          provider: autonomyProvider.trim() || chosenAutonomyAccount?.harness,
+          model: autonomyModel.trim() || undefined,
           autonomyTarget,
         });
       } else {
@@ -317,6 +393,9 @@ export default function CreateTaskDialog({
                 onClick={() => {
                   setAutonomyTarget("local");
                   setAutonomyAccountId("");
+                  setAutonomyProvider("");
+                  setAutonomyModel("");
+                  setAutonomyModels([]);
                 }}
               >
                 本地
@@ -334,6 +413,9 @@ export default function CreateTaskDialog({
                 onClick={() => {
                   setAutonomyTarget("remote");
                   setAutonomyAccountId("");
+                  setAutonomyProvider("");
+                  setAutonomyModel("");
+                  setAutonomyModels([]);
                 }}
               >
                 海外
@@ -509,35 +591,101 @@ export default function CreateTaskDialog({
         </div>
         )}
         {autonomyMode && (
-          <label className="runtime-field runtime-field-wide">
-            <span className="runtime-field-label">
-              账号{" "}
-              <span className="intent-hint">
-                （autonomy 的账号池：决定它那边用哪个 harness / vendor / model）
+          <div className="runtime-fields">
+            <label className="runtime-field">
+              <span className="runtime-field-label">Provider</span>
+              <select
+                className="runtime-select"
+                value={autonomyProvider}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setAutonomyProvider(next);
+                  setAutonomyModel("");
+                  if (
+                    chosenAutonomyAccount &&
+                    next &&
+                    chosenAutonomyAccount.harness !== next
+                  ) {
+                    setAutonomyAccountId("");
+                  }
+                }}
+              >
+                <option value="">由账号 / 池子决定</option>
+                {autonomyProviders.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="runtime-field">
+              <span className="runtime-field-label">
+                账号{" "}
+                <span className="intent-hint">（autonomy 的账号池）</span>
               </span>
-            </span>
-            <select
-              className="runtime-select"
-              value={autonomyAccountId}
-              onChange={(e) => setAutonomyAccountId(e.target.value)}
-            >
-              <option value="">由 autonomy 的账号池解析（该 harness 的默认账号）</option>
-              {autonomyAccounts.map((a) => (
-                <option key={a.accountId} value={a.accountId}>
-                  {`${a.harness} / ${a.vendor}`}
-                  {a.model ? ` · ${a.model}` : ""}
-                  {` — ${a.label}`}
-                  {a.isDefault ? "（默认）" : ""}
-                  {a.enabled ? "" : "（已停用）"}
+              <select
+                className="runtime-select"
+                value={autonomyAccountId}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setAutonomyAccountId(next);
+                  setAutonomyModel("");
+                  const hit = autonomyAccounts.find((a) => a.accountId === next);
+                  if (hit && hit.harness !== autonomyProvider) {
+                    setAutonomyProvider(hit.harness);
+                  }
+                }}
+              >
+                <option value="">
+                  由 autonomy 的账号池解析（该 harness 的默认账号）
                 </option>
-              ))}
-            </select>
+                {autonomyAccountsForProvider.map((a) => (
+                  <option key={a.accountId} value={a.accountId}>
+                    {`${a.harness} / ${a.vendor}`}
+                    {a.model ? ` · ${a.model}` : ""}
+                    {` — ${a.label}`}
+                    {a.isDefault ? "（默认）" : ""}
+                    {a.enabled ? "" : "（已停用）"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="runtime-field">
+              <span className="runtime-field-label">Model</span>
+              <select
+                className="runtime-select"
+                value={autonomyModel}
+                disabled={!autonomyHarness}
+                title={
+                  autonomyHarness
+                    ? undefined
+                    : "先选 Provider 或账号，再选模型"
+                }
+                onChange={(e) => setAutonomyModel(e.target.value)}
+              >
+                <option value="">
+                  {chosenAutonomyAccount?.model
+                    ? `账号默认：${chosenAutonomyAccount.model}`
+                    : "账号 / harness 默认"}
+                </option>
+                {autonomyModels.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </label>
             {autonomyAccountsError && (
               <span className="intent-hint">
                 读不到 autonomy 的账号池：{autonomyAccountsError}（留空仍可建任务，交给它的池子解析）
               </span>
             )}
-          </label>
+            {autonomyModelsError && autonomyHarness && (
+              <span className="intent-hint">
+                读不到模型目录：{autonomyModelsError}（可留空，用账号默认）
+              </span>
+            )}
+          </div>
         )}
         {autonomyMode && autonomyHint && (
           <div className="intent-hint">{autonomyHint}</div>

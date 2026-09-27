@@ -10,7 +10,7 @@
  *   GET  /health                    → { status, llm_backend, llm_model, turns }（部署平台探活路径）
  *   GET  /api/meta                  → { service, version, reason_turns, has_tasks_table, turns }
  *   POST /api/tasks                 → 202 { task_id, agent_id, status, message_id, queued }
- *         body: { description, context_ref: { project }, account_id? }
+ *         body: { description, context_ref: { project }, account_id?, model? }
  *   GET  /api/accounts              → { accounts: [{ accountId, harness, vendor, label, model?,
  *                                       agentRootWorkspace?, enabled, isDefault, apiKeyMasked?, hasKey? }] }
  *         *账号池*：autonomy 的任务跑在哪个 harness / vendor / model 上由它决定（不再是环境变量）。
@@ -35,6 +35,7 @@ const META_PATH = "/api/meta";
 const HEALTH_PATH = "/health";
 const TASKS_PATH = "/api/tasks";
 const ACCOUNTS_PATH = "/api/accounts";
+const ACCOUNT_MODELS_PATH = "/api/accounts/models";
 
 /** Default cache TTL for a successful lookup. */
 const DEFAULT_TTL_MS = 30_000;
@@ -129,6 +130,17 @@ export interface AutonomyAccountSummary {
 export interface AutonomyAccountListResult {
   available: boolean;
   accounts: AutonomyAccountSummary[];
+  url: string;
+  error?: string;
+  fetchedAt: string;
+}
+
+/** `GET /api/accounts/models`：某个 harness + vendor 可选的模型（可能为空：由 harness 自己解析）。 */
+export interface AutonomyAccountModelsResult {
+  available: boolean;
+  harness: string;
+  vendor?: string;
+  models: string[];
   url: string;
   error?: string;
   fetchedAt: string;
@@ -349,6 +361,43 @@ export class AutonomyClient {
     }
   }
 
+  /**
+   * 某个 harness / vendor 的模型目录（`GET /api/accounts/models`）。
+   * 和别的**读**一样 best-effort：不可达 / 4xx → `available:false`，不抛。
+   */
+  async listAccountModels(opts: {
+    harness: string;
+    vendor?: string;
+    accountId?: string;
+  }): Promise<AutonomyAccountModelsResult> {
+    const harness = opts.harness.trim();
+    const vendor = opts.vendor?.trim() ?? "";
+    const accountId = opts.accountId?.trim() ?? "";
+    const params = new URLSearchParams();
+    if (harness) params.set("harness", harness);
+    if (vendor) params.set("vendor", vendor);
+    if (accountId) params.set("accountId", accountId);
+    const q = params.toString() ? `?${params.toString()}` : "";
+    try {
+      const res = await this.get(`${this.baseUrl}${ACCOUNT_MODELS_PATH}${q}`);
+      const payload = await res.json().catch(() => undefined);
+      if (!res.ok) {
+        return this.unavailableAccountModels(
+          harness,
+          readAutonomyError(payload, `autonomy 返回 HTTP ${res.status}`),
+        );
+      }
+      return {
+        available: true,
+        ...normalizeAccountModels(payload, harness),
+        url: this.baseUrl,
+        fetchedAt: new Date(this.now()).toISOString(),
+      };
+    } catch (err) {
+      return this.unavailableAccountModels(harness, this.reason(err));
+    }
+  }
+
   /** 任务详情 / 进展（404 原样带出，供路由透传）。 */
   async getTask(taskId: string): Promise<AutonomyTaskDetailResult> {
     const id = taskId.trim();
@@ -394,10 +443,16 @@ export class AutonomyClient {
      * （该 harness 的默认账号）。id 不存在 / 被停用 → autonomy 拒绝，原文由路由带出。
      */
     accountId?: string;
+    /**
+     * 这次任务覆盖账号默认模型。不传 = 用账号自己的 model（或 harness 默认）。
+     * autonomy 认 `model`；id 不在目录里时由它那边决定是否拒绝。
+     */
+    model?: string;
   }): Promise<AutonomyCreateResult> {
     const description = input.description.trim();
     const projectId = input.projectId?.trim();
     const accountId = input.accountId?.trim();
+    const model = input.model?.trim();
     if (!description) return { ok: false, error: "description is required (任务描述必填)" };
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${TASKS_PATH}`, {
@@ -408,6 +463,7 @@ export class AutonomyClient {
           description,
           ...(projectId ? { context_ref: { project: projectId } } : {}),
           ...(accountId ? { account_id: accountId } : {}),
+          ...(model ? { model } : {}),
         }),
       });
       const payload = await res.json().catch(() => undefined);
@@ -546,4 +602,39 @@ export class AutonomyClient {
       fetchedAt: new Date(this.now()).toISOString(),
     };
   }
+
+  private unavailableAccountModels(
+    harness: string,
+    error: string,
+  ): AutonomyAccountModelsResult {
+    return {
+      available: false,
+      harness,
+      models: [],
+      url: this.baseUrl,
+      error,
+      fetchedAt: new Date(this.now()).toISOString(),
+    };
+  }
+}
+
+/** `GET /api/accounts/models` → 归一化（缺字段不补假值）。 */
+export function normalizeAccountModels(
+  payload: unknown,
+  fallbackHarness = "",
+): { harness: string; vendor?: string; models: string[] } {
+  if (!isRecord(payload)) {
+    return { harness: fallbackHarness, models: [] };
+  }
+  const harness = trimmedString(payload.harness) || fallbackHarness;
+  const vendor = trimmedString(payload.vendor);
+  const raw = Array.isArray(payload.models) ? payload.models : [];
+  const models = raw
+    .map((row) => (typeof row === "string" ? row.trim() : ""))
+    .filter(Boolean);
+  return {
+    harness,
+    ...(vendor ? { vendor } : {}),
+    models,
+  };
 }

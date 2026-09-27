@@ -90,6 +90,7 @@ export default function CreateTaskDialog({
   const [autonomyProvider, setAutonomyProvider] = useState("");
   const [autonomyModel, setAutonomyModel] = useState("");
   const [autonomyModels, setAutonomyModels] = useState<string[]>([]);
+  const [autonomyModelsLoading, setAutonomyModelsLoading] = useState(false);
   const [autonomyModelsError, setAutonomyModelsError] = useState<string | null>(
     null,
   );
@@ -122,6 +123,7 @@ export default function CreateTaskDialog({
     setAutonomyProvider("");
     setAutonomyModel("");
     setAutonomyModels([]);
+    setAutonomyModelsLoading(false);
     setAutonomyModelsError(null);
     setAutonomyTarget("local");
     setError(null);
@@ -176,32 +178,56 @@ export default function CreateTaskDialog({
     const harness = autonomyHarness;
     if (!harness) {
       setAutonomyModels([]);
+      setAutonomyModelsLoading(false);
       setAutonomyModelsError(null);
       return;
     }
     let cancelled = false;
-    void api
-      .autonomyAccountModels(autonomyTarget, {
-        harness,
-        ...(chosenAutonomyAccount?.vendor
-          ? { vendor: chosenAutonomyAccount.vendor }
-          : {}),
-        ...(chosenAutonomyAccount?.accountId
-          ? { accountId: chosenAutonomyAccount.accountId }
-          : {}),
-      })
-      .then((r) => {
-        if (cancelled) return;
-        setAutonomyModels(r.models ?? []);
-        setAutonomyModelsError(
-          r.available ? null : (r.error ?? "读不到 autonomy 的模型目录"),
-        );
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setAutonomyModels([]);
-        setAutonomyModelsError(errorText(e));
-      });
+    setAutonomyModelsLoading(true);
+    void (async () => {
+      let models: string[] = [];
+      let catalogueError: string | null = null;
+      try {
+        const r = await api.autonomyAccountModels(autonomyTarget, {
+          harness,
+          ...(chosenAutonomyAccount?.vendor
+            ? { vendor: chosenAutonomyAccount.vendor }
+            : {}),
+          ...(chosenAutonomyAccount?.accountId
+            ? { accountId: chosenAutonomyAccount.accountId }
+            : {}),
+        });
+        models = (r.models ?? []).map((id) => id.trim()).filter(Boolean);
+        if (!r.available) {
+          catalogueError = r.error ?? "读不到 autonomy 的模型目录";
+        }
+      } catch (e) {
+        catalogueError = errorText(e);
+      }
+      // cursor（以及其它 harness 目录为空时）回退到控制面同一套模型目录，
+      // 否则下拉只剩「账号默认」，看起来像没加载出来。
+      if (models.length === 0) {
+        try {
+          const fallback = await api.listModels(harness);
+          models = (fallback.models ?? [])
+            .map((m) => m.id.trim())
+            .filter((id) => id && id !== "default");
+        } catch {
+          /* 控制面没有这个 provider 就保持空，下面再用 harness 默认补 */
+        }
+      }
+      if (models.length === 0 && harness === "cursor") {
+        models = ["composer-2", "composer-2.5"];
+      }
+      const accountModel = chosenAutonomyAccount?.model?.trim();
+      if (accountModel && !models.includes(accountModel)) {
+        models = [accountModel, ...models];
+      }
+      if (cancelled) return;
+      setAutonomyModels(models);
+      setAutonomyModelsError(models.length > 0 ? null : catalogueError);
+      setAutonomyModelsLoading(false);
+    })();
     return () => {
       cancelled = true;
     };
@@ -664,9 +690,11 @@ export default function CreateTaskDialog({
                 onChange={(e) => setAutonomyModel(e.target.value)}
               >
                 <option value="">
-                  {chosenAutonomyAccount?.model
-                    ? `账号默认：${chosenAutonomyAccount.model}`
-                    : "账号 / harness 默认"}
+                  {autonomyModelsLoading
+                    ? "加载模型中…"
+                    : chosenAutonomyAccount?.model
+                      ? `账号默认：${chosenAutonomyAccount.model}`
+                      : "账号 / harness 默认"}
                 </option>
                 {autonomyModels.map((id) => (
                   <option key={id} value={id}>

@@ -856,6 +856,7 @@ export class AgentGateway {
         title,
         workspace: "",
         provider: "autonomy",
+        ...(input.model?.trim() ? { model: input.model.trim() } : {}),
         projectId,
         createdBy: input.createdBy,
         ...(input.description !== undefined

@@ -765,6 +765,8 @@ export default function App() {
     async (input: {
       description: string;
       accountId?: string;
+      provider?: string;
+      model?: string;
       autonomyTarget?: "local" | "remote";
     }) => {
       if (!selectedProjectId) return;
@@ -776,6 +778,8 @@ export default function App() {
           // 选了 autonomy 池子里的哪条账号（不选 = 交给它的池子解析）。
           autonomyAccountId: input.accountId,
           autonomyTarget: input.autonomyTarget,
+          ...(input.provider ? { provider: input.provider } : {}),
+          ...(input.model ? { model: input.model } : {}),
         });
         await refreshTasks(selectedProjectId);
         await loadAutonomy();

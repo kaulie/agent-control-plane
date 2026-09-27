@@ -78,6 +78,18 @@ function fakeAutonomy(over = {}) {
     async listTasks() {
       return { available: true, tasks: [], url: "http://127.0.0.1:4300", fetchedAt: "x" };
     },
+    async listAccounts() {
+      return { available: true, accounts: [], url: "http://127.0.0.1:4300", fetchedAt: "x" };
+    },
+    async listAccountModels(opts) {
+      return {
+        available: true,
+        harness: opts.harness,
+        models: [],
+        url: "http://127.0.0.1:4300",
+        fetchedAt: "x",
+      };
+    },
     async getTask(taskId) {
       calls.push(["getTask", taskId]);
       if (taskId === "task-missing") {

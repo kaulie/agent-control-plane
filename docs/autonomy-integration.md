@@ -22,9 +22,9 @@
 ## 1. 端到端数据流
 
 ```
-创建：前端（创建对话框选「交给 autonomy」+ 本机/远端）→ POST 控制面 /api/tasks { description, projectId, agentPath: "autonomy", autonomyTarget: "local"|"remote" }
-      → 控制面**先落库**（我们的 task id；provider=autonomy；不建本地工作区、不预分配本地 agent）
-      → POST autonomy /api/tasks { description, context_ref: { project } }
+创建：前端（创建对话框选「交给 autonomy」+ 本机/远端 + provider + model）→ POST 控制面 /api/tasks { description, projectId, agentPath: "autonomy", autonomyTarget: "local"|"remote", autonomyAccountId?, model? }
+      → 控制面**先落库**（我们的 task id；provider=autonomy；model 若选了就记下；不建本地工作区、不预分配本地 agent）
+      → POST autonomy /api/tasks { description, context_ref: { project }, account_id?, model? }
       → 202 { task_id, agent_id, status, message_id, queued }
       → 记到我们的行上：executor_task_id / executor_agent_id（时间线留一条 `executor_attached`）
       → 201 返回**我们的** task（前端当普通任务展示）
@@ -86,7 +86,8 @@ autonomy 侧新增的**账号池**（一条账号 = 一个 harness（`cursor` / 
 | 响应 | `{ available, accounts: [ { accountId, harness, vendor, label, model?, agentRootWorkspace?, enabled, isDefault, apiKeyMasked?, hasKey? } ], url, error?, fetchedAt, entry }` |
 | **key** | **只有掩码**（`sk-1…06d2`）；autonomy 的类型层面就不渲染 key 原文，控制面也不缓存它 |
 | 写：选账号 | 建任务时 `POST /api/tasks` 带 `autonomyAccountId`（我们的字段名），在 `agentPath=autonomy` 时随交接交给 autonomy 的 `account_id` |
-| 不选 | **不发这个字段**（不是发空串）→ 交给它的池子解析：该 harness 的默认账号，否则第一条启用账号 |
+| 写：选模型 | 选完 provider / 账号后，`GET /api/autonomy/{target}/accounts/models` 拉目录；创建时 `model` 随交接交给 autonomy 的 `model`（覆盖账号默认） |
+| 不选 | **不发这个字段**（不是发空串）→ 交给它的池子解析：该 harness 的默认账号，否则第一条启用账号；模型同理用账号默认 |
 | 未知 / 已停用的 id | autonomy **拒绝**（4xx + 原文），控制面原样带出（把任务标 error），**绝不静默换一个账号跑** |
 | `autonomyAccountId` + `agentPath=control-plane` | 控制面 **400**：那是两次请求混在一起，不静默丢掉这个选择 |
 | 两个池子别混 | 控制面自己的 `/api/accounts`（给**本机** agent 用）与 autonomy 的池子不是一个东西；字段也故意不同名（`accountId` vs `autonomyAccountId`） |

@@ -268,6 +268,52 @@ await check("createTask(): 带账号就发 account_id（trim），不带就不�
   assert.equal("account_id" in JSON.parse(calls[1].init.body), false);
 });
 
+await check("createTask(): 带 model 就发 model（trim），不带就不发这个字段", async () => {
+  const { impl, calls } = makeFetch({ "/api/tasks": ok({ task_id: "t" }) });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  await client.createTask({ description: "x", accountId: "acct-1", model: "  deepseek-v4-pro  " });
+  assert.equal(JSON.parse(calls[0].init.body).model, "deepseek-v4-pro");
+  await client.createTask({ description: "x", accountId: "acct-1" });
+  assert.equal("model" in JSON.parse(calls[1].init.body), false);
+});
+
+await check("listAccountModels(): 拼 query + 归一化 models", async () => {
+  const { impl, calls } = makeFetch({
+    "/api/accounts/models": ok({
+      harness: "cline",
+      vendor: "deepseek",
+      models: ["deepseek-v4-flash", "deepseek-v4-pro", ""],
+    }),
+  });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const catalogue = await client.listAccountModels({
+    harness: "cline",
+    vendor: "deepseek",
+    accountId: "acct-1",
+  });
+  assert.equal(catalogue.available, true);
+  assert.equal(catalogue.harness, "cline");
+  assert.equal(catalogue.vendor, "deepseek");
+  assert.deepEqual(catalogue.models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+  assert.equal(
+    calls[0].url,
+    `${BASE}/api/accounts/models?harness=cline&vendor=deepseek&accountId=acct-1`,
+  );
+});
+
+await check("listAccountModels(): 不可达 → available:false（不抛）", async () => {
+  const { impl } = makeFetch({
+    "/api/accounts/models": () => {
+      throw new Error("connect ECONNREFUSED");
+    },
+  });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const catalogue = await client.listAccountModels({ harness: "cline" });
+  assert.equal(catalogue.available, false);
+  assert.deepEqual(catalogue.models, []);
+  assert.match(catalogue.error, /ECONNREFUSED/);
+});
+
 await check("listAccounts(): 池子归一化（掩码、无 key 原文）+ 缺 id 的行丢掉", async () => {
   const { impl, calls } = makeFetch({
     "/api/accounts": ok({

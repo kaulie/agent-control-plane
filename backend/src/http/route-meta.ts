@@ -198,6 +198,18 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
     summary: "指定一台 autonomy 的账号池（local=本地 / remote=海外）",
     tags: ["autonomy"],
   },
+  "GET /api/autonomy/accounts/models": {
+    summary: "autonomy 某个 harness / vendor 的模型目录（选完 provider 后的 Model 下拉）",
+    tags: ["autonomy"],
+    description:
+      "代理 autonomy 的 `GET /api/accounts/models?harness=&vendor=&accountId=`。" +
+      "读不到 → `200 + available:false`。可用 `?target=`；新代码走 " +
+      "`GET /api/autonomy/{target}/accounts/models`。",
+  },
+  "GET /api/autonomy/{target}/accounts/models": {
+    summary: "指定一台 autonomy 的模型目录（local=本地 / remote=海外）",
+    tags: ["autonomy"],
+  },
   "GET /api/autonomy/tasks/{taskId}": {
     summary: "autonomy 任务详情 / 进展（只代理；404 原样透传）",
     tags: ["autonomy"],
@@ -250,8 +262,9 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
       "只决定** agent 由谁创建**：后者把执行交给 autonomy（agent 由它的 runtime 创建），交接结果记在" +
       "`executorTaskId` / `executorAgentId` 上；交接失败 → 任务保留并标 error + 原文，返回 4xx/503。" +
       "`agentPath=autonomy` 时可带 `autonomyAccountId`（autonomy 的账号池里的 id，见 " +
-      "`GET /api/autonomy/accounts`）—— 决定这条任务在它那边用哪个 harness / vendor / model / " +
-      "工作目录；不传 = 交给它的池子解析（该 harness 的默认账号）。id 不存在 / 被停用会被 **autonomy** " +
+      "`GET /api/autonomy/accounts`）—— 决定这条任务在它那边用哪个 harness / vendor / 工作目录；" +
+      "再带 `model` 覆盖该账号的默认模型（目录见 `GET /api/autonomy/{target}/accounts/models`）。" +
+      "不传账号 = 交给它的池子解析（该 harness 的默认账号）。id 不存在 / 被停用会被 **autonomy** " +
       "拒绝，原文原样带出（绝不静默换一个账号跑）。`autonomyAccountId` 配 `control-plane` 路径 → 400" +
       "（那是两次请求混在一起，不静默丢掉这个选择）。",
     responses: {

@@ -472,6 +472,72 @@ body {
   color: var(--amber);
 }
 
+/* ---- 两块提示词（task prompt / 初始化 system prompt）：分开显示、分开保存 ----
+   面板上就靠这两个块把「哪块管什么」摆明白：task prompt 装具体信息，system prompt 只装协议。 */
+
+.prompt-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-3);
+}
+
+.prompt-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.prompt-block-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.prompt-block-hint,
+.prompt-block-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.prompt-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 生效文本预览：等宽、可滚动、只读（要改点「改这一块」）。 */
+.prompt-preview {
+  margin: 0;
+  padding: 8px;
+  max-height: 22vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 折叠态：system prompt 的预览太长 → 收起来（task prompt 那行仍留 2 行摘要）。 */
+.task-intent-body.collapsed .prompt-block .prompt-preview {
+  display: none;
+}
+
 .task-intent-editor {
   display: flex;
   flex-direction: column;

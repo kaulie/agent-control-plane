@@ -188,14 +188,22 @@ const listed = JSON.parse(
 assert.equal(listed.find((t) => t.taskId === deployTask.taskId).goal, "deploy");
 
 
-// ---- 3) 简报：目标换了行为约束；老任务保持原样 ----
+// ---- 3) 两份 prompt：**目标值**在 task prompt 里，**目标规则**在系统 prompt 的协议里 ----
 const mergeBootstrap = bootstrapOf(store.getTask(mergeTask.taskId));
-assert.ok(mergeBootstrap.includes("- goal: 合入主分支 (merge)"));
+assert.ok(mergeBootstrap.includes("- goal: 合入主分支 (merge)"), "这一单的目标值是具体信息 → task prompt 里");
 assert.ok(mergeBootstrap.includes("Delivery goal = 合入主分支 (merge)"));
 assert.ok(mergeBootstrap.includes("merge it into `main` yourself"));
+// 协议那半现在是一张**条件表**（三种情况各自绑在自己的 goal 值上）：所以「不许 merge」那句
+// 只能以「没有 goal 行」为前提出现，绝不能是无条件的老约束（否则模型会收到互相矛盾的指令）。
 assert.ok(
-  !mergeBootstrap.includes("Do not merge the PR and do not deploy unless the user asks."),
-  "有目标时不能再出现「不许 merge」的老约束",
+  mergeBootstrap.includes(
+    "没有 `goal` 行 — Do not merge the PR and do not deploy unless the user asks.",
+  ),
+  "「不许 merge」必须挂在「没有 goal 行」那一条上",
+);
+assert.ok(
+  !mergeBootstrap.includes("Do not merge the PR and do not deploy unless the user asks. The app"),
+  "不许再出现无条件的「不许 merge」老约束",
 );
 // 部署平台这条路的事实说明（不要在 agent 进程里同步跑发版脚本）任何情况都要在
 assert.ok(mergeBootstrap.includes("agent-control-plane-deployment"));
@@ -214,13 +222,18 @@ const legacy = store.createTask({
   description: "老任务没有目标。",
 });
 const legacyBootstrap = bootstrapOf(legacy);
-assert.ok(!legacyBootstrap.includes("- goal:"), "老任务的简报不能多出 goal 行");
-assert.ok(!legacyBootstrap.includes("Delivery goal"), "老任务的简报不能多出目标段");
+assert.ok(!legacyBootstrap.includes("- goal:"), "老任务没有目标 → task prompt 里不能多出 goal 行");
+// 协议那半对**所有 task 都一样**（所以「目标怎么算交付完成」这几条规则总在），
+// 但老任务没有 `goal` 行 → 生效的是「不许 merge」那条：**行为不变**（不会因为协议总在就自动 merge）。
 assert.ok(
   legacyBootstrap.includes(
-    "- Do not merge the PR and do not deploy unless the user asks. The app itself has **no** deploy entry point:",
+    "没有 `goal` 行 — Do not merge the PR and do not deploy unless the user asks.",
   ),
-  "老任务保持原来那句约束（行为不变）",
+  "老任务：协议里生效的是「不许 merge」那条",
+);
+assert.ok(
+  legacyBootstrap.includes("The app itself has **no** deploy entry point:"),
+  "部署平台那条事实说明照旧",
 );
 
 // ---- 4) PATCH 换目标 / 清空 ----

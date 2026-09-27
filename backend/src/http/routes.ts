@@ -17,6 +17,7 @@ import type {
 import type { ShutdownReport } from "../shutdown.js";
 import { isUsageGranularity, isUsageTimeZone } from "../usage/series.js";
 import { normalizeDepartment } from "../settings.js";
+import { MAX_SYSTEM_PROMPT_CHARS } from "../task-context.js";
 import {
   resolveAttachmentPath,
   validateIncomingImages,
@@ -960,6 +961,11 @@ export async function registerRoutes(
       taskType?: string;
       /** `merge` / `deploy`；`null` = 清掉目标（回到「开完 PR 即停」）。 */
       goal?: string | null;
+      /**
+       * **初始化 system prompt**（这条 task 自己的那份）：`null` / 空串 = 清掉覆盖（回到模板生成）。
+       * 与 `description`（**task prompt**）是两条独立的轴，各改各的。
+       */
+      systemPrompt?: string | null;
     };
   }>("/api/tasks/:taskId", async (req, reply) => {
     const body = req.body ?? {};
@@ -968,9 +974,17 @@ export async function registerRoutes(
     const hasDescription = body.description !== undefined;
     const hasType = body.taskType !== undefined;
     const hasGoal = body.goal !== undefined;
-    if (!hasPrUrl && !hasTitle && !hasDescription && !hasType && !hasGoal) {
+    const hasSystemPrompt = body.systemPrompt !== undefined;
+    if (!hasPrUrl && !hasTitle && !hasDescription && !hasType && !hasGoal && !hasSystemPrompt) {
       return reply.code(400).send({
-        error: "prUrl, title, description, taskType or goal is required",
+        error: "prUrl, title, description, taskType, goal or systemPrompt is required",
+      });
+    }
+    // 初始化 system prompt 允许清空（回到模板）：空串与 null 同义。
+    const systemPrompt = body.systemPrompt?.trim() ?? "";
+    if (systemPrompt.length > MAX_SYSTEM_PROMPT_CHARS) {
+      return reply.code(400).send({
+        error: `systemPrompt too long (max ${MAX_SYSTEM_PROMPT_CHARS} chars)`,
       });
     }
     const description = body.description?.trim() ?? "";
@@ -1002,13 +1016,14 @@ export async function registerRoutes(
       const withPr = gateway.updateTaskPrUrl(req.params.taskId, body.prUrl ?? null);
       if (!withPr) return reply.code(404).send({ error: "task not found" });
       // 只回写 prUrl（agent 的常规动作）：无需再走意图更新。
-      if (!hasTitle && !hasDescription && !hasType && !hasGoal) return withPr;
+      if (!hasTitle && !hasDescription && !hasType && !hasGoal && !hasSystemPrompt) return withPr;
     }
     const task = gateway.updateTaskIntent(req.params.taskId, {
       ...(hasTitle ? { title: body.title! } : {}),
       ...(hasDescription ? { description } : {}),
       ...(hasType ? { taskType: body.taskType! } : {}),
       ...(hasGoal ? { goal: body.goal ?? null } : {}),
+      ...(hasSystemPrompt ? { systemPrompt: systemPrompt || null } : {}),
     });
     if (!task) return reply.code(404).send({ error: "task not found" });
     return task;
@@ -1022,6 +1037,19 @@ export async function registerRoutes(
         return reply.code(404).send({ error: "task not found" });
       }
       return detail;
+    },
+  );
+
+  /**
+   * 这条 task 的**两份 prompt**（分开独立管理）：初始化 system prompt + task prompt，各自的
+   * 生效文本、来源（这条 task 自己的 / 模板生成）与字符数。面板的 prompt 管理块用它。
+   */
+  app.get<{ Params: { taskId: string } }>(
+    "/api/tasks/:taskId/prompts",
+    async (req, reply) => {
+      const prompts = await gateway.taskPromptPreview(req.params.taskId);
+      if (!prompts) return reply.code(404).send({ error: "task not found" });
+      return prompts;
     },
   );
 

@@ -44,6 +44,8 @@ const tests = [
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
   { file: "scripts/test-task-intent.mjs", via: "tsx" },
   { file: "scripts/test-task-goal.mjs", via: "tsx" },
+  // 两条 prompt 分开独立管理（协议那半不含具体信息 / 两块互不影响）
+  { file: "scripts/test-task-prompts.mjs", via: "tsx" },
   { file: "scripts/test-agent-workspace.mjs", via: "tsx" },
   { file: "scripts/test-accounts.mjs", via: "tsx" },
   { file: "scripts/test-openapi-contract.mjs", via: "tsx" },
@@ -63,6 +65,12 @@ const tests = [
   // 任务意图（类型标签 + 系统投递卡片）前端口径
   {
     file: "../web/scripts/test-task-intent-ui.mjs",
+    via: "tsx",
+    args: ["--tsconfig", "../web/tsconfig.json"],
+  },
+  // 面板上两块提示词分开显示 / 分开保存（初始化 system prompt × task prompt）
+  {
+    file: "../web/scripts/test-task-prompts-ui.mjs",
     via: "tsx",
     args: ["--tsconfig", "../web/tsconfig.json"],
   },

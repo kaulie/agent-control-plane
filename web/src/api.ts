@@ -20,6 +20,7 @@ import type {
   Task,
   TaskDetail,
   TaskGoal,
+  TaskPromptPreview,
   TaskType,
   TokenUsage,
   TokenUsageSeries,
@@ -319,6 +320,17 @@ export const api = {
       goal?: TaskGoal | null;
     },
   ) => write<Task>(`/tasks/${taskId}`, { method: "PATCH", body }),
+
+  /**
+   * **初始化 system prompt**：与 `updateTaskIntent`（task prompt 那条轴）**互不影响** —— 只动这一块。
+   * `null` / 空串 = 清掉覆盖（回到模板生成）。
+   */
+  updateTaskSystemPrompt: (taskId: string, systemPrompt: string | null) =>
+    write<Task>(`/tasks/${taskId}`, { method: "PATCH", body: { systemPrompt } }),
+
+  /** 这条 task 的两份 prompt 的**生效文本**（面板上两块分开显示）。 */
+  getTaskPrompts: (taskId: string) =>
+    fetch(`${BASE}/tasks/${taskId}/prompts`).then((r) => j<TaskPromptPreview>(r)),
 
   getTask: (id: string) => fetch(`${BASE}/tasks/${id}`).then((r) => j<TaskDetail>(r)),
 

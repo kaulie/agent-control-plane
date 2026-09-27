@@ -108,6 +108,8 @@ interface TaskRow {
   task_type: string | null;
   goal: string | null;
   description: string | null;
+  /** 这条 task 自己的**初始化 system prompt**（NULL = 用模板生成）。 */
+  system_prompt: string | null;
   last_user_input_at: string | null;
   forked_from: string | null;
   /** agent 创建路径（NULL = 老任务 = 控制面）。 */
@@ -343,6 +345,11 @@ export class Store {
     if (!taskCols.some((c) => c.name === "description")) {
       // 任务描述（需求原文）：新建时必填；老任务为 NULL（面板会提示补上）。
       this.db.exec(`ALTER TABLE tasks ADD COLUMN description TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "system_prompt")) {
+      // 这条 task 自己的**初始化 system prompt**（与描述/需求原文那条轴分开管理）。
+      // 历史任务为 NULL = 用模板生成，**不做 backfill**（老行为逐字节不变）。
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN system_prompt TEXT`);
     }
     if (!taskCols.some((c) => c.name === "context_digest")) {
       // 模型生成的会话摘要（默认关闭；开了以后按水位缓存，见 gateway.contextDigestFor）。
@@ -1220,6 +1227,11 @@ export class Store {
     createdBy?: string;
     /** 任务描述（需求原文）。新建入口必填；内部调用（watchdog 等）可空。 */
     description?: string;
+    /**
+     * 这条 task 自己的**初始化 system prompt**（可选；缺省 = 用模板生成）。
+     * 与 `description` 是两条独立的轴：一个改系统那半，一个改任务那半。
+     */
+    systemPrompt?: string;
     /** 任务类型标签；缺省 `general`（= 老行为）。 */
     taskType?: TaskType;
     /** 交付目标；缺省 = 没有目标（老行为：开完 PR 停）。 */
@@ -1246,6 +1258,7 @@ export class Store {
     }
     const now = new Date().toISOString();
     const description = input.description?.trim();
+    const systemPrompt = input.systemPrompt?.trim();
     const goal = normalizeTaskGoal(input.goal);
     const preallocatedAgentId = input.agentId?.trim();
     const task: Task = {
@@ -1264,6 +1277,7 @@ export class Store {
       taskType: normalizeTaskType(input.taskType),
       ...(goal ? { goal } : {}),
       ...(description ? { description } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
       lastUserInputAt: now,
       ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
       ...(normalizeAgentPath(input.agentPath) === "autonomy"
@@ -1273,8 +1287,8 @@ export class Store {
     };
     this.db
       .prepare(
-        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, last_user_input_at, forked_from, agent_path, account_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (task_id, project_id, title, created_at, status, workspace, provider, model, created_by, agent_id, agent_preallocated, task_type, goal, description, system_prompt, last_user_input_at, forked_from, agent_path, account_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.taskId,
@@ -1291,6 +1305,7 @@ export class Store {
         task.taskType,
         task.goal ?? null,
         task.description ?? null,
+        task.systemPrompt ?? null,
         task.lastUserInputAt,
         task.forkedFrom ?? null,
         task.agentPath ?? null,
@@ -1504,7 +1519,9 @@ export class Store {
   }
 
   /**
-   * 修改任务意图（标题 / 类型 / 目标 / 描述）——「理解随对话变清晰」时用户就地修正。
+   * 修改任务意图（标题 / 类型 / 目标 / 描述 / **初始化 system prompt**）——「理解随对话变清晰」时
+   * 用户就地修正。**两条 prompt 各改各的**：`description`（task prompt）与 `systemPrompt`
+   * （初始化 system prompt）互不影响。
    *
    * 语义：`undefined` = 不动这个字段；`description` 传空串/NULL 视为**清空**，
    * 由调用方（gateway）负责「描述不允许清空」这条业务规则，store 只做落库。
@@ -1516,6 +1533,8 @@ export class Store {
       taskType?: TaskType;
       goal?: TaskGoal | null;
       description?: string | null;
+      /** `null` / 空串 = **清掉覆盖**（回到模板生成）。 */
+      systemPrompt?: string | null;
     },
   ): Task | undefined {
     const current = this.getTask(taskId);
@@ -1539,6 +1558,11 @@ export class Store {
       sets.push("description = ?");
       values.push(patch.description?.trim() ? patch.description.trim() : null);
     }
+    if (patch.systemPrompt !== undefined) {
+      sets.push("system_prompt = ?");
+      // 空 = 清掉（回到模板），与 description 同一套语义。
+      values.push(patch.systemPrompt?.trim() ? patch.systemPrompt.trim() : null);
+    }
     if (!sets.length) return current;
     this.db
       .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE task_id = ?`)
@@ -1549,6 +1573,7 @@ export class Store {
   private toTask(r: TaskRow): Task {
     const prUrl = r.pr_url?.trim();
     const description = r.description?.trim();
+    const systemPrompt = r.system_prompt?.trim();
     const goal = normalizeTaskGoal(r.goal);
     return {
       taskId: r.task_id,
@@ -1569,6 +1594,8 @@ export class Store {
       // 目标没有默认值：历史 / 脏值一律读成「没设目标」（老行为）。
       ...(goal ? { goal } : {}),
       ...(description ? { description } : {}),
+      // 初始化 system prompt：NULL = 没覆盖（模板生成），**不带字段**。
+      ...(systemPrompt ? { systemPrompt } : {}),
       lastUserInputAt: r.last_user_input_at || r.created_at,
       ...(r.forked_from ? { forkedFrom: r.forked_from } : {}),
       // 老任务 agent_path 为 NULL → 不带字段（读出来 = 控制面，老行为）。

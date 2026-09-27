@@ -46,6 +46,8 @@ const tests = [
   { file: "scripts/test-task-goal.mjs", via: "tsx" },
   // 两条 prompt 分开独立管理（协议那半不含具体信息 / 两块互不影响）
   { file: "scripts/test-task-prompts.mjs", via: "tsx" },
+  // 提示词模板是文件（改文件即生效 / 缺文件大声失败）
+  { file: "scripts/test-prompt-files.mjs", via: "tsx" },
   { file: "scripts/test-agent-workspace.mjs", via: "tsx" },
   { file: "scripts/test-accounts.mjs", via: "tsx" },
   { file: "scripts/test-openapi-contract.mjs", via: "tsx" },

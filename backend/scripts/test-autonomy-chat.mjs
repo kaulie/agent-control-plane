@@ -371,6 +371,46 @@ assert.ok(created.executorTaskId, "交接记下了执行方那侧的 task id");
   assert.match(JSON.parse(res.body).error, /autonomy 未配置/);
 }
 
+// ---- 12) 对账投递必须指定那一台：切开后两边可能有同一批 id，绝不本机优先再扫海外 ----
+{
+  const dual = Fastify({ logger: false });
+  const local = fakeAutonomy();
+  const remote = fakeAutonomy();
+  await registerRoutes(dual, gateway, providers, {
+    dataDir,
+    appVersion: APP_VERSION,
+    autonomy: local,
+    autonomyRemote: remote,
+    taskEntry: "both",
+  });
+  const send = (url, payload) =>
+    dual.inject({ method: "POST", url, headers: uiHeaders, payload });
+
+  const rem = await send("/api/autonomy/tasks/task-exec-1/messages?target=remote", {
+    message: "海外接着干",
+  });
+  assert.equal(rem.statusCode, 202);
+  assert.equal(local.calls.filter((c) => c[0] === "addInstruction").length, 0, "不打本机");
+  assert.deepEqual(remote.calls.filter((c) => c[0] === "addInstruction").at(-1)[1], {
+    taskId: "task-exec-1",
+    message: "海外接着干",
+    mode: "command",
+  });
+
+  const bodyTarget = await send("/api/autonomy/tasks/task-exec-1/messages", {
+    message: "body 指定",
+    target: "remote",
+  });
+  assert.equal(bodyTarget.statusCode, 202);
+  assert.equal(remote.calls.filter((c) => c[0] === "addInstruction").length, 2);
+
+  const bad = await send("/api/autonomy/tasks/task-exec-1/messages?target=mars", {
+    message: "x",
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.match(JSON.parse(bad.body).error, /autonomyTarget/);
+}
+
 console.log(
   "PASS: autonomy 任务能 chat（两种寻址都投递给执行方 / chat|command 分流 / 只收文字 / 先确认 task 存在 / 不可达不假装 / 纯代理不写库 / 本机路径不变）",
 );

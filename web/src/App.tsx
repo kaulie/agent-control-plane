@@ -162,6 +162,7 @@ export default function App() {
   const [showCreateTask, setShowCreateTask] = useState(false);
   /** autonomy 的可用性 / 版本 / LLM 后端 + 入口开关（`TASK_ENTRY`）。 */
   const [autonomyMeta, setAutonomyMeta] = useState<AutonomyMeta | null>(null);
+  const [remoteAutonomyMeta, setRemoteAutonomyMeta] = useState<AutonomyMeta | null>(null);
   /**
    * agent 由 autonomy 创建的任务，适配成**同一个**列表里的行（不落库，数据来自 `/api/autonomy/*`）。
    * 它和我们自己的任务一起显示；区别只有 `agentPath`。
@@ -701,18 +702,29 @@ export default function App() {
    */
   const loadAutonomy = useCallback(async () => {
     try {
-      const [meta, list] = await Promise.all([
-        api.autonomyMeta(),
-        api.autonomyTasks(selectedProjectId ?? undefined),
+      const projectId = selectedProjectId ?? undefined;
+      const [meta, remoteMeta, localList, remoteList] = await Promise.all([
+        api.autonomyMeta("local"),
+        api.autonomyMeta("remote"),
+        api.autonomyTasks(projectId, "local"),
+        api.autonomyTasks(projectId, "remote"),
       ]);
       setAutonomyMeta(meta);
-      setAutonomyRows(
-        (list.available ? list.tasks : []).map((task) =>
-          autonomyTaskToRow(task, {
-            ...(meta.llmBackend ? { llmBackend: meta.llmBackend } : {}),
-          }),
-        ),
+      setRemoteAutonomyMeta(remoteMeta);
+      const localRows = (localList.available ? localList.tasks : []).map((task) =>
+        autonomyTaskToRow(task, {
+          autonomyTarget: "local",
+          ...(meta.llmBackend ? { llmBackend: meta.llmBackend } : {}),
+        }),
       );
+      const remoteRows = (remoteList.available ? remoteList.tasks : []).map(
+        (task) =>
+          autonomyTaskToRow(task, {
+            autonomyTarget: "remote",
+            ...(remoteMeta.llmBackend ? { llmBackend: remoteMeta.llmBackend } : {}),
+          }),
+      );
+      setAutonomyRows([...localRows, ...remoteRows]);
     } catch {
       setAutonomyRows([]);
     }
@@ -737,10 +749,10 @@ export default function App() {
    * loadAutonomy 只在 selectedProjectId 变化时重建，所以同一个项目里不会反复重置计时器。
    */
   useEffect(() => {
-    if (!autonomyMeta?.available || autonomyRows.length === 0) return;
+    if (autonomyRows.length === 0) return;
     const timer = window.setInterval(() => void loadAutonomy(), AUTONOMY_TASK_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [autonomyMeta?.available, autonomyRows.length, loadAutonomy]);
+  }, [autonomyRows.length, loadAutonomy]);
 
   /**
    * 「交给 autonomy」新建：任务**还是我们创建的**（`POST /api/tasks` + `agentPath=autonomy`），
@@ -780,7 +792,9 @@ export default function App() {
   /** 执行方（autonomy）那边的状态，按它那侧的 task id 索引 —— 给我们的行显示「真正在跑」的状态。 */
   const executorById = useMemo(() => {
     const map = new Map<string, TaskListRow>();
-    for (const row of autonomyRows) map.set(row.taskId, row);
+    for (const row of autonomyRows) {
+      map.set(`${row.autonomyTarget ?? "local"}:${row.taskId}`, row);
+    }
     return map;
   }, [autonomyRows]);
 
@@ -790,7 +804,9 @@ export default function App() {
       mergeTaskRows(
         tasks.map((task) => {
           const exec = task.executorTaskId
-            ? executorById.get(task.executorTaskId)
+            ? executorById.get(
+                `${task.autonomyTarget ?? "local"}:${task.executorTaskId}`,
+              )
             : undefined;
           return localTaskToRow(task, {
             ...(exec?.status ? { executorStatus: exec.status } : {}),
@@ -800,9 +816,10 @@ export default function App() {
         autonomyRows,
         {
           executorIds: new Set(
-            tasks
-              .map((task) => task.executorTaskId)
-              .filter((id): id is string => Boolean(id)),
+            tasks.flatMap((task) => {
+              if (!task.executorTaskId) return [];
+              return [`${task.autonomyTarget ?? "local"}:${task.executorTaskId}`];
+            }),
           ),
         },
       ),
@@ -811,19 +828,24 @@ export default function App() {
 
   /** 只在 autonomy 那边存在、我们没建过的行（点它只能看代理数据）。 */
   const extraAutonomyIds = useMemo(() => {
-    const localIds = new Set(tasks.map((task) => task.taskId));
+    const ours = new Set(tasks.map((task) => task.taskId));
     return new Set(
-      autonomyRows.map((row) => row.taskId).filter((id) => !localIds.has(id)),
+      taskRows
+        .filter((row) => Boolean(row.listKey) && !ours.has(row.taskId))
+        .map((row) => row.listKey as string),
     );
-  }, [tasks, autonomyRows]);
+  }, [tasks, taskRows]);
 
   /** 选中的是不是「只在 autonomy 那边存在」的那类行。 */
   const selectedIsExtraRow = selectedId != null && extraAutonomyIds.has(selectedId);
 
   const selectedRow = useMemo(
-    () => taskRows.find((row) => row.taskId === selectedId),
+    () => taskRows.find((row) => (row.listKey ?? row.taskId) === selectedId),
     [taskRows, selectedId],
   );
+
+  const selectedAutonomyMeta =
+    selectedRow?.autonomyTarget === "remote" ? remoteAutonomyMeta : autonomyMeta;
 
   /**
    * 这条任务的详情走**哪一套模板**、画哪些块：`taskDetailBlocks`（见 src/autonomy.ts）—— 事件流说的是
@@ -1272,9 +1294,10 @@ export default function App() {
           {selectedIsExtraRow && selectedId ? (
             /* 我们没建过、只在 autonomy 那边存在的行：同一个主区、同一个 TaskIdsBar，纯代理。 */
             <AutonomyTaskPanel
-              taskId={selectedId}
+              taskId={selectedRow?.taskId ?? selectedId}
+              autonomyTarget={selectedRow?.autonomyTarget ?? "local"}
               {...(selectedRow ? { row: selectedRow } : {})}
-              {...(autonomyMeta ? { meta: autonomyMeta } : {})}
+              {...(selectedAutonomyMeta ? { meta: selectedAutonomyMeta } : {})}
               {...(selectedRowProject?.department?.departmentId
                 ? { orgId: selectedRowProject.department.departmentId }
                 : {})}
@@ -1301,8 +1324,9 @@ export default function App() {
               {detail.task.agentPath === "autonomy" ? (
                 <ExecutorTaskBody
                   taskId={detail.task.taskId}
+                  autonomyTarget={detail.task.autonomyTarget}
                   {...(selectedRow ? { row: selectedRow } : {})}
-                  {...(autonomyMeta ? { meta: autonomyMeta } : {})}
+                  {...(selectedAutonomyMeta ? { meta: selectedAutonomyMeta } : {})}
                   reloadSignal={executorReload}
                 />
               ) : null}

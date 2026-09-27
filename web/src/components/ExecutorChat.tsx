@@ -4,6 +4,7 @@ import { deliveryReceipt, executorBusy } from "../autonomy";
 import { formatDateTime } from "../format";
 import ChatInput, { type ChatPayload, type ExecutorInputMode } from "./ChatInput";
 import { onExecutorReply, type ReplyOutcome } from "../executorReply";
+import type { AutonomyTarget } from "../types";
 
 /**
  * 给**执行方**（autonomy）发消息 —— 「autonomy 创建的 agent 也要能 chat」。
@@ -38,6 +39,8 @@ interface Props {
   status: string;
   /** 投递成功后回调（详情/计划区立刻刷新一次）。 */
   onDelivered?: () => void;
+  /** 对账行指定哪一台；切开后两边可能有同一批 id。 */
+  autonomyTarget?: AutonomyTarget;
 }
 
 interface Sent {
@@ -52,7 +55,13 @@ function asExecutorMode(mode: ChatPayload["mode"]): ExecutorInputMode {
   return mode === "chat" ? "chat" : "command";
 }
 
-export default function ExecutorChat({ taskId, via = "task", status, onDelivered }: Props) {
+export default function ExecutorChat({
+  taskId,
+  via = "task",
+  status,
+  onDelivered,
+  autonomyTarget,
+}: Props) {
   const [sent, setSent] = useState<Sent[]>([]);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +73,7 @@ export default function ExecutorChat({ taskId, via = "task", status, onDelivered
     try {
       const res =
         via === "executor"
-          ? await api.sendMessageToExecutor(taskId, text, mode)
+          ? await api.sendMessageToExecutor(taskId, text, mode, autonomyTarget)
           : await api.sendMessage(taskId, text, undefined, mode);
       const line = deliveryReceipt(res);
       setReceipt(line);

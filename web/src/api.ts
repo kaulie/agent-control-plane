@@ -253,19 +253,24 @@ export const api = {
   autonomyTargets: () =>
     fetch(`${BASE}/autonomy/targets`).then((r) => j<AutonomyTargets>(r)),
 
-  /** autonomy 任务列表（可按当前 project 过滤）。 */
-  autonomyTasks: (projectId?: string) => {
-    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-    return fetch(`${BASE}/autonomy/tasks${q}`).then((r) =>
+  /** autonomy 任务列表（可按当前 project / 哪一台过滤）。 */
+  autonomyTasks: (projectId?: string, target?: AutonomyTarget) => {
+    const q = new URLSearchParams();
+    if (projectId) q.set("projectId", projectId);
+    if (target) q.set("target", target);
+    const s = q.toString();
+    return fetch(`${BASE}/autonomy/tasks${s ? `?${s}` : ""}`).then((r) =>
       j<AutonomyTaskList>(r),
     );
   },
 
-  /** autonomy 任务详情 / 进展（404 会抛出它的原文）。 */
-  autonomyTask: (taskId: string) =>
-    fetch(`${BASE}/autonomy/tasks/${encodeURIComponent(taskId)}`).then((r) =>
-      j<AutonomyTaskDetail>(r),
-    ),
+  /** autonomy 任务详情 / 进展（404 会抛出它的原文）。对账行必须带 target，避免两台同 id 串台。 */
+  autonomyTask: (taskId: string, target?: AutonomyTarget) => {
+    const q = target ? `?target=${encodeURIComponent(target)}` : "";
+    return fetch(`${BASE}/autonomy/tasks/${encodeURIComponent(taskId)}${q}`).then(
+      (r) => j<AutonomyTaskDetail>(r),
+    );
+  },
 
   /**
    * autonomy 的账号池 —— 「交给 autonomy」时选账号的下拉（不可达时 `available:false`，不是 500）。
@@ -441,8 +446,10 @@ export const api = {
     executorTaskId: string,
     message: string,
     mode?: "chat" | "command",
-  ) =>
-    write<{
+    target?: AutonomyTarget,
+  ) => {
+    const q = target ? `?target=${encodeURIComponent(target)}` : "";
+    return write<{
       executor?: boolean;
       executorTaskId?: string;
       executorAgentId?: number;
@@ -450,10 +457,11 @@ export const api = {
       messageId?: number;
       queueAhead?: number;
       inputMode?: "chat" | "command";
-    }>(`/autonomy/tasks/${executorTaskId}/messages`, {
+    }>(`/autonomy/tasks/${executorTaskId}/messages${q}`, {
       method: "POST",
       body: { message, ...(mode ? { mode } : {}) },
-    }),
+    });
+  },
 
   sendMessage: (
     id: string,

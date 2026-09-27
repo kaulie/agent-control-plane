@@ -1,5 +1,6 @@
 import type {
   AgentPath,
+  AutonomyTarget,
   AutonomyTaskDetail,
   AutonomyTaskSummary,
   Task,
@@ -39,9 +40,10 @@ export function titleFromDescription(description: string, max = 60): string {
  */
 export function autonomyTaskToRow(
   task: AutonomyTaskSummary,
-  opts: { llmBackend?: string } = {},
+  opts: { llmBackend?: string; autonomyTarget?: AutonomyTarget } = {},
 ): TaskListRow {
   const when = autonomyRowTime(task);
+  const autonomyTarget = opts.autonomyTarget ?? "local";
   return {
     taskId: task.id,
     projectId: task.projectId ?? "",
@@ -55,6 +57,8 @@ export function autonomyTaskToRow(
     createdAt: when,
     ...(when ? { lastUserInputAt: when } : {}),
     agentPath: "autonomy",
+    autonomyTarget,
+    listKey: `${autonomyTarget}:${task.id}`,
   };
 }
 
@@ -120,7 +124,10 @@ export function mergeTaskRows(
   // 已经在我们这边建过、并交接出去的任务（按执行方 id 对上）不再重复显示一遍 ——
   // 它的「真身」是本地那行（点击进的是我们自己的任务详情）。
   const known = opts.executorIds ?? new Set<string>();
-  const extra = autonomy.filter((row) => !known.has(row.taskId));
+  const extra = autonomy.filter((row) => {
+    const keyed = `${row.autonomyTarget ?? "local"}:${row.taskId}`;
+    return !known.has(keyed);
+  });
   if (extra.length === 0) return local;
   return [...local, ...extra].sort(
     (a, b) => rowActivityMs(b) - rowActivityMs(a),

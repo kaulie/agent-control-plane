@@ -14,7 +14,7 @@ import ExecutorChat from "./ExecutorChat";
 import ExecutorPhaseBar from "./ExecutorPhaseBar";
 import ExecutorBlockedPanel from "./ExecutorBlockedPanel";
 import TaskIdsBar from "./TaskIdsBar";
-import type { AutonomyMeta, TaskListRow } from "../types";
+import type { AutonomyMeta, AutonomyTarget, TaskListRow } from "../types";
 
 /**
  * 「agent 由 autonomy 创建」那部分数据的展示件（和老任务共用同一套版式）。
@@ -38,9 +38,18 @@ interface BodyProps {
   meta?: AutonomyMeta | null;
   /** 变一下就立刻重读一次（投递了新指令时用；平时靠 `AUTONOMY_TASK_REFRESH_MS` 轮询）。 */
   reloadSignal?: number;
+  /** 对账行必须指定哪一台；切开后两边可能有同一批 id。 */
+  autonomyTarget?: AutonomyTarget;
 }
 
-export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal = 0 }: BodyProps) {
+export function ExecutorTaskBody({
+  taskId,
+  via = "task",
+  row,
+  meta,
+  reloadSignal = 0,
+  autonomyTarget,
+}: BodyProps) {
   const [read, dispatch] = useReducer(reduceExecutorRead, EMPTY_EXECUTOR_READ);
   const detail = read.detail;
   const error = read.error;
@@ -48,19 +57,21 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
   const load = useCallback(async (): Promise<void> => {
     try {
       const next =
-        via === "task" ? await api.taskExecutor(taskId) : await api.autonomyTask(taskId);
+        via === "task"
+          ? await api.taskExecutor(taskId)
+          : await api.autonomyTask(taskId, autonomyTarget);
       dispatch({ type: "ok", detail: next });
     } catch (e) {
       // 读失败**不清内容**：保留上一次成功读到的 detail，只记下原因；页面继续显示已有内容，
       // 顶部给一条非破坏性的提醒即可（需求：端读失败时不要清空当前内容）。
       dispatch({ type: "error", error: errorText(e) });
     }
-  }, [taskId, via]);
+  }, [taskId, via, autonomyTarget]);
 
   // 换了一条 task：先丢掉上一条的内容，免得「新 task 首次读失败」时把旧 task 的内容当成它的。
   useEffect(() => {
     dispatch({ type: "switch" });
-  }, [taskId, via]);
+  }, [taskId, via, autonomyTarget]);
 
   useEffect(() => {
     void load();
@@ -177,9 +188,10 @@ export function ExecutorTaskBody({ taskId, via = "task", row, meta, reloadSignal
          * 我们建的任务（via="task"）的输入框在详情底部（App 里），不在这里重复画。
          */
         <ExecutorChat
-          key={taskId}
+          key={`${autonomyTarget ?? "local"}:${taskId}`}
           via="executor"
           taskId={taskId}
+          autonomyTarget={autonomyTarget}
           status={status}
           onDelivered={() => void load()}
         />
@@ -198,7 +210,14 @@ interface Props extends BodyProps {
  * 只在 autonomy 那边存在、我们没建过的任务：与老任务同一个主区外壳（同一个 `TaskIdsBar`）。
  * 我们建的任务（`agentPath=autonomy`）走自己的任务详情，只把 `ExecutorTaskBody` 嵌进去。
  */
-export default function AutonomyTaskPanel({ taskId, row, orgId, orgName, meta }: Props) {
+export default function AutonomyTaskPanel({
+  taskId,
+  row,
+  orgId,
+  orgName,
+  meta,
+  autonomyTarget,
+}: Props) {
   return (
     <>
       <TaskIdsBar
@@ -211,7 +230,13 @@ export default function AutonomyTaskPanel({ taskId, row, orgId, orgName, meta }:
         {...(orgName ? { orgName } : {})}
         agentPath="autonomy"
       />
-      <ExecutorTaskBody taskId={taskId} via="executor" {...(row ? { row } : {})} {...(meta ? { meta } : {})} />
+      <ExecutorTaskBody
+        taskId={taskId}
+        via="executor"
+        autonomyTarget={autonomyTarget ?? row?.autonomyTarget}
+        {...(row ? { row } : {})}
+        {...(meta ? { meta } : {})}
+      />
     </>
   );
 }

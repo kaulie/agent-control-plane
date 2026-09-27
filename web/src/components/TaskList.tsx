@@ -100,12 +100,14 @@ export default function TaskList({
           + New Task
         </button>
         <div className="task-items">
-          {tasks.map((t) => (
+          {tasks.map((t) => {
+            const rowKey = t.listKey ?? t.taskId;
+            return (
             <button
-              key={t.taskId}
-              className={`task-item ${t.taskId === selectedId ? "selected" : ""}`}
-              aria-current={t.taskId === selectedId ? "true" : undefined}
-              onClick={() => onSelect(t.taskId)}
+              key={rowKey}
+              className={`task-item ${rowKey === selectedId ? "selected" : ""}`}
+              aria-current={rowKey === selectedId ? "true" : undefined}
+              onClick={() => onSelect(rowKey)}
             >
               <div className="task-title">
                 {/* 类型/目标是**我们**的分类，agent 由 autonomy 创建的任务没有 → 不显示（不是缺字段）。 */}
@@ -152,7 +154,8 @@ export default function TaskList({
                 {t.status} · {formatDateTime(t.lastUserInputAt ?? t.createdAt)}
               </div>
             </button>
-          ))}
+            );
+          })}
           {tasks.length === 0 && (
             <div className="task-empty">No tasks in this project</div>
           )}

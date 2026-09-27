@@ -298,6 +298,11 @@ export type TaskListRow = Omit<Task, "status" | "taskType"> & {
   taskType?: TaskType;
   /** 这条 task 的 agent 是谁创建的。 */
   agentPath: AgentPath;
+  /**
+   * 对账行在列表里的稳定键（`local:task-…` / `remote:task-…`）。
+   * 我们建的任务不用这个字段，点选仍用控制面 taskId。
+   */
+  listKey?: string;
   /** 轮次：autonomy 侧由它自己记（我们这边没有它的 runs）；本地任务不显示这一格。 */
   turns?: number;
 };

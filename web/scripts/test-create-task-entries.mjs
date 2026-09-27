@@ -304,6 +304,8 @@ const render = (props) =>
     "时间用最后活动 → 与老列表同一个排序口径"
   );
   assert.equal(row.taskType, undefined, "它没有我们的类型分类 → 不显示类型徽标");
+  assert.equal(row.autonomyTarget, "local", "没标 target 的对账行当本机");
+  assert.equal(row.listKey, `local:${summary.id}`, "对账行用 target:id 当列表键");
 
   // 我们建的任务：agentPath 由**后端**决定；执行方状态优先显示（真正在跑的是那边）
   const ours = localTaskToRow(
@@ -396,16 +398,51 @@ const render = (props) =>
     "没有 autonomy 行时**原样返回**（老列表逐字不变，连顺序都不动）"
   );
   assert.deepEqual(
-    mergeTaskRows(local, autonomy, { executorIds: new Set(["task-auto-mid"]) }).map(
+    mergeTaskRows(local, autonomy, { executorIds: new Set(["local:task-auto-mid"]) }).map(
       (r) => r.taskId
     ),
     ["task-local-old", "task-local-new"],
-    "已经在我们这边建过、并交接出去的行不再重复显示（它的真身是本地那行；此时只剩本地行 → 原样返回，顺序也不动）"
+    "已经在我们这边建过、并交接出去的行不再重复显示（按 target:id 对上；此时只剩本地行 → 原样返回，顺序也不动）"
   );
   assert.deepEqual(
     mergeTaskRows(local, autonomy, { executorIds: new Set(["other"]) }).map((r) => r.taskId),
     ["task-local-new", "task-auto-mid", "task-local-old"],
     "对不上的行（我们没建过的）照旧并进列表并参与排序"
+  );
+
+  const forkedLocal = autonomyTaskToRow(
+    {
+      id: "task-forked",
+      description: "本机对账",
+      status: "running",
+      turns: 1,
+      lastAt: "2026-09-21T03:00:00.000Z",
+    },
+    { autonomyTarget: "local" },
+  );
+  const forkedRemote = autonomyTaskToRow(
+    {
+      id: "task-forked",
+      description: "海外对账",
+      status: "pending",
+      turns: 0,
+      lastAt: "2026-09-21T03:01:00.000Z",
+    },
+    { autonomyTarget: "remote" },
+  );
+  assert.equal(forkedLocal.listKey, "local:task-forked");
+  assert.equal(forkedRemote.listKey, "remote:task-forked");
+  assert.deepEqual(
+    mergeTaskRows([], [forkedLocal, forkedRemote]).map((r) => r.listKey),
+    ["remote:task-forked", "local:task-forked"],
+    "切开后同一批 id 两边都要显示，按最后活动排",
+  );
+  assert.deepEqual(
+    mergeTaskRows([], [forkedLocal, forkedRemote], {
+      executorIds: new Set(["local:task-forked"]),
+    }).map((r) => r.listKey),
+    ["remote:task-forked"],
+    "本机建过的那条只藏本机对账，海外同 id 仍在",
   );
 }
 
@@ -463,6 +500,7 @@ const render = (props) =>
   assert.ok(html.includes("cursor/gpt-5"), "老行照旧显示 provider/model");
   assert.ok(html.includes("task-type-badge"), "老行照旧有类型徽标");
   assert.ok(html.includes("autonomy"), "新行写明 agent 创建路径：autonomy");
+  assert.ok(html.includes("本机"), "对账行标出本机 / 远端");
   assert.ok(html.includes("cline"), "新行显示它的 LLM 后端");
   assert.equal(
     (html.match(/task-type-badge/g) ?? []).length,
@@ -597,6 +635,15 @@ const render = (props) =>
     "前端不再有单独的「交给 autonomy」创建接口"
   );
   assert.ok(apiSrc.includes("taskExecutor"), "执行方状态按我们的 taskId 读");
+  assert.ok(
+    apiSrc.includes("autonomyTask: (taskId: string, target?: AutonomyTarget)"),
+    "对账详情带 target，避免两台同 id 串台",
+  );
+  assert.ok(
+    app.includes('api.autonomyTasks(projectId, "local")') &&
+      app.includes('api.autonomyTasks(projectId, "remote")'),
+    "列表同时拉本机和远端",
+  );
   assert.ok(
     app.includes('agentPath: "autonomy"'),
     "新入口创建时下发 agentPath（任务还是我们建的）"

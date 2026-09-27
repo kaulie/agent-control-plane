@@ -509,6 +509,43 @@ const json = async (res) => JSON.parse(res.body);
   assert.equal(remotePool.target, "remote");
   assert.ok(remote.calls.some((c) => c[0] === "listAccounts"));
 
+  const remoteList = await json(
+    await dual.inject({ method: "GET", url: "/api/autonomy/tasks?target=remote" }),
+  );
+  assert.equal(remoteList.target, "remote");
+  assert.ok(remote.calls.some((c) => c[0] === "listTasks"), "列表?target=remote 打海外");
+
+  const localGetsBefore = local.calls.filter((c) => c[0] === "getTask").length;
+  const remoteGetsBefore = remote.calls.filter((c) => c[0] === "getTask").length;
+  const remoteDetail = await dual.inject({
+    method: "GET",
+    url: "/api/autonomy/tasks/task-aaa?target=remote",
+  });
+  assert.equal(remoteDetail.statusCode, 200);
+  assert.equal(local.calls.filter((c) => c[0] === "getTask").length, localGetsBefore, "对账详情不扫本机");
+  assert.equal(
+    remote.calls.filter((c) => c[0] === "getTask").length,
+    remoteGetsBefore + 1,
+    "对账详情只打指定那台",
+  );
+
+  const defaultDetail = await dual.inject({
+    method: "GET",
+    url: "/api/autonomy/tasks/task-aaa",
+  });
+  assert.equal(defaultDetail.statusCode, 200);
+  assert.ok(
+    local.calls.filter((c) => c[0] === "getTask").length > localGetsBefore,
+    "不带 target 只打本机（兼容老对账行）",
+  );
+
+  const badTarget = await dual.inject({
+    method: "GET",
+    url: "/api/autonomy/tasks/task-aaa?target=mars",
+  });
+  assert.equal(badTarget.statusCode, 400);
+  assert.match((await json(badTarget)).error, /autonomyTarget/);
+
   const rem = await dual.inject({
     method: "POST",
     url: "/api/tasks",

@@ -334,6 +334,8 @@ const json = async (res) => JSON.parse(res.body);
   );
   assert.equal(list.available, true);
   assert.equal(list.tasks.length, 1);
+  assert.equal(list.target, "local");
+  assert.equal(list.tasks[0].autonomyTarget, "local", "列表每行盖上执行位置");
   assert.match(
     autonomy.calls.filter((c) => c[0] === "listTasks").at(-1)[1].projectId,
     new RegExp(PROJECT_ID),
@@ -510,18 +512,20 @@ const json = async (res) => JSON.parse(res.body);
   assert.ok(remote.calls.some((c) => c[0] === "listAccounts"));
 
   const remoteList = await json(
-    await dual.inject({ method: "GET", url: "/api/autonomy/tasks?target=remote" }),
+    await dual.inject({ method: "GET", url: "/api/autonomy/remote/tasks" }),
   );
   assert.equal(remoteList.target, "remote");
-  assert.ok(remote.calls.some((c) => c[0] === "listTasks"), "列表?target=remote 打海外");
+  assert.equal(remoteList.tasks[0].autonomyTarget, "remote", "列表每行盖上执行位置");
+  assert.ok(remote.calls.some((c) => c[0] === "listTasks"), "列表走海外那台的接口");
 
   const localGetsBefore = local.calls.filter((c) => c[0] === "getTask").length;
   const remoteGetsBefore = remote.calls.filter((c) => c[0] === "getTask").length;
   const remoteDetail = await dual.inject({
     method: "GET",
-    url: "/api/autonomy/tasks/task-aaa?target=remote",
+    url: "/api/autonomy/remote/tasks/task-aaa",
   });
   assert.equal(remoteDetail.statusCode, 200);
+  assert.equal((await json(remoteDetail)).autonomyTarget, "remote");
   assert.equal(local.calls.filter((c) => c[0] === "getTask").length, localGetsBefore, "对账详情不扫本机");
   assert.equal(
     remote.calls.filter((c) => c[0] === "getTask").length,

@@ -89,4 +89,16 @@ assert.equal(
   "只有 Task / Project 可以复制（组织是缺失状态）",
 );
 
+// ---- 6) autonomy 任务必须标出本地 / 海外 ----
+const htmlRemote = renderToStaticMarkup(
+  React.createElement(TaskIdsBar, {
+    task: { ...task, title: "", createdAt: "", status: "active", workspace: "", provider: "autonomy", taskType: "general" },
+    agentPath: "autonomy",
+    autonomyTarget: "remote",
+  }),
+);
+assert.ok(htmlRemote.includes("执行位置"), "autonomy 任务有执行位置字段");
+assert.ok(htmlRemote.includes("海外"), "remote → 海外");
+assert.ok(!htmlRemote.includes("本地"), "海外任务不写本地");
+
 console.log("test-task-ids-bar: ok");

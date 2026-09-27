@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import AgentPathChip from "./AgentPathChip";
-import type { AgentPath, Task } from "../types";
+import type { AgentPath, AutonomyTarget, Task } from "../types";
+import { autonomyTargetHint, autonomyTargetLabel } from "../autonomy-target";
 
 /**
  * 一条基础信息（方便测试用）：
@@ -85,6 +86,8 @@ interface Props {
   agentPath?: AgentPath;
   /** autonomy 侧的数据源（只写进悬停；拿不到就不传 —— 留空不显示）。 */
   agentPathSource?: string;
+  /** `agentPath=autonomy` 时：本地还是海外。不传 = 本地。 */
+  autonomyTarget?: AutonomyTarget;
 }
 
 const COPIED_MS = 1200;
@@ -113,6 +116,7 @@ export default function TaskIdsBar({
   orgName,
   agentPath,
   agentPathSource,
+  autonomyTarget,
 }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -168,6 +172,15 @@ export default function TaskIdsBar({
           path={agentPath}
           {...(agentPathSource ? { source: agentPathSource } : {})}
         />
+      ) : null}
+      {agentPath === "autonomy" ? (
+        <span
+          className="task-id-chip is-static"
+          title={autonomyTargetHint(autonomyTarget)}
+        >
+          <span className="task-id-label">执行位置</span>
+          <code className="task-id-value">{autonomyTargetLabel(autonomyTarget)}</code>
+        </span>
       ) : null}
     </div>
   );

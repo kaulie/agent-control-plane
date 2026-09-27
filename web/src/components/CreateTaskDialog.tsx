@@ -192,7 +192,7 @@ export default function CreateTaskDialog({
     autonomyTarget === "remote"
       ? autonomyTargets?.remote?.llmModel
       : (autonomyTargets?.local?.llmModel ?? autonomy?.model);
-  const targetLabel = autonomyTarget === "remote" ? "远端（海外机）" : "本机";
+  const targetLabel = autonomyTarget === "remote" ? "海外" : "本地";
   const autonomyHint = autonomyMode
     ? autonomyDown
       ? `${targetLabel} autonomy 不可达：${selectedTargetMeta?.error ?? "未配置"} —— 先修好它，或改选另一台 / 「本机 agent」入口。`
@@ -313,13 +313,13 @@ export default function CreateTaskDialog({
                 className={`intent-type-chip ${
                   autonomyTarget === "local" ? "selected" : ""
                 }`}
-                title="本机 autonomy（AUTONOMY_API_URL，默认 127.0.0.1:4300）"
+                title="本地 autonomy（AUTONOMY_API_URL，默认 127.0.0.1:4300）"
                 onClick={() => {
                   setAutonomyTarget("local");
                   setAutonomyAccountId("");
                 }}
               >
-                本机
+                本地
               </button>
               <button
                 type="button"
@@ -328,7 +328,7 @@ export default function CreateTaskDialog({
                 }`}
                 title={
                   autonomyTargets && !autonomyTargets.remote.configured
-                    ? "远端 autonomy 未配置（AUTONOMY_REMOTE_API_URL）"
+                    ? "海外 autonomy 未配置（AUTONOMY_REMOTE_API_URL）"
                     : "海外机 autonomy（AUTONOMY_REMOTE_API_URL）"
                 }
                 onClick={() => {
@@ -336,13 +336,13 @@ export default function CreateTaskDialog({
                   setAutonomyAccountId("");
                 }}
               >
-                远端
+                海外
               </button>
             </div>
             <span className="intent-hint">
               {autonomyTarget === "remote"
-                ? "任务交给海外机上的 autonomy 执行（与本机是两台 runtime、两套账号池）。"
-                : "任务交给本机 autonomy 执行。"}
+                ? "任务交给海外机上的 autonomy 执行（与本地是两台 runtime、两套账号池）。"
+                : "任务交给本地 autonomy 执行。"}
             </span>
           </div>
         )}

@@ -734,6 +734,8 @@ export interface AutonomyTaskSummary {
   projectId?: string;
   agentId?: number;
   updatedAt?: string;
+  /** 控制面盖上的：这条对账行来自哪一台 autonomy。 */
+  autonomyTarget?: AutonomyTarget;
 }
 
 /** `GET /api/autonomy/tasks`。 */
@@ -744,6 +746,7 @@ export interface AutonomyTaskList {
   error?: string;
   fetchedAt: string;
   entry: TaskEntry;
+  target?: AutonomyTarget;
 }
 
 /**
@@ -791,6 +794,8 @@ export interface AutonomyAccepted {
 
 /** `GET /api/autonomy/tasks/{id}`：autonomy 的详情**原样**透传（字段由它决定，我们只挑着渲染）。 */
 export type AutonomyTaskDetail = Record<string, unknown> & {
+  /** 控制面盖上的：这条详情来自哪一台 autonomy。 */
+  autonomyTarget?: AutonomyTarget;
   task_id?: string;
   description?: string;
   status?: string;

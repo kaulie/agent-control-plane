@@ -104,13 +104,13 @@ const render = (props) =>
   assert.ok(html.includes("autonomy 的账号池"), "写明这是 autonomy 的池子");
   assert.ok(html.includes("由 autonomy 的账号池解析"), "默认项 = 交给它的池子解析");
   assert.ok(html.includes("账号留空 = 由它的账号池解析"), "提示里写清留空意味着什么");
-  assert.ok(html.includes("执行位置"), "新入口要选本机还是远端");
-  assert.ok(html.includes(">本机<") || html.includes("本机</button>"), "本机 chip");
-  assert.ok(html.includes(">远端<") || html.includes("远端</button>"), "远端 chip");
+  assert.ok(html.includes("执行位置"), "新入口要选本地还是海外");
+  assert.ok(html.includes(">本地<") || html.includes("本地</button>"), "本地 chip");
+  assert.ok(html.includes(">海外<") || html.includes("海外</button>"), "海外 chip");
   assert.match(
     html,
-    /intent-type-chip selected[^>]*>\s*本机/,
-    "默认选中本机 autonomy",
+    /intent-type-chip selected[^>]*>\s*本地/,
+    "默认选中本地 autonomy",
   );
 }
 
@@ -262,15 +262,15 @@ const render = (props) =>
     };
   };
   const pool = await apiAgain.autonomyAccounts();
-  assert.equal(calls.at(-1).url, "/api/autonomy/accounts", "账号池走它自己的代理路由");
+  assert.equal(calls.at(-1).url, "/api/autonomy/local/accounts", "账号池走本地那台的接口");
   assert.equal(pool.accounts[0].accountId, "acct-1");
   assert.equal(pool.accounts[0].apiKeyMasked, "sk-1…06d2", "只有掩码");
 
   await apiAgain.autonomyAccounts("remote");
   assert.equal(
     calls.at(-1).url,
-    "/api/autonomy/accounts?target=remote",
-    "选远端时账号池带 target",
+    "/api/autonomy/remote/accounts",
+    "选海外时账号池走海外那台的接口",
   );
   await apiAgain.autonomyTargets();
   assert.equal(calls.at(-1).url, "/api/autonomy/targets", "两台可用性走 /api/autonomy/targets");
@@ -500,7 +500,7 @@ const render = (props) =>
   assert.ok(html.includes("cursor/gpt-5"), "老行照旧显示 provider/model");
   assert.ok(html.includes("task-type-badge"), "老行照旧有类型徽标");
   assert.ok(html.includes("autonomy"), "新行写明 agent 创建路径：autonomy");
-  assert.ok(html.includes("本机"), "对账行标出本机 / 远端");
+  assert.ok(html.includes("本地"), "对账行标出本地 / 海外");
   assert.ok(html.includes("cline"), "新行显示它的 LLM 后端");
   assert.equal(
     (html.match(/task-type-badge/g) ?? []).length,
@@ -547,6 +547,8 @@ const render = (props) =>
   assert.ok(html.includes("10001"), "Agent chip");
   assert.ok(html.includes("Agent 创建路径"), "同一位置上写清 agent 是谁创建的");
   assert.ok(html.includes("autonomy"), "路径值：autonomy");
+  assert.ok(html.includes("执行位置"), "详情写清本地还是海外");
+  assert.ok(html.includes("本地"), "没标 target 的对账行当本地");
   assert.ok(html.includes("http://127.0.0.1:4300"), "数据源写进悬停（不占版面）");
   assert.ok(html.includes("轮次"), "轮次是它给的，就显示");
   assert.ok(html.includes("running"), "状态");
@@ -636,8 +638,8 @@ const render = (props) =>
   );
   assert.ok(apiSrc.includes("taskExecutor"), "执行方状态按我们的 taskId 读");
   assert.ok(
-    apiSrc.includes("autonomyTask: (taskId: string, target?: AutonomyTarget)"),
-    "对账详情带 target，避免两台同 id 串台",
+    apiSrc.includes("autonomyTask: (taskId: string, target: AutonomyTarget)"),
+    "对账详情必须指定哪一台，避免两台同 id 串台",
   );
   assert.ok(
     app.includes('api.autonomyTasks(projectId, "local")') &&

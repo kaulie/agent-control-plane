@@ -160,10 +160,90 @@
         }
       }
     },
+    "/api/autonomy/{target}/accounts": {
+      "get": {
+        "summary": "指定一台 autonomy 的账号池（local=本地 / remote=海外）",
+        "operationId": "getApiAutonomyTargetAccounts",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/{target}/meta": {
+      "get": {
+        "summary": "指定一台 autonomy 的可用性（local=本地 / remote=海外）",
+        "operationId": "getApiAutonomyTargetMeta",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/{target}/tasks": {
+      "get": {
+        "summary": "指定一台 autonomy 的任务列表（local=本地 / remote=海外）",
+        "description": "与本机、海外是两套接口，回包每行带 `autonomyTarget`，避免同 id 串台。",
+        "operationId": "getApiAutonomyTargetTasks",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/{target}/tasks/{taskId}": {
+      "get": {
+        "summary": "指定一台 autonomy 的任务详情（local=本地 / remote=海外）",
+        "operationId": "getApiAutonomyTargetTasksTaskId",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/{target}/tasks/{taskId}/messages": {
+      "post": {
+        "summary": "给指定一台 autonomy 的对账行投递指令（local=本地 / remote=海外）",
+        "operationId": "postApiAutonomyTargetTasksTaskIdMessages",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "202": {
+            "description": "已投递给指定那一台"
+          },
+          "400": {
+            "description": "空消息 / 带图 / 未知 target"
+          },
+          "404": {
+            "description": "那一台 autonomy 没有这条任务"
+          },
+          "503": {
+            "description": "那一台 autonomy 不可达 / 未配置"
+          }
+        }
+      }
+    },
     "/api/autonomy/accounts": {
       "get": {
         "summary": "autonomy 的账号池（只代理；新建「交给 autonomy」任务时选账号的下拉）",
-        "description": "代理 autonomy 的 `GET /api/accounts`（每条 accountId / harness / vendor / label / model / agentRootWorkspace / enabled / isDefault / apiKeyMasked）。**key 只有掩码**，永远拿不到原文。与 `/api/accounts`（控制面自己的池子，给本机 agent 用）是两个池子。读不到 → `200 + available:false`（页面显示「读不到」而不是 500）。",
+        "description": "代理 autonomy 的 `GET /api/accounts`（每条 accountId / harness / vendor / label / model / agentRootWorkspace / enabled / isDefault / apiKeyMasked）。**key 只有掩码**，永远拿不到原文。与 `/api/accounts`（控制面自己的池子，给本机 agent 用）是两个池子。读不到 → `200 + available:false`（页面显示「读不到」而不是 500）。可用 `?target=`；新代码走 `GET /api/autonomy/{target}/accounts`。",
         "operationId": "getApiAutonomyAccounts",
         "tags": [
           "autonomy"
@@ -178,8 +258,23 @@
     "/api/autonomy/meta": {
       "get": {
         "summary": "autonomy 可用性 / 版本 / 当前 LLM 后端（读不到时 available=false，不是 500）",
-        "description": "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。",
+        "description": "「交给 autonomy」入口能不能点看这里。控制面只代理；url 指向数据源，便于页面上写清。可用 `?target=local|remote`；新代码走 `GET /api/autonomy/{target}/meta`。",
         "operationId": "getApiAutonomyMeta",
+        "tags": [
+          "autonomy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/autonomy/targets": {
+      "get": {
+        "summary": "本机 + 海外两台 autonomy 的可用性",
+        "description": "创建任务选执行位置时用。两台各一份 status，互不混用。",
+        "operationId": "getApiAutonomyTargets",
         "tags": [
           "autonomy"
         ],
@@ -193,7 +288,7 @@
     "/api/autonomy/tasks": {
       "get": {
         "summary": "autonomy 侧的任务列表（只代理；用于对账 / 显示执行方状态）",
-        "description": "数据全部来自 autonomy 的 `GET /api/tasks`（每行 id / description / status / turns / last_at / project_id / agent_id / updated_at）。控制面用它给 `agentPath=autonomy` 的任务显示执行方状态，也用来把「没在我们这边建过」的行显示出来（对账）。",
+        "description": "数据全部来自 autonomy 的 `GET /api/tasks`。每行盖上 `autonomyTarget`。可用 `?target=local|remote`；新代码走 `GET /api/autonomy/{target}/tasks`。",
         "operationId": "getApiAutonomyTasks",
         "tags": [
           "autonomy"
@@ -208,7 +303,7 @@
     "/api/autonomy/tasks/{taskId}": {
       "get": {
         "summary": "autonomy 任务详情 / 进展（只代理；404 原样透传）",
-        "description": "代理 autonomy 的 `GET /api/tasks/{id}`（status / error / context_ref / project / plans[].steps[] / updated_at）。不可达 → 503。",
+        "description": "代理 autonomy 的 `GET /api/tasks/{id}`。回包盖 `autonomyTarget`。可用 `?target=`；新代码走 `GET /api/autonomy/{target}/tasks/{taskId}`。",
         "operationId": "getApiAutonomyTasksTaskId",
         "tags": [
           "autonomy"
@@ -223,7 +318,7 @@
     "/api/autonomy/tasks/{taskId}/messages": {
       "post": {
         "summary": "给**对账行**（只在 autonomy 那边存在的任务）投递一条指令",
-        "description": "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` + `mode=chat|command`，默认 command），区别只在寻址：这里直接用它的 task id。`chat` 只和 planner 互动、不改已有 plan；`command` 是可重规划的指令。**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。成功 → `202 { executor: true, executorTaskId, messageId, queueAhead, executorStatus, inputMode }`。",
+        "description": "与 `POST /api/tasks/{taskId}/messages` 同一件事（autonomy 的 `POST /api/tasks` 带 `task_id` + `mode=chat|command`，默认 command），区别只在寻址：这里直接用它的 task id。`chat` 只和 planner 互动、不改已有 plan；`command` 是可重规划的指令。**纯代理，我方库一行都不写**：只收文字（带图 400 且不投递）· 投递前先确认它真有这条 task（未知 id 会被当成**新建**任务）→ 404 · 不可达 / 被拒 → 503 / 4xx + 原文。成功 → `202 { executor: true, executorTaskId, autonomyTarget, messageId, queueAhead, executorStatus, inputMode }`。可用 `?target=` / `body.target`；新代码走 `POST /api/autonomy/{target}/tasks/{taskId}/messages`。",
         "operationId": "postApiAutonomyTasksTaskIdMessages",
         "tags": [
           "autonomy"

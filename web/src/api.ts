@@ -244,45 +244,36 @@ export const api = {
   // 数据源全是 autonomy；控制面只转发、不改写、不缓存业务状态。
 
   /** autonomy 可用性 / 版本 / LLM 后端 + 入口开关（不可达时 available:false，不是 500）。 */
-  autonomyMeta: (target?: AutonomyTarget) => {
-    const q = target ? `?target=${encodeURIComponent(target)}` : "";
-    return fetch(`${BASE}/autonomy/meta${q}`).then((r) => j<AutonomyMeta>(r));
-  },
+  autonomyMeta: (target: AutonomyTarget = "local") =>
+    fetch(`${BASE}/autonomy/${target}/meta`).then((r) => j<AutonomyMeta>(r)),
 
   /** 本机 + 海外两台 autonomy 的可用性（创建对话框选哪一台）。 */
   autonomyTargets: () =>
     fetch(`${BASE}/autonomy/targets`).then((r) => j<AutonomyTargets>(r)),
 
-  /** autonomy 任务列表（可按当前 project / 哪一台过滤）。 */
-  autonomyTasks: (projectId?: string, target?: AutonomyTarget) => {
-    const q = new URLSearchParams();
-    if (projectId) q.set("projectId", projectId);
-    if (target) q.set("target", target);
-    const s = q.toString();
-    return fetch(`${BASE}/autonomy/tasks${s ? `?${s}` : ""}`).then((r) =>
+  /** autonomy 任务列表：本机走 `/autonomy/local/tasks`，海外走 `/autonomy/remote/tasks`。 */
+  autonomyTasks: (projectId?: string, target: AutonomyTarget = "local") => {
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return fetch(`${BASE}/autonomy/${target}/tasks${q}`).then((r) =>
       j<AutonomyTaskList>(r),
     );
   },
 
-  /** autonomy 任务详情 / 进展（404 会抛出它的原文）。对账行必须带 target，避免两台同 id 串台。 */
-  autonomyTask: (taskId: string, target?: AutonomyTarget) => {
-    const q = target ? `?target=${encodeURIComponent(target)}` : "";
-    return fetch(`${BASE}/autonomy/tasks/${encodeURIComponent(taskId)}${q}`).then(
-      (r) => j<AutonomyTaskDetail>(r),
-    );
-  },
+  /** autonomy 任务详情：必须指定哪一台，避免两台同 id 串台。 */
+  autonomyTask: (taskId: string, target: AutonomyTarget) =>
+    fetch(
+      `${BASE}/autonomy/${target}/tasks/${encodeURIComponent(taskId)}`,
+    ).then((r) => j<AutonomyTaskDetail>(r)),
 
   /**
    * autonomy 的账号池 —— 「交给 autonomy」时选账号的下拉（不可达时 `available:false`，不是 500）。
    * 注意：这是 **autonomy 的**池子（决定它那边用哪个 harness / vendor / model），
    * 与 `listAccounts`（控制面自己的池子，给本机 agent 用）不是一个。
    */
-  autonomyAccounts: (target?: AutonomyTarget) => {
-    const q = target ? `?target=${encodeURIComponent(target)}` : "";
-    return fetch(`${BASE}/autonomy/accounts${q}`).then((r) =>
+  autonomyAccounts: (target: AutonomyTarget = "local") =>
+    fetch(`${BASE}/autonomy/${target}/accounts`).then((r) =>
       j<AutonomyAccountList>(r),
-    );
-  },
+    ),
 
   /**
    * 执行方（autonomy）的状态 / 进展 —— 按**我们的** taskId 读（控制面代理）。
@@ -446,10 +437,9 @@ export const api = {
     executorTaskId: string,
     message: string,
     mode?: "chat" | "command",
-    target?: AutonomyTarget,
-  ) => {
-    const q = target ? `?target=${encodeURIComponent(target)}` : "";
-    return write<{
+    target: AutonomyTarget = "local",
+  ) =>
+    write<{
       executor?: boolean;
       executorTaskId?: string;
       executorAgentId?: number;
@@ -457,11 +447,11 @@ export const api = {
       messageId?: number;
       queueAhead?: number;
       inputMode?: "chat" | "command";
-    }>(`/autonomy/tasks/${executorTaskId}/messages${q}`, {
+      autonomyTarget?: AutonomyTarget;
+    }>(`/autonomy/${target}/tasks/${executorTaskId}/messages`, {
       method: "POST",
       body: { message, ...(mode ? { mode } : {}) },
-    });
-  },
+    }),
 
   sendMessage: (
     id: string,

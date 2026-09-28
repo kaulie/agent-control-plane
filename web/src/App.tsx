@@ -9,7 +9,6 @@ import type {
   Project,
   Task,
   TaskDetail,
-  TaskPromptPreview,
   TaskListRow,
   TaskGoal,
   TaskType,
@@ -128,13 +127,6 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
-  /**
-   * 这条 task 的**两份 prompt**的生效文本（`GET /api/tasks/:id/prompts`）：面板上两块分开显示 /
-   * 独立保存。执行方是 autonomy 的 task 不拉（本机不建会话，这份 prompt 在那边不生效）。
-   */
-  const [taskPrompts, setTaskPrompts] = useState<TaskPromptPreview | null>(null);
-  /** 保存任一块后 +1 → 重新拉一次生效文本（两块各自刷新，互不依赖）。 */
-  const [promptReload, setPromptReload] = useState(0);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [wsStatus, setWsStatus] = useState("connecting");
@@ -305,26 +297,6 @@ export default function App() {
           ? { ...prev, task: updated }
           : prev,
       );
-      void refreshTasks();
-      // task prompt 那条轴改了 → system prompt 那块的预览不必变，但两块一起刷新最省事。
-      setPromptReload((n) => n + 1);
-    },
-    [refreshTasks],
-  );
-
-  /**
-   * 只保存**初始化 system prompt** 这一块（`null` = 恢复模板）。
-   * 与 `saveTaskIntent`（task prompt 那条轴）分开：两次请求各带各的字段，互不覆盖。
-   */
-  const saveTaskSystemPrompt = useCallback(
-    async (taskId: string, text: string | null): Promise<void> => {
-      const updated = await api.updateTaskSystemPrompt(taskId, text);
-      setDetail((prev) =>
-        prev && prev.task.taskId === updated.taskId
-          ? { ...prev, task: updated }
-          : prev,
-      );
-      setPromptReload((n) => n + 1);
       void refreshTasks();
     },
     [refreshTasks],
@@ -636,28 +608,6 @@ export default function App() {
    * 任务意图面板上的「投递状态」：找第一条系统投递的需求消息，
    * 以及它那次 run 是否还在排队（并发满 / 部署 drain）。
    */
-  /** 拉这条 task 的两份 prompt（切换任务 / 保存后）。拿不到就当作没有那块（不显示）。 */
-  useEffect(() => {
-    const taskId = detail?.task.taskId;
-    // 执行方是 autonomy：本机不建会话 → 不显示本机的 system prompt（免得误导）。
-    if (!taskId || detail?.task.agentPath === "autonomy") {
-      setTaskPrompts(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .getTaskPrompts(taskId)
-      .then((p) => {
-        if (!cancelled) setTaskPrompts(p);
-      })
-      .catch(() => {
-        if (!cancelled) setTaskPrompts(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail?.task.taskId, detail?.task.agentPath, promptReload]);
-
   const intentDelivery = useMemo(() => {
     const delivered = events.find(
       (ev) =>
@@ -1383,10 +1333,6 @@ export default function App() {
               <TaskIntentPanel
                 task={detail.task}
                 delivery={intentDelivery}
-                prompts={taskPrompts}
-                onSaveSystemPrompt={(text) =>
-                  saveTaskSystemPrompt(detail.task.taskId, text)
-                }
                 onSave={(patch) =>
                   saveTaskIntent({ taskId: detail.task.taskId, ...patch })
                 }

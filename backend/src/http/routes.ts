@@ -42,6 +42,7 @@ import {
   TASK_GOAL_IDS,
 } from "../task-goals.js";
 import { parseExecutorInputMode } from "../executor-input-mode.js";
+import { autonomyHandoffFromTask } from "../autonomy-handoff.js";
 
 /** 一台 autonomy runtime 的代理面（本机 / 海外各一份）。 */
 type AutonomyProxy = {
@@ -60,6 +61,8 @@ type AutonomyProxy = {
     projectId?: string;
     accountId?: string;
     model?: string;
+    goalType?: string;
+    completionContracts?: unknown;
   }): Promise<AutonomyCreateResult>;
   addInstruction(input: {
     taskId: string;
@@ -1135,14 +1138,19 @@ export async function registerRoutes(
         // 交接失败时任务**保留**并标 error + 原文（不静默消失、也不回落成本机执行）。
         const client = clientFor(autonomyTarget);
         const autonomyModel = body.model?.trim() ?? "";
+        const handoff = autonomyHandoffFromTask(task);
         const handed = client
           ? await client.createTask({
-              // 与本机「需求投递」同一份：类型 / 目标 / 描述都写进去，
-              // 否则 autonomy 只看到裸描述，创建时指定的交付目标到不了 planner。
+              // 描述仍用与本机同一份「需求投递」；类型 / 目标另外走结构化字段，
+              // 否则 autonomy 只看到散文，goal_type 默认成 dev_feature、契约要等 planner 首答才钉。
               description: formatTaskIntentMessage(task),
               ...(task.projectId ? { projectId: task.projectId } : {}),
               ...(autonomyAccountId ? { accountId: autonomyAccountId } : {}),
               ...(autonomyModel ? { model: autonomyModel } : {}),
+              goalType: handoff.goalType,
+              ...(handoff.completionContracts
+                ? { completionContracts: handoff.completionContracts }
+                : {}),
             })
           : { ok: false as const, error: missingClientError(autonomyTarget) };
         if (!handed.ok) {

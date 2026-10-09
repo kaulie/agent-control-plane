@@ -44,6 +44,7 @@ const tests = [
   { file: "scripts/test-fork-api.mjs", via: "tsx" },
   { file: "scripts/test-task-intent.mjs", via: "tsx" },
   { file: "scripts/test-task-goal.mjs", via: "tsx" },
+  { file: "scripts/test-autonomy-handoff.mjs", via: "tsx" },
   // 两条 prompt 分开独立管理（协议那半不含具体信息 / 两块互不影响）
   { file: "scripts/test-task-prompts.mjs", via: "tsx" },
   // 提示词模板是文件（改文件即生效 / 缺文件大声失败）

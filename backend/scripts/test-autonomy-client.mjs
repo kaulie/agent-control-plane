@@ -277,6 +277,24 @@ await check("createTask(): 带 model 就发 model（trim），不带就不发这
   assert.equal("model" in JSON.parse(calls[1].init.body), false);
 });
 
+await check("createTask(): 带 goal_type / completion_contracts 就原样发出去，不带就不发", async () => {
+  const { impl, calls } = makeFetch({ "/api/tasks": ok({ task_id: "t" }) });
+  const client = new AutonomyClient({ baseUrl: BASE, fetchImpl: impl });
+  const contract = { steps: [{ name: "merged_to_main", requirement: "合入 main" }] };
+  await client.createTask({
+    description: "x",
+    goalType: "  resolve_issue  ",
+    completionContracts: contract,
+  });
+  const sent = JSON.parse(calls[0].init.body);
+  assert.equal(sent.goal_type, "resolve_issue");
+  assert.deepEqual(sent.completion_contracts, contract);
+  await client.createTask({ description: "x" });
+  const bare = JSON.parse(calls[1].init.body);
+  assert.equal("goal_type" in bare, false);
+  assert.equal("completion_contracts" in bare, false);
+});
+
 await check("listAccountModels(): 拼 query + 归一化 models", async () => {
   const { impl, calls } = makeFetch({
     "/api/accounts/models": ok({

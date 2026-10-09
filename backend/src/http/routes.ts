@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
-import type { AgentGateway } from "../gateway/gateway.js";
+import { formatTaskIntentMessage, type AgentGateway } from "../gateway/gateway.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
 import type { BillingRuleInput } from "../billing/index.js";
@@ -1137,7 +1137,9 @@ export async function registerRoutes(
         const autonomyModel = body.model?.trim() ?? "";
         const handed = client
           ? await client.createTask({
-              description,
+              // 与本机「需求投递」同一份：类型 / 目标 / 描述都写进去，
+              // 否则 autonomy 只看到裸描述，创建时指定的交付目标到不了 planner。
+              description: formatTaskIntentMessage(task),
               ...(task.projectId ? { projectId: task.projectId } : {}),
               ...(autonomyAccountId ? { accountId: autonomyAccountId } : {}),
               ...(autonomyModel ? { model: autonomyModel } : {}),

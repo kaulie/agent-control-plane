@@ -77,6 +77,23 @@ assert.ok(
   "「部署上线」不能被默认选中（部署必须是明确选择）",
 );
 
+const autonomyDialog = renderToStaticMarkup(
+  React.createElement(CreateTaskDialog, {
+    open: true,
+    projectId: "project-1",
+    onClose: () => {},
+    onCreate: noop,
+    onCreateAutonomy: noop,
+    entry: "autonomy",
+    autonomy: { available: true, backend: "cline" },
+  }),
+);
+assert.ok(autonomyDialog.includes(">目标<"), "交给 autonomy 创建时也必须指定目标");
+assert.ok(
+  autonomyDialog.includes("intent-type-chip goal-merge selected"),
+  "autonomy 入口默认也是合入主分支",
+);
+
 // ---- 3) 任务意图面板上的目标徽标 ----
 const baseTask = {
   taskId: "task-1",

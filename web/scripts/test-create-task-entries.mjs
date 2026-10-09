@@ -90,12 +90,16 @@ const render = (props) =>
   });
   assert.ok(!html.includes("本机 agent（现状）"), "只留新入口时不显示老入口");
   assert.ok(html.includes("交给 autonomy 创建"), "按钮换成新入口文案");
-  // 新入口：选完 provider（harness）后可以选 model；类型 / 目标仍不适用。
+  // 新入口：选完 provider（harness）后可以选 model；类型 / 目标创建时必须指定。
   assert.ok(html.includes(">Provider<"), "新入口有 Provider（harness）控件");
   assert.ok(html.includes(">Model<"), "新入口有 Model 控件");
   assert.ok(html.includes("runtime-fields"), "新入口的 Provider / 账号 / Model 一组");
-  assert.ok(!html.includes(">类型<"), "新入口不显示类型");
-  assert.ok(!html.includes(">目标<"), "新入口不显示目标");
+  assert.ok(html.includes(">类型<"), "新入口也要指定类型");
+  assert.ok(html.includes(">目标<"), "新入口创建时必须指定目标");
+  assert.ok(
+    html.includes("intent-type-chip goal-merge selected"),
+    "新入口默认目标 = 合入主分支",
+  );
   assert.ok(html.includes("context_ref.project"), "提示里写清项目会作为 context_ref.project 带过去");
   assert.ok(html.includes("cline"), "提示里写清 autonomy 当前的 LLM 后端");
   assert.ok(html.includes("任务描述"), "描述仍然必填");

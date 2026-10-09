@@ -48,9 +48,13 @@ interface Props {
     model?: string;
     error?: string;
   } | null;
-  /** 「交给 autonomy」入口：描述 + 可选的账号 / provider / model（类型/目标不适用）。 */
+  /** 「交给 autonomy」入口：类型 / 目标 / 描述 + 可选的账号 / provider / model。 */
   onCreateAutonomy?: (input: {
+    title?: string;
     description: string;
+    taskType: TaskType;
+    /** 创建时必须指定：合入主分支 / 合入并部署。 */
+    goal: TaskGoal;
     /** autonomy 账号池里的账号 id；不传 = 由它的池子解析。 */
     accountId?: string;
     /** 选中的 harness（cursor / cline / codex / claude）；给控制面任务行记一笔。 */
@@ -261,7 +265,7 @@ export default function CreateTaskDialog({
 
   const option = taskTypeOption(taskType);
   const goalOption = TASK_GOAL_OPTIONS.find((g) => g.id === goal)!;
-  /** 「交给 autonomy」这一侧：任务由它的 agent 执行，我们只能填描述。 */
+  /** 「交给 autonomy」这一侧：任务由它的 agent 执行。 */
   const autonomyMode = entryMode === "autonomy";
   /** 入口选择器里「交给 autonomy」按钮用（JSX 里名字短一点好读）。 */
   const autoMode0 = autonomyMode;
@@ -285,7 +289,7 @@ export default function CreateTaskDialog({
   const autonomyHint = autonomyMode
     ? autonomyDown
       ? `${targetLabel} autonomy 不可达：${selectedTargetMeta?.error ?? "未配置"} —— 先修好它，或改选另一台 / 「本机 agent」入口。`
-      : `任务由${targetLabel} autonomy 的 agent 执行，类型与目标不适用（它有自己的一套 goal_type / 完成契约）；当前项目会作为 context_ref.project 带过去。${
+      : `任务由${targetLabel} autonomy 的 agent 执行。类型是分类标签；目标会写进交给它的需求（合入 / 合入并部署）。当前项目会作为 context_ref.project 带过去。${
           chosenAutonomyAccount
             ? `这条任务跑在 ${chosenAutonomyAccount.harness}/${
                 chosenAutonomyAccount.vendor
@@ -334,7 +338,10 @@ export default function CreateTaskDialog({
             )?.accountId
             : undefined);
         await onCreateAutonomy({
+          title: titleOrFallback(),
           description: description.trim(),
+          taskType,
+          goal,
           accountId: pickedAccountId || undefined,
           provider: autonomyProvider.trim() || chosenAutonomyAccount?.harness,
           model: autonomyModel.trim() || undefined,
@@ -454,8 +461,6 @@ export default function CreateTaskDialog({
             </span>
           </div>
         )}
-        {!autonomyMode && (
-          <>
         <div className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">类型</span>
           <div className="intent-type-chips">
@@ -507,8 +512,6 @@ export default function CreateTaskDialog({
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
-          </>
-        )}
         <label className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">
             任务描述 <b className="intent-required">必填</b>

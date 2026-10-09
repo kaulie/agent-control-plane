@@ -1,17 +1,18 @@
 /**
- * 面板上**两块提示词分开管理**（走查式断言）：
+ * 主界面不再摊开两块提示词（走查式断言）：
  *
- * 1. 「任务意图」面板里 **task prompt**（需求原文）与 **初始化 system prompt** 是**两个块**，
- *    各自标明身份与来源（模板生成 / 这条 task 自己的）。
- * 2. 拿不到 `/prompts` 就不显示 system prompt 那块（**不编内容**）。
- * 3. 两块各走各的接口：`updateTaskIntent`（task prompt 那条轴）/ `updateTaskSystemPrompt`
- *    （只带 `systemPrompt` 一个字段）—— 互不覆盖是接口层就定死的。
+ * 1. 「任务意图」面板折叠态只留类型 / 标题 / 目标 / 编辑，**没有**
+ *    【task prompt】和【初始化 system prompt】预览块。
+ * 2. 即便调用方仍塞 `prompts` / `onSaveSystemPrompt`，面板也不渲染它们
+ *    （Props 已删，主界面不编这两块）。
+ * 3. App 不再拉 `/prompts`、不再接 `onSaveSystemPrompt`；描述仍走
+ *    `updateTaskIntent`。接口层两块仍然分开（改描述不动 system prompt）。
  *
  *   npx tsx --tsconfig web/tsconfig.json web/scripts/test-task-prompts-ui.mjs
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
+import path from "path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -49,70 +50,58 @@ const promptsTemplate = {
   taskPrompt: { text: "## Task identity\n- taskId: task-prompts-ui", description: task.description, chars: 40 },
 };
 
-// 两个块的"标题徽标"就是它们的身份标记（折叠按钮的 title 里也提到这两个名字，所以按元素断言）。
 const SYS_BLOCK = 'class="prompt-block-name">初始化 system prompt';
 const TASK_BLOCK = 'class="prompt-block-name">task prompt';
 
-const render = (props) =>
-  renderToStaticMarkup(
-    React.createElement(TaskIntentPanel, {
-      task,
-      onSave: async () => {},
-      ...props,
-    })
-  );
+const html = renderToStaticMarkup(
+  React.createElement(TaskIntentPanel, {
+    task,
+    onSave: async () => {},
+    // 旧调用方可能还塞这两项；面板必须忽略，不能把预览摊回主界面。
+    prompts: promptsTemplate,
+    onSaveSystemPrompt: async () => {},
+  }),
+);
 
-// ---- 1) 两个块都在，各自标明是什么 ----
-const withTemplate = render({
-  prompts: promptsTemplate,
-  onSaveSystemPrompt: async () => {},
-});
-assert.ok(withTemplate.includes(TASK_BLOCK), "要有 task prompt 那块");
-assert.ok(withTemplate.includes(SYS_BLOCK), "要有 system prompt 那块");
-assert.ok(withTemplate.includes("任务相关"), "要说明 task prompt 是任务相关那半");
-assert.ok(withTemplate.includes("不含这条 task 的具体信息"), "system prompt 那块要写明「只讲协议、不含具体信息」");
-assert.ok(withTemplate.includes("模板生成"), "来源要说清（模板生成 / 这条 task 自己的）");
-assert.ok(withTemplate.includes(task.description), "task prompt 那块要显示需求原文");
-assert.ok(withTemplate.includes(SYSTEM_TEXT.slice(0, 24)), "要显示 system prompt 的生效文本");
-assert.ok(withTemplate.includes("改这一块"), "system prompt 能单独改");
-assert.ok(!withTemplate.includes("恢复模板"), "没覆盖过 → 没有「恢复模板」这个动作");
+assert.ok(html.includes("新功能开发"), "折叠态要有类型徽标");
+assert.ok(html.includes(task.title), "折叠态要有标题");
+assert.ok(html.includes("合入主分支"), "折叠态要有目标徽标");
+assert.ok(html.includes("✎ 编辑"), "折叠态要有编辑入口");
+assert.ok(!html.includes(TASK_BLOCK), "主界面不再摊开 task prompt 预览块");
+assert.ok(!html.includes(SYS_BLOCK), "主界面不再摊开初始化 system prompt 预览块");
+assert.ok(!html.includes("改这一块"), "主界面没有单独改 system prompt 的入口");
+assert.ok(!html.includes("恢复模板"), "主界面没有恢复模板动作");
+assert.ok(
+  !html.includes(SYSTEM_TEXT.slice(0, 24)),
+  "主界面不显示 system prompt 原文（哪怕调用方塞了 prompts）",
+);
 
-// ---- 2) 覆盖过：来源变了，且给出「恢复模板」 ----
-const withOwn = render({
-  prompts: {
-    ...promptsTemplate,
-    systemPrompt: { ...promptsTemplate.systemPrompt, text: "自己的那份", source: "task" },
-  },
-  onSaveSystemPrompt: async () => {},
-});
-assert.ok(withOwn.includes("这条 task 自己的"), "覆盖过 → 来源写「这条 task 自己的」");
-assert.ok(withOwn.includes("恢复模板"), "覆盖过 → 可以恢复模板");
-assert.ok(withOwn.includes("自己的那份"), "显示的是覆盖后的生效文本");
+const panelSrc = fs.readFileSync(
+  path.join(here, "../src/components/TaskIntentPanel.tsx"),
+  "utf8",
+);
+assert.ok(panelSrc.includes("任务描述"), "编辑态用「任务描述」改需求原文");
+assert.ok(!panelSrc.includes("prompt-block-name"), "面板源码不再渲染提示词预览块");
 
-// ---- 3) 拿不到 / 执行方是 autonomy：不显示 system prompt 那块（不编内容）----
-const withoutPrompts = render({ onSaveSystemPrompt: async () => {} });
-assert.ok(withoutPrompts.includes(TASK_BLOCK), "task prompt 那块照旧");
-assert.ok(!withoutPrompts.includes(SYS_BLOCK), "拿不到就不显示，不编");
-
-// ---- 4) 接口层就分开（两块互不覆盖）----
 const appSrc = fs.readFileSync(path.join(here, "../src/App.tsx"), "utf8");
+assert.ok(appSrc.includes("api.updateTaskIntent(input.taskId"), "描述仍走 updateTaskIntent");
 assert.ok(
-  appSrc.includes("api.updateTaskSystemPrompt(taskId, text)"),
-  "system prompt 那条轴走 updateTaskSystemPrompt",
+  !appSrc.includes("onSaveSystemPrompt="),
+  "App 不再把 system prompt 编辑接到主面板",
 );
-assert.ok(appSrc.includes("api.updateTaskIntent(input.taskId"), "task prompt 那条轴走 updateTaskIntent");
 assert.ok(
-  appSrc.includes("onSaveSystemPrompt={(text) =>"),
-  "面板接的是**单独的** onSaveSystemPrompt（不是复用 onSave）",
+  !appSrc.includes("getTaskPrompts"),
+  "App 不再为了主界面预览去拉 /prompts",
 );
+
 const apiSrc = fs.readFileSync(path.join(here, "../src/api.ts"), "utf8");
 assert.ok(
   apiSrc.includes("systemPrompt: string | null) =>\n    write<Task>(`/tasks/${taskId}`, { method: \"PATCH\", body: { systemPrompt } })"),
-  "updateTaskSystemPrompt 只带 systemPrompt 一个字段",
+  "updateTaskSystemPrompt 只带 systemPrompt 一个字段（与描述互不覆盖）",
 );
 assert.ok(
   apiSrc.includes("getTaskPrompts: (taskId: string) =>"),
-  "有拉两份生效文本的接口",
+  "拉两份生效文本的接口还在（给别的入口用，主界面不再摊开）",
 );
 
-console.log("✅ task prompts UI OK（两块分开显示 / 分开保存 / 拿不到不编）");
+console.log("✅ task prompts UI OK（主界面不摊开两块提示词 / 描述仍走 updateTaskIntent）");

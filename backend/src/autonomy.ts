@@ -10,7 +10,8 @@
  *   GET  /health                    → { status, llm_backend, llm_model, turns }（部署平台探活路径）
  *   GET  /api/meta                  → { service, version, reason_turns, has_tasks_table, turns }
  *   POST /api/tasks                 → 202 { task_id, agent_id, status, message_id, queued }
- *         body: { description, context_ref: { project }, account_id?, model? }
+ *         body: { description, context_ref: { project }, account_id?, model?,
+ *                 goal_type?, completion_contracts? }
  *   GET  /api/accounts              → { accounts: [{ accountId, harness, vendor, label, model?,
  *                                       agentRootWorkspace?, enabled, isDefault, apiKeyMasked?, hasKey? }] }
  *         *账号池*：autonomy 的任务跑在哪个 harness / vendor / model 上由它决定（不再是环境变量）。
@@ -448,11 +449,24 @@ export class AutonomyClient {
      * autonomy 认 `model`；id 不在目录里时由它那边决定是否拒绝。
      */
     model?: string;
+    /**
+     * autonomy 工作分类（`goal_type`）。空 = 不传这个字段，由它默认 `dev_feature`。
+     * 控制面用 `autonomyGoalType()` 从 taskType 映射，交接时必须显式带上。
+     */
+    goalType?: string;
+    /**
+     * 呼叫方钉住的完成契约（`completion_contracts`，与 planner 首答同一套 JSON）。
+     * 空 = 不传，留给 planner 第一轮自己钉。控制面用 `autonomyCompletionContract()`
+     * 从交付目标（merge / deploy）生成。
+     */
+    completionContracts?: unknown;
   }): Promise<AutonomyCreateResult> {
     const description = input.description.trim();
     const projectId = input.projectId?.trim();
     const accountId = input.accountId?.trim();
     const model = input.model?.trim();
+    const goalType = input.goalType?.trim();
+    const completionContracts = input.completionContracts;
     if (!description) return { ok: false, error: "description is required (任务描述必填)" };
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${TASKS_PATH}`, {
@@ -464,6 +478,10 @@ export class AutonomyClient {
           ...(projectId ? { context_ref: { project: projectId } } : {}),
           ...(accountId ? { account_id: accountId } : {}),
           ...(model ? { model } : {}),
+          ...(goalType ? { goal_type: goalType } : {}),
+          ...(completionContracts != null
+            ? { completion_contracts: completionContracts }
+            : {}),
         }),
       });
       const payload = await res.json().catch(() => undefined);

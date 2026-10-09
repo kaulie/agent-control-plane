@@ -209,7 +209,47 @@ const json = async (res) => JSON.parse(res.body);
   assert.equal(after.events, before.events + 1, "时间线留一条交接说明（可审计）");
 
   const said = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
-  assert.deepEqual(said, { description: "写个 demo", projectId: PROJECT_ID }, "交接只带描述 + 项目上下文");
+  assert.equal(said.projectId, PROJECT_ID, "交接带项目上下文");
+  assert.match(said.description, /写个 demo/, "用户描述在交接需求里");
+  assert.match(said.description, /目标：合入主分支（merge）/, "创建时指定的交付目标写进交给 autonomy 的需求");
+  assert.match(said.description, /【需求投递】/, "交接用与本机同一份需求投递文本");
+  assert.equal(said.goalType, "dev_feature", "类型 general → 显式传 goal_type=dev_feature");
+  assert.equal(said.completionContracts.steps[0].name, "merged_to_main", "默认 merge 钉合入契约");
+  assert.match(said.completionContracts.steps[0].requirement, /合入主分支/, "契约 requirement 是交付目标原文");
+  assert.equal(task.goal, "merge", "没传目标 → 默认合入主分支");
+
+  const deployRes = await post("/api/tasks", {
+    description: "要上线",
+    projectId: PROJECT_ID,
+    agentPath: "autonomy",
+    goal: "deploy",
+    taskType: "feature",
+  });
+  assert.equal(deployRes.statusCode, 201);
+  const deployTask = await json(deployRes);
+  assert.equal(deployTask.goal, "deploy", "创建时指定的目标落库");
+  assert.equal(deployTask.taskType, "feature");
+  const deploySaid = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
+  assert.match(
+    deploySaid.description,
+    /目标：合入主分支并部署上线（deploy）/,
+    "指定 deploy 时交接需求带上线目标",
+  );
+  assert.equal(deploySaid.goalType, "dev_feature", "feature → goal_type=dev_feature");
+  assert.equal(deploySaid.completionContracts.steps[0].name, "merged_and_deployed");
+  assert.match(deploySaid.completionContracts.steps[0].requirement, /部署上线/);
+
+  const bugfixRes = await post("/api/tasks", {
+    description: "修登录",
+    projectId: PROJECT_ID,
+    agentPath: "autonomy",
+    goal: "merge",
+    taskType: "bugfix",
+  });
+  assert.equal(bugfixRes.statusCode, 201);
+  const bugfixSaid = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
+  assert.equal(bugfixSaid.goalType, "resolve_issue", "bugfix → goal_type=resolve_issue");
+  assert.equal(bugfixSaid.completionContracts.steps[0].name, "merged_to_main");
 
   // 按**我们的 taskId** 读执行方状态/进展
   const exec = await app.inject({
@@ -430,11 +470,10 @@ const json = async (res) => JSON.parse(res.body);
   });
   assert.equal(withAccount.statusCode, 201);
   const said = autonomy.calls.filter((c) => c[0] === "createTask").at(-1)[1];
-  assert.deepEqual(
-    said,
-    { description: "跑在 deepseek 上", projectId: PROJECT_ID, accountId: "acct-1" },
-    "账号 id trim 后带过去",
-  );
+  assert.equal(said.projectId, PROJECT_ID);
+  assert.equal(said.accountId, "acct-1", "账号 id trim 后带过去");
+  assert.match(said.description, /跑在 deepseek 上/);
+  assert.match(said.description, /目标：合入主分支（merge）/);
 
   const withModel = await post("/api/tasks", {
     description: "指定模型",

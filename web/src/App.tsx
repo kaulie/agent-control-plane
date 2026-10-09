@@ -713,7 +713,10 @@ export default function App() {
    */
   const createAutonomyTask = useCallback(
     async (input: {
+      title?: string;
       description: string;
+      taskType: TaskType;
+      goal: TaskGoal;
       accountId?: string;
       provider?: string;
       model?: string;
@@ -722,7 +725,10 @@ export default function App() {
       if (!selectedProjectId) return;
       try {
         const task = await api.createTask({
+          title: input.title,
           description: input.description,
+          taskType: input.taskType,
+          goal: input.goal,
           projectId: selectedProjectId,
           agentPath: "autonomy",
           // 选了 autonomy 池子里的哪条账号（不选 = 交给它的池子解析）。

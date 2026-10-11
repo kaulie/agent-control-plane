@@ -752,7 +752,7 @@ export interface AutonomyTaskList {
 /**
  * `GET /api/autonomy/accounts` 的一行：autonomy 账号池里的一条账号。
  *
- * 一条账号 = 一个 harness（`cursor` / `cline` / `codex`）+ 一个 vendor + 一份凭据；
+ * 一条账号 = 一个 harness（`cursor` / `cline` / `codex` / `claude`）+ 一个 vendor + 一份凭据；
  * 「交给 autonomy」的任务跑在哪个 harness / vendor / model / 工作目录上，就是选它。
  * **没有 key 原文**（autonomy 只回掩码），页面也别想显示它。
  */

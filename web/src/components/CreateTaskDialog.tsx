@@ -223,6 +223,20 @@ export default function CreateTaskDialog({
       if (models.length === 0 && harness === "cursor") {
         models = ["composer-2", "composer-2.5"];
       }
+      if (models.length === 0 && harness === "claude") {
+        models = ["sonnet", "opus", "haiku", "fable", "opusplan"];
+      }
+      if (models.length === 0 && harness === "codex") {
+        models = [
+          "gpt-5-codex",
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.3-codex",
+          "gpt-5.2-codex",
+          "o3",
+          "o4-mini",
+        ];
+      }
       const accountModel = chosenAutonomyAccount?.model?.trim();
       if (accountModel && !models.includes(accountModel)) {
         models = [accountModel, ...models];
@@ -681,30 +695,30 @@ export default function CreateTaskDialog({
             </label>
             <label className="runtime-field">
               <span className="runtime-field-label">Model</span>
-              <select
+              <input
                 className="runtime-select"
+                list="autonomy-model-options"
                 value={autonomyModel}
                 disabled={!autonomyHarness}
-                title={
-                  autonomyHarness
-                    ? undefined
-                    : "先选 Provider 或账号，再选模型"
-                }
-                onChange={(e) => setAutonomyModel(e.target.value)}
-              >
-                <option value="">
-                  {autonomyModelsLoading
+                placeholder={
+                  autonomyModelsLoading
                     ? "加载模型中…"
                     : chosenAutonomyAccount?.model
                       ? `账号默认：${chosenAutonomyAccount.model}`
-                      : "账号 / harness 默认"}
-                </option>
+                      : "账号 / harness 默认（可手填）"
+                }
+                title={
+                  autonomyHarness
+                    ? "Codex / Claude 可从列表选，也可手填 CLI 认的 id"
+                    : "先选 Provider 或账号，再选模型"
+                }
+                onChange={(e) => setAutonomyModel(e.target.value)}
+              />
+              <datalist id="autonomy-model-options">
                 {autonomyModels.map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
+                  <option key={id} value={id} />
                 ))}
-              </select>
+              </datalist>
             </label>
             {autonomyAccountsError && (
               <span className="intent-hint">

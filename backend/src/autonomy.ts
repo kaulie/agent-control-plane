@@ -110,7 +110,7 @@ export type AutonomyTaskDetail = Record<string, unknown>;
 /**
  * `GET /api/accounts` 的一行：autonomy 账号池里的一条账号。
  *
- * 一条账号 = 一个 harness（`cursor` / `cline` / `codex`）+ 一个 vendor + 一份凭据，
+ * 一条账号 = 一个 harness（`cursor` / `cline` / `codex` / `claude`）+ 一个 vendor + 一份凭据，
  * 任务的 harness / vendor / model / 工作目录都从它来。**没有 key 原文**（autonomy 只回掩码，
  * 这是它的类型层面保证）—— 这里也照抄，别给它补一个字段。
  */

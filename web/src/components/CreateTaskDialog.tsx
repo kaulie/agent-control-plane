@@ -250,10 +250,6 @@ export default function CreateTaskDialog({
           "gpt-6.1-sol",
           "gpt-6-sol",
           "gpt-6-luna",
-          "gpt-5.5",
-          "gpt-5-codex",
-          "o3",
-          "o4-mini",
         ];
       }
       const accountModel = chosenAutonomyAccount?.model?.trim();

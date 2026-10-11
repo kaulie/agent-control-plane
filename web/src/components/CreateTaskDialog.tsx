@@ -224,7 +224,23 @@ export default function CreateTaskDialog({
         models = ["composer-2", "composer-2.5"];
       }
       if (models.length === 0 && harness === "claude") {
-        models = ["sonnet", "opus", "haiku", "fable", "opusplan"];
+        models = [
+          "claude-sonnet-5-5",
+          "claude-sonnet-4-6",
+          "claude-sonnet-4-5",
+          "claude-opus-5-5",
+          "claude-opus-4-8",
+          "claude-opus-4-6",
+          "claude-haiku-5-5",
+          "claude-haiku-4-5",
+          "claude-fable-5-1",
+          "claude-fable-5",
+          "sonnet",
+          "opus",
+          "haiku",
+          "fable",
+          "opusplan",
+        ];
       }
       if (models.length === 0 && harness === "codex") {
         models = [

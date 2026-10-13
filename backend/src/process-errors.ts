@@ -27,9 +27,29 @@ export function isBenignSdkClosedStreamError(reason: unknown): boolean {
   return false;
 }
 
-/** True → keep serving; false → existing fatal crash path. */
-export function shouldExitOnProcessError(reason: unknown): boolean {
-  return !isBenignSdkClosedStreamError(reason);
+/**
+ * Cursor SDK 1.0.30 can leak a transport rejection alongside its run error.
+ * Only recognize the observed Connect unavailable error from an SDK frame;
+ * matching message text alone would hide unrelated application failures.
+ */
+export function isCursorSdkUnavailableError(reason: unknown): boolean {
+  if (!(reason instanceof Error)) return false;
+  const error = reason as Error & { code?: unknown };
+  return (
+    error.name === "ConnectError" &&
+    error.code === 14 &&
+    /^\[unavailable\](?:\s|$)/.test(error.message) &&
+    /(?:^|\n)\s+at [^\n]*[\\/]node_modules[\\/]@cursor[\\/]sdk[\\/]dist[\\/]/.test(error.stack ?? "")
+  );
+}
+
+/** False keeps serving; true preserves the fatal crash path. */
+export function shouldExitOnProcessError(
+  reason: unknown,
+  kind: "uncaughtException" | "unhandledRejection" = "uncaughtException",
+): boolean {
+  if (isBenignSdkClosedStreamError(reason)) return false;
+  return !(kind === "unhandledRejection" && isCursorSdkUnavailableError(reason));
 }
 
 function isClosedStreamName(name: string | undefined): boolean {

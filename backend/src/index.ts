@@ -26,7 +26,7 @@ import {
   readPreviousExit,
   readPreviousShutdown,
 } from "./shutdown.js";
-import { shouldExitOnProcessError } from "./process-errors.js";
+import { isCursorSdkUnavailableError, shouldExitOnProcessError } from "./process-errors.js";
 
 const config = loadConfig();
 /** Prefer on-disk VERSION so /health matches rsynced web assets mid-restart. */
@@ -76,8 +76,8 @@ function writeCrashReport(kind: string, err: unknown): void {
 }
 
 process.on("uncaughtException", (err) => {
-  if (!shouldExitOnProcessError(err)) {
-    logBenignSdkClosedStream("uncaughtException", err);
+  if (!shouldExitOnProcessError(err, "uncaughtException")) {
+    logNonFatalSdkError("uncaughtException", err);
     return;
   }
   writeCrashReport("uncaughtException", err);
@@ -86,8 +86,8 @@ process.on("uncaughtException", (err) => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  if (!shouldExitOnProcessError(reason)) {
-    logBenignSdkClosedStream("unhandledRejection", reason);
+  if (!shouldExitOnProcessError(reason, "unhandledRejection")) {
+    logNonFatalSdkError("unhandledRejection", reason);
     return;
   }
   writeCrashReport("unhandledRejection", reason);
@@ -95,7 +95,14 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-function logBenignSdkClosedStream(kind: string, reason: unknown): void {
+function logNonFatalSdkError(kind: string, reason: unknown): void {
+  if (isCursorSdkUnavailableError(reason)) {
+    console.warn(
+      `[sdk] non-fatal ${kind}: Cursor transport unavailable (code=14); gateway kept alive, run failure is handled by the provider`,
+      reason,
+    );
+    return;
+  }
   const detail =
     reason instanceof Error
       ? `${reason.name}: ${reason.message}`

@@ -142,6 +142,15 @@ export function ExecutorTaskBody({
         ) : null}
       </div>
 
+      {/* 对账行没有主区上方的意图条：描述钉在滚动区顶上，计划/轮次变长时不滚走。
+          我们建的任务描述在 TaskIntentPanel 里，这里不重复。 */}
+      {via === "executor" && description ? (
+        <div className="task-brief">
+          <span className="task-brief-label">任务描述</span>
+          <p className="task-brief-text">{description}</p>
+        </div>
+      ) : null}
+
       {/* 计划：正在规划 / 最新计划 + 已完成 step + 当前 step 的进展 */}
       <PlanSection detail={detail} status={status} />
 
@@ -160,12 +169,6 @@ export function ExecutorTaskBody({
           <div className="auto-detail-row">
             <span>error</span>
             <span className="auto-err">{String(detail.error)}</span>
-          </div>
-        ) : null}
-        {description ? (
-          <div className="auto-detail-row">
-            <span>描述</span>
-            <span className="auto-detail-text">{description}</span>
           </div>
         ) : null}
         {world ? (
@@ -220,7 +223,7 @@ export default function AutonomyTaskPanel({
   autonomyTarget,
 }: Props) {
   return (
-    <>
+    <div className="task-fill">
       <TaskIdsBar
         task={{
           taskId,
@@ -232,13 +235,15 @@ export default function AutonomyTaskPanel({
         agentPath="autonomy"
         autonomyTarget={autonomyTarget ?? row?.autonomyTarget}
       />
-      <ExecutorTaskBody
-        taskId={taskId}
-        via="executor"
-        autonomyTarget={autonomyTarget ?? row?.autonomyTarget}
-        {...(row ? { row } : {})}
-        {...(meta ? { meta } : {})}
-      />
-    </>
+      <div className="task-stream">
+        <ExecutorTaskBody
+          taskId={taskId}
+          via="executor"
+          autonomyTarget={autonomyTarget ?? row?.autonomyTarget}
+          {...(row ? { row } : {})}
+          {...(meta ? { meta } : {})}
+        />
+      </div>
+    </div>
   );
 }

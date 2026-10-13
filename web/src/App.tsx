@@ -1267,6 +1267,9 @@ export default function App() {
             />
           ) : selectedId && detail ? (
             <>
+              {/* 任务详情钉在主区上方：轮次 / 事件流再长，也只滚中间那一栏，
+                  描述不会被顶到屏幕最底下。 */}
+              <div className="task-detail-dock">
               <TaskIdsBar
                 task={
                   detail.task.agentPath === "autonomy"
@@ -1281,16 +1284,13 @@ export default function App() {
                 agentPath={detail.task.agentPath ?? "control-plane"}
                 autonomyTarget={detail.task.autonomyTarget}
               />
-              {/* agent 由 autonomy 创建：读它的状态/进展（代理）；跑不了的本地块一概不画。 */}
-              {detail.task.agentPath === "autonomy" ? (
-                <ExecutorTaskBody
-                  taskId={detail.task.taskId}
-                  autonomyTarget={detail.task.autonomyTarget}
-                  {...(selectedRow ? { row: selectedRow } : {})}
-                  {...(selectedAutonomyMeta ? { meta: selectedAutonomyMeta } : {})}
-                  reloadSignal={executorReload}
-                />
-              ) : null}
+              <TaskIntentPanel
+                task={detail.task}
+                delivery={intentDelivery}
+                onSave={(patch) =>
+                  saveTaskIntent({ taskId: detail.task.taskId, ...patch })
+                }
+              />
               {detail.task.agentPath === "autonomy" ? null : (
               <AgentRoundsBar
                 runs={detail.runs}
@@ -1312,6 +1312,18 @@ export default function App() {
                   />
                 </>
               )}
+              </div>
+              <div className="task-stream">
+              {/* agent 由 autonomy 创建：读它的状态/进展（代理）；跑不了的本地块一概不画。 */}
+              {detail.task.agentPath === "autonomy" ? (
+                <ExecutorTaskBody
+                  taskId={detail.task.taskId}
+                  autonomyTarget={detail.task.autonomyTarget}
+                  {...(selectedRow ? { row: selectedRow } : {})}
+                  {...(selectedAutonomyMeta ? { meta: selectedAutonomyMeta } : {})}
+                  reloadSignal={executorReload}
+                />
+              ) : null}
               {/* 事件流（交互细节 + 它的折叠/保留控制）只对**我们自己执行**的任务有意义：
                   agent 由 autonomy 创建的任务没有本地 run，就不画（规则见 taskDetailBlocks）。 */}
               {detailBlocks.eventStream ? (
@@ -1329,6 +1341,7 @@ export default function App() {
                   cancellingQueuedRunId={cancellingQueuedRunId}
                 />
               ) : null}
+              </div>
               {pendingPlanQuestions && (
                 <PlanQuestionsWizard
                   batch={pendingPlanQuestions}
@@ -1336,13 +1349,6 @@ export default function App() {
                   onSubmit={(answers) => void submitPlanAnswers(answers)}
                 />
               )}
-              <TaskIntentPanel
-                task={detail.task}
-                delivery={intentDelivery}
-                onSave={(patch) =>
-                  saveTaskIntent({ taskId: detail.task.taskId, ...patch })
-                }
-              />
               {detail.task.agentPath === "autonomy" ? (
                 /* agent 由 autonomy 创建：同一个输入框，但消息**投递给执行方**（本机不跑 run）。 */
                 <ExecutorChat

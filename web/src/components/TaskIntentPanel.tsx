@@ -27,10 +27,10 @@ interface Props {
 }
 
 /**
- * 任务意图面板：**pin 在聊天框上方**的独立 panel。
+ * 任务意图面板：钉在主区**上方**（事件流之外）。
  *
- * 主界面只显示类型 + 目标 + 标题；描述与协议提示词不再摊开。
- * 折叠态只占一行，不抢聊天区的空间。
+ * 折叠态显示类型 + 目标 + 标题 + 任务描述。描述留在这里，轮次再多也不会被事件流顶走。
+ * 协议提示词不在主界面摊开；要改描述得点「编辑」。
  */
 export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
   const [editing, setEditing] = useState(false);
@@ -54,6 +54,7 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
     setError(null);
   }, [task.taskId, task.title, task.description, task.taskType, task.goal]);
 
+  const descriptionText = (task.description ?? "").trim();
   const option = taskTypeOption(taskType);
   const dirty =
     title.trim() !== task.title ||
@@ -123,6 +124,10 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
           ✎ 编辑
         </button>
       </div>
+
+      {!editing && descriptionText && descriptionText !== task.title.trim() ? (
+        <p className="task-intent-desc">{descriptionText}</p>
+      ) : null}
 
       {editing ? (
         <div className="task-intent-editor">

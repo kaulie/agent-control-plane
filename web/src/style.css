@@ -396,17 +396,22 @@ body {
   background: color-mix(in srgb, #a06bff 26%, var(--bg-3));
 }
 
-/* ---- 任务意图面板：pin 在聊天框上方 ---- */
+/* ---- 任务意图面板：钉在主区上方，不跟事件流一起滚 ---- */
 
 .task-intent {
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   padding: 7px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 编辑态可能很高：自己滚，别把事件流挤没。 */
+.task-intent.expanded {
   max-height: 42vh;
-  overflow-y: auto;
+  overflow: auto;
 }
 
 .task-intent-head {
@@ -451,6 +456,7 @@ body {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
+.task-intent-desc,
 .task-intent-body .task-intent-desc {
   margin: 0;
   font-size: 12.5px;
@@ -458,6 +464,12 @@ body {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 折叠态的描述自己滚，不把下面的事件流挤出屏幕。大约 6 行。 */
+.task-intent > .task-intent-desc {
+  max-height: 9em;
+  overflow: auto;
 }
 
 .task-intent-body.collapsed .task-intent-desc {
@@ -637,7 +649,36 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
+}
+
+/* 详情（id / 标题 / 描述 / 用量）固定在上方；中间事件流或执行进展单独滚。 */
+.task-detail-dock {
+  /* 不跟中间的事件流抢高度（flex-shrink: 0）。窄屏用量折行时封顶，自己滚。 */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(46vh, calc(100% - 220px));
+  overflow: auto;
+}
+
+.task-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.task-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* ---- 主区**两套模板**：本地执行的 agent 与「执行方 autonomy」代理的 ------------------------
@@ -1622,6 +1663,7 @@ button.agent-rounds-chip-link:focus-visible {
   padding: 12px 16px;
   background: var(--bg-2);
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .chat-mode-hint {
@@ -3488,6 +3530,36 @@ button.agent-rounds-chip-link:focus-visible {
   color: #ffd79a;
 }
 
+/* 对账行没有上方的任务意图条：描述钉在滚动区顶部，计划变长时也不滚走。 */
+.task-brief {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 0 8px;
+  padding: 8px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.task-brief-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.task-brief-text {
+  margin: 0;
+  max-height: 9em;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .auto-detail {
   margin: 16px;
   padding: 12px;
@@ -3649,6 +3721,7 @@ button.agent-rounds-chip-link:focus-visible {
 /* ---- 给执行方（autonomy）发消息：输入框 + 投递回执 + 本页投递记录 ---- */
 .executor-chat {
   margin: 16px;
+  flex-shrink: 0;
 }
 .executor-chat-head {
   display: flex;

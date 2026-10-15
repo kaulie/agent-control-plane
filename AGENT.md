@@ -23,6 +23,7 @@ Gateway 默认把本地 agent 的 `cwd` 设为 task workspace，并启用 `setti
   - 脚本：`scripts/start.sh` / `stop.sh` / `watchdog.sh` 用同一套解析，`start.sh` 会把端口导出给 node，
     保证「监听端口」与「健康检查 / 端口清理」始终一致。
   - 开发代理：`web/vite.config.ts` 也按同一优先级取后端端口，改端口不再需要手改代理目标。
+- 监听主机按 **`HOST` → `0.0.0.0`** 解析（`resolveHost()`）。未设置时绑全部 IPv4 网卡，公网地址可以访问。只允许本机访问时设 `HOST=127.0.0.1`（环境变量优先于 `backend/.env`）。空白或带空白的 `HOST` 会告警并回退默认。`start.sh` 不导出默认 `HOST`，避免挡住 `.env`。
 - **线上（runtime）默认端口为 `4211`**，开发阶段必须避开，改用其它端口（例如 `SERVICE_PORT=4212` 或 `PORT=4212`）。
 - 切换开发端口（二选一即可，代理会自动跟随）：
   1. `backend/.env` → `SERVICE_PORT=4212`（或 `PORT=4212`）

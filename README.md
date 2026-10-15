@@ -66,7 +66,9 @@ npm run dev
 ```
 
 The gateway port resolves as **`SERVICE_PORT` → `PORT` → `4211`**; the Vite dev
-proxy follows the same order, so changing the port only requires setting it once:
+proxy follows the same order, so changing the port only requires setting it once.
+The listen host resolves as **`HOST` → `0.0.0.0`** (all IPv4 interfaces). Set
+`HOST=127.0.0.1` when the process should accept only local connections:
 
 ```bash
 SERVICE_PORT=4212 npm run dev      # backend + proxy both on 4212

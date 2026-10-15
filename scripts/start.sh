@@ -16,6 +16,9 @@ LOG_BACKUPS="${LOG_BACKUPS:-5}"
 # 监听端口：SERVICE_PORT（部署平台约定）→ PORT（兼容旧用法）→ 4211（线上默认）。
 PORT="${SERVICE_PORT:-${PORT:-4211}}"
 export PORT   # 让 node 子进程与健康检查/端口清理使用同一个端口
+# 监听主机由 node 解析：已有 HOST（环境优先于 backend/.env）原样使用，否则 0.0.0.0。
+# 不在这里 export 默认值，否则 .env 里的 HOST=127.0.0.1 会被进程环境挡住。
+# 探活固定打 127.0.0.1：绑全网卡时回环仍然可达，curl 也不用去请求 0.0.0.0。
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 PAUSED_FLAG="${BACKEND_DIR}/.watchdog-paused"
 

@@ -20,6 +20,14 @@ export const DEFAULT_AGENT_WORKSPACE_ROOT = "/Users/gaolei/agent-workspace";
 export const DEFAULT_PORT = 4211;
 
 /**
+ * Fallback listen host when `HOST` is unset or blank.
+ * `0.0.0.0` binds every IPv4 interface so a public address is reachable
+ * (overseas runtime was loopback-only and refused `http://<public-ip>:4211`).
+ * Set `HOST=127.0.0.1` to keep the process on loopback.
+ */
+export const DEFAULT_HOST = "0.0.0.0";
+
+/**
  * Fallback cap on concurrently running agent runs
  * (`AGENT_MAX_CONCURRENT_RUNS`). Bumped 2 → 4 so a fresh deploy runs four
  * agents at once without env tweaks.
@@ -203,6 +211,32 @@ export function resolvePort(
 }
 
 /**
+ * Startup listen host:
+ *
+ *   HOST (trimmed, single token)  →  DEFAULT_HOST (0.0.0.0)
+ *
+ * Blank is ignored. A value containing whitespace is ignored (with a warning)
+ * so a broken env line cannot hand Fastify a host it would reject at boot.
+ * Process environment wins over `backend/.env` because `loadEnvFile` does not
+ * override variables that are already set.
+ */
+export function resolveHost(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const raw = env.HOST;
+  if (raw == null) return DEFAULT_HOST;
+  const trimmed = raw.trim();
+  if (!trimmed) return DEFAULT_HOST;
+  if (/\s/.test(trimmed)) {
+    console.warn(
+      `[config] ignoring invalid HOST="${trimmed}" (expected a single host token); using ${DEFAULT_HOST}`,
+    );
+    return DEFAULT_HOST;
+  }
+  return trimmed;
+}
+
+/**
  * Global cap on concurrently running agent runs, resolved from
  * `AGENT_MAX_CONCURRENT_RUNS`:
  *
@@ -279,6 +313,7 @@ export interface Config {
   appVersion: string;
   /** Listen port: SERVICE_PORT → PORT → 4211 (see resolvePort). */
   port: number;
+  /** Listen host: HOST → 0.0.0.0 (see resolveHost). */
   host: string;
   apiKey: string | undefined;
   /** Root directory; new tasks use `<root>/agent-<agentid>/`. */
@@ -447,7 +482,7 @@ export function loadConfig(): Config {
   return {
     appVersion: process.env.APP_VERSION?.trim() || "dev",
     port: resolvePort(process.env),
-    host: process.env.HOST || "127.0.0.1",
+    host: resolveHost(process.env),
     apiKey: process.env.CURSOR_API_KEY || undefined,
     agentWorkspaceRoot,
     agentWorkspace: agentWorkspaceRoot,

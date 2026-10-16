@@ -2346,12 +2346,12 @@ export class AgentGateway {
       }
       if (rows.length > 0) {
         console.warn(
-          `[concurrency-series] restored ${rows.length} samples from sqlite`,
+          `[concurrency-series] restored ${rows.length} samples from the store`,
         );
       }
     } catch (err) {
       console.warn(
-        `[concurrency-series] failed to load from sqlite: ${String(err)}`,
+        `[concurrency-series] failed to load from the store: ${String(err)}`,
       );
     }
   }

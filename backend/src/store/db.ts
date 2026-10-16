@@ -2,6 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { PostgresSync } from "./pg-sync.js";
+import {
+  adaptPostgresDdl,
+  describeDatabaseUrl,
+  isUniqueEventIdError,
+  type SqlDatabase,
+} from "./sql-dialect.js";
 import { isAgentPath, normalizeAgentPath, type AgentPath } from "../agent-path.js";
 import {
   isAutonomyTarget,
@@ -180,13 +187,6 @@ function roundCents(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function isUniqueEventIdError(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    /UNIQUE constraint failed: events\.event_id/i.test(err.message)
-  );
-}
-
 /** `billing_rules` 行（snake_case，价格 = 本币 / 1M tokens）。 */
 interface BillingRuleRow {
   rule_id: string;
@@ -244,19 +244,89 @@ function toBillingRule(r: BillingRuleRow): BillingRule {
 }
 
 export class Store {
-  private db: DatabaseSync;
+  private db: SqlDatabase;
+  private readonly dialect: "sqlite" | "postgres";
   /** Guard for close(): shutdown may run twice (two signals, crash path). */
   private closed = false;
 
   constructor(dataDir: string) {
     fs.mkdirSync(dataDir, { recursive: true });
-    this.db = new DatabaseSync(path.join(dataDir, "web_cursor.db"));
-    this.db.exec("PRAGMA journal_mode = WAL;");
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (databaseUrl) {
+      this.dialect = "postgres";
+      this.db = new PostgresSync(databaseUrl);
+      console.warn(`[store] postgres ${describeDatabaseUrl(databaseUrl)}`);
+    } else {
+      this.dialect = "sqlite";
+      this.db = new DatabaseSync(path.join(dataDir, "web_cursor.db"));
+      this.execSchema("PRAGMA journal_mode = WAL;");
+    }
     this.migrate();
+    if (
+      this.dialect === "postgres" &&
+      process.env.WEB_CURSOR_SQLITE_CUTOVER === "1" &&
+      this.db instanceof PostgresSync
+    ) {
+      const sqlitePath = path.join(dataDir, "web_cursor.db");
+      if (fs.existsSync(sqlitePath)) {
+        this.db.importSqlite(sqlitePath, { finalize: true });
+      }
+    }
+  }
+
+  /**
+   * Copy SQLite rows into Postgres. Does not copy `events` (agent event history).
+   * `finalize` records the cutover so later startups leave Postgres alone.
+   */
+  importSqlite(sqlitePath: string, opts: { finalize?: boolean } = {}): void {
+    if (!(this.db instanceof PostgresSync)) {
+      throw new Error("importSqlite requires DATABASE_URL");
+    }
+    this.db.importSqlite(sqlitePath, { finalize: opts.finalize === true });
+  }
+
+  private execSchema(sql: string): void {
+    this.db.exec(this.dialect === "postgres" ? adaptPostgresDdl(sql) : sql);
+  }
+
+  private columnNames(table: string): string[] {
+    if (this.dialect === "postgres") {
+      const rows = this.db
+        .prepare(
+          `SELECT column_name AS name
+           FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = ?
+           ORDER BY ordinal_position`,
+        )
+        .all(table) as Array<{ name: string }>;
+      return rows.map((row) => row.name);
+    }
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    return rows.map((row) => row.name);
+  }
+
+  private hasTable(name: string): boolean {
+    if (this.dialect === "postgres") {
+      return Boolean(
+        this.db
+          .prepare(
+            `SELECT 1 AS ok FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = ?`,
+          )
+          .get(name),
+      );
+    }
+    return Boolean(
+      this.db
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+        .get(name),
+    );
   }
 
   private migrate(): void {
-    this.db.exec(`
+    this.execSchema(`
       CREATE TABLE IF NOT EXISTS tasks (
         task_id   TEXT PRIMARY KEY,
         title     TEXT NOT NULL,
@@ -317,76 +387,82 @@ export class Store {
         settings_json TEXT NOT NULL DEFAULT '{}',
         updated_at    TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS store_meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
 
-    const taskCols = this.db
-      .prepare(`PRAGMA table_info(tasks)`)
-      .all() as unknown as Array<{ name: string }>;
+    const taskCols = this.columnNames("tasks").map((name) => ({ name }));
     if (!taskCols.some((c) => c.name === "project_id")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN project_id TEXT`);
     }
     if (!taskCols.some((c) => c.name === "created_by")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN created_by TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN created_by TEXT`);
     }
     if (!taskCols.some((c) => c.name === "agent_id")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN agent_id TEXT`);
     }
     if (!taskCols.some((c) => c.name === "agent_preallocated")) {
       // 预分配标记：新建任务时 agent id 由网关生成（= 工作区目录名 `agent-<agentid>`），
       // 那时它还不是活的会话。历史任务没有这个标记 → 0（老行为：resume 老会话）。
-      this.db.exec(
+      this.execSchema(
         `ALTER TABLE tasks ADD COLUMN agent_preallocated INTEGER NOT NULL DEFAULT 0`,
       );
     }
     if (!taskCols.some((c) => c.name === "task_type")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN task_type TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN task_type TEXT`);
     }
     if (!taskCols.some((c) => c.name === "pr_url")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     }
     if (!taskCols.some((c) => c.name === "goal")) {
       // 任务目标（合入主分支 / 合入并部署）。历史任务为 NULL = 没有目标，
       // 保持老行为（开完 PR 停），所以这里**不做** backfill。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN goal TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN goal TEXT`);
     }
     if (!taskCols.some((c) => c.name === "description")) {
       // 任务描述（需求原文）：新建时必填；老任务为 NULL（面板会提示补上）。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN description TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN description TEXT`);
     }
     if (!taskCols.some((c) => c.name === "system_prompt")) {
       // 这条 task 自己的**初始化 system prompt**（与描述/需求原文那条轴分开管理）。
       // 历史任务为 NULL = 用模板生成，**不做 backfill**（老行为逐字节不变）。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN system_prompt TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN system_prompt TEXT`);
     }
     if (!taskCols.some((c) => c.name === "context_digest")) {
       // 模型生成的会话摘要（默认关闭；开了以后按水位缓存，见 gateway.contextDigestFor）。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest TEXT`);
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest_at TEXT`);
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN context_digest_seq INTEGER`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN context_digest TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN context_digest_at TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN context_digest_seq INTEGER`);
     }
     if (!taskCols.some((c) => c.name === "forked_from")) {
       // fork 新 task 时记来源；老库自动补列（透明化：页面能显示"fork 自 #xxx"）。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN forked_from TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN forked_from TEXT`);
     }
     if (!taskCols.some((c) => c.name === "agent_path")) {
       // agent 创建路径：老任务为 NULL（读出来 = control-plane，老行为不变）。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_path TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN agent_path TEXT`);
     }
     if (!taskCols.some((c) => c.name === "executor_task_id")) {
       // 执行方（autonomy）那侧的 task / agent id —— 只有 agentPath=autonomy 的 task 才有。
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_task_id TEXT`);
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN executor_agent_id TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN executor_task_id TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN executor_agent_id TEXT`);
     }
     if (!taskCols.some((c) => c.name === "account_id")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN account_id TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN account_id TEXT`);
     }
     if (!taskCols.some((c) => c.name === "autonomy_target")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN autonomy_target TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN autonomy_target TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "workflow_state")) {
+      // 旧库有这一列、当前代码不读写。迁库时保留，避免丢掉已有值。
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN workflow_state TEXT`);
     }
     if (!taskCols.some((c) => c.name === "last_user_input_at")) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
+      this.execSchema(`ALTER TABLE tasks ADD COLUMN last_user_input_at TEXT`);
       // Backfill: latest user_message event, else created_at.
-      this.db.exec(`
+      this.execSchema(`
         UPDATE tasks
         SET last_user_input_at = COALESCE(
           (
@@ -401,7 +477,7 @@ export class Store {
       `);
     }
 
-    this.db.exec(`
+    this.execSchema(`
       CREATE TABLE IF NOT EXISTS agent_successions (
         succession_id    TEXT PRIMARY KEY,
         task_id          TEXT NOT NULL,
@@ -424,14 +500,12 @@ export class Store {
 
     // 透明化（PR-5）：succession 带过去的 seed 体量（token 估算）——
     // 以前只记条数，看不出"切模式把 1M 上下文搬进新会话"。
-    const successionCols = this.db
-      .prepare(`PRAGMA table_info(agent_successions)`)
-      .all() as unknown as Array<{ name: string }>;
+    const successionCols = this.columnNames("agent_successions").map((name) => ({ name }));
     if (!successionCols.some((c) => c.name === "seeded_tokens")) {
-      this.db.exec(`ALTER TABLE agent_successions ADD COLUMN seeded_tokens INTEGER`);
+      this.execSchema(`ALTER TABLE agent_successions ADD COLUMN seeded_tokens INTEGER`);
     }
 
-    this.db.exec(`
+    this.execSchema(`
       CREATE TABLE IF NOT EXISTS concurrency_samples (
         t TEXT PRIMARY KEY,
         running_count INTEGER NOT NULL
@@ -442,7 +516,7 @@ export class Store {
 
     // 计费规则表（billing 模块的唯一数据源）：模型价目 + 峰谷时段规则。
     // 价格单位 = 规则本币 / 1M tokens；错峰窗口用 UTC 分钟 [start, end)，跨 0 点 start > end。
-    this.db.exec(`
+    this.execSchema(`
       CREATE TABLE IF NOT EXISTS billing_rules (
         rule_id             TEXT PRIMARY KEY,
         provider            TEXT NOT NULL,
@@ -469,7 +543,7 @@ export class Store {
 
     // Provider + 账号池：一把 key = 一行。Cursor 多账号、Cline 下多个 deepseek /
     // minimax 账号都可以同时存在。完整 api_key 只存在这张表，HTTP 层只回掩码。
-    this.db.exec(`
+    this.execSchema(`
       CREATE TABLE IF NOT EXISTS provider_accounts (
         account_id            TEXT PRIMARY KEY,
         provider              TEXT NOT NULL,
@@ -487,42 +561,35 @@ export class Store {
         ON provider_accounts(provider, vendor, enabled);
     `);
 
-    this.db.exec(
+    this.execSchema(
       `UPDATE tasks SET task_type = 'general' WHERE task_type IS NULL OR task_type = ''`,
     );
-    this.db.exec(
+    this.execSchema(
       `CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
     );
     // Agent board（`GET /api/agents`）要按 (task, agent) 取「最后活跃时间」：
     // 没有这个索引时 `MAX(timestamp) GROUP BY task_id, agent_id` 要全表扫 events
     // （实测 47 万行 ≈ 0.65s，会卡住网关事件循环；建索引后 ≈ 0.13s）。
-    this.db.exec(
+    this.execSchema(
       `CREATE INDEX IF NOT EXISTS idx_events_agent_time
          ON events(task_id, agent_id, timestamp)`,
     );
 
-    const projectCols = this.db
-      .prepare(`PRAGMA table_info(projects)`)
-      .all() as unknown as Array<{ name: string }>;
+    const projectCols = this.columnNames("projects").map((name) => ({ name }));
     if (!projectCols.some((c) => c.name === "workspace_root")) {
-      this.db.exec(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
+      this.execSchema(`ALTER TABLE projects ADD COLUMN workspace_root TEXT`);
     }
     if (!projectCols.some((c) => c.name === "git_repo_url")) {
       // 历史列：项目级仓库地址已废弃，但 INSERT 仍显式带这一列（写 NULL），
       // 老库缺列就得补上，否则插入会报 no such column。
-      this.db.exec(`ALTER TABLE projects ADD COLUMN git_repo_url TEXT`);
+      this.execSchema(`ALTER TABLE projects ADD COLUMN git_repo_url TEXT`);
     }
     if (!projectCols.some((c) => c.name === "settings_json")) {
-      this.db.exec(`ALTER TABLE projects ADD COLUMN settings_json TEXT`);
+      this.execSchema(`ALTER TABLE projects ADD COLUMN settings_json TEXT`);
     }
 
-    const appSettingsExists = this.db
-      .prepare(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'`,
-      )
-      .get() as { name: string } | undefined;
-    if (!appSettingsExists) {
-      this.db.exec(`
+    if (!this.hasTable("app_settings")) {
+      this.execSchema(`
         CREATE TABLE app_settings (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           settings_json TEXT NOT NULL DEFAULT '{}',
@@ -543,7 +610,7 @@ export class Store {
     }
 
     // Backfill: bind each task to its most recent non-empty run agent_id.
-    this.db.exec(`
+    this.execSchema(`
       UPDATE tasks
       SET agent_id = (
         SELECT r.agent_id FROM runs r
@@ -611,17 +678,18 @@ export class Store {
   }
 
   /**
-   * 内置计费规则只在缺失时补种（`INSERT OR IGNORE`）：运维改过的行不被覆盖，
+   * 内置计费规则只在缺失时补种（`ON CONFLICT DO NOTHING`）：运维改过的行不被覆盖，
    * 想在重启后仍停用某行就置 `enabled = 0`，不要删。
    */
   private seedBillingRules(now: string): void {
     const insert = this.db.prepare(`
-      INSERT OR IGNORE INTO billing_rules (
+      INSERT INTO billing_rules (
         rule_id, provider, model, display_name, currency, usd_per_unit,
         peak_cache_hit, peak_cache_miss, peak_output, peak_cache_write,
         offpeak_cache_hit, offpeak_cache_miss, offpeak_output, offpeak_cache_write,
         offpeak_start_min, offpeak_end_min, priority, enabled, note, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (rule_id) DO NOTHING
     `);
     for (const rule of DEFAULT_BILLING_RULES) {
       insert.run(
@@ -1484,10 +1552,7 @@ export class Store {
 
   /** `agent_successions` 的列名（诊断 / 测试用：确认老库补上了 seeded_tokens）。 */
   agentSuccessionColumns(): string[] {
-    const rows = this.db
-      .prepare(`PRAGMA table_info(agent_successions)`)
-      .all() as unknown as Array<{ name: string }>;
-    return rows.map((r) => r.name);
+    return this.columnNames("agent_successions");
   }
 
   listAgentSuccessions(taskId: string): AgentSuccession[] {
@@ -1762,13 +1827,14 @@ export class Store {
   appendEvent(event: AgentEvent): void {
     const insert = this.db.prepare(
       `INSERT INTO events (event_id, task_id, run_id, agent_id, timestamp, event_type, payload, usage, cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING seq`,
     );
     // Retry with a fresh id if we still hit a rare collision (or a caller
     // reused an eventId). Mutate event.eventId so WS publish matches the row.
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const result = insert.run(
+        const row = insert.get(
           event.eventId,
           event.taskId,
           event.runId,
@@ -1778,10 +1844,11 @@ export class Store {
           JSON.stringify(event.payload),
           event.usage ? JSON.stringify(event.usage) : null,
           event.cost ? JSON.stringify(event.cost) : null,
-        );
-        // Attach AUTOINCREMENT seq before WS publish — without it the UI treats
+        ) as { seq: number } | undefined;
+        if (!row) throw new Error("insert event returned no seq");
+        // Attach the sequence before WS publish — without it the UI treats
         // live events as seq=0 and sorts them above historically loaded rows.
-        event.seq = Number(result.lastInsertRowid);
+        event.seq = Number(row.seq);
         return;
       } catch (err) {
         if (!isUniqueEventIdError(err) || attempt === 4) throw err;
@@ -2293,8 +2360,9 @@ export class Store {
   insertConcurrencySample(t: string, runningCount: number): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO concurrency_samples (t, running_count)
-         VALUES (?, ?)`,
+        `INSERT INTO concurrency_samples (t, running_count)
+         VALUES (?, ?)
+         ON CONFLICT (t) DO UPDATE SET running_count = excluded.running_count`,
       )
       .run(t, runningCount);
   }

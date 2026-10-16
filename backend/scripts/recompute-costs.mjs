@@ -27,6 +27,12 @@ function argValue(name) {
 
 const dataDir = argValue("--data-dir");
 const apply = process.argv.includes("--apply");
+// 这个脚本的安全边界是「对着一份副本算」。进程里如果带着线上 DATABASE_URL，
+// Store 会连 Postgres。除非显式 `--postgres`，否则强制走 data-dir 里的 SQLite。
+if (!process.argv.includes("--postgres")) {
+  delete process.env.DATABASE_URL;
+  delete process.env.WEB_CURSOR_SQLITE_CUTOVER;
+}
 if (!dataDir) {
   console.error(
     "用法：npx tsx backend/scripts/recompute-costs.mjs --data-dir=<数据目录> [--apply]\n" +

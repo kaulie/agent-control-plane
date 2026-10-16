@@ -35,7 +35,7 @@ const OFFPEAK_NOTE = "空闲时段 = 北京时间 00:30–08:30（UTC 16:30–00
 /**
  * 内置种子规则（元 / 1M tokens），来源：DeepSeek 官方价目表。
  *
- * 只在表里缺这一行时补种（`INSERT OR IGNORE`）：运维改过的行不会被覆盖。
+ * 只在表里缺这一行时补种（`ON CONFLICT DO NOTHING`）：运维改过的行不会被覆盖。
  * 想停用内置行请把 `enabled` 置 0（删掉会在下次启动补回来）。
  */
 export const DEFAULT_BILLING_RULES: BillingRuleSeed[] = [

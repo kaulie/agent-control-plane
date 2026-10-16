@@ -31,7 +31,7 @@ only under `backend/src/providers/cursor/`. New runtimes implement the same
 
 ## Prerequisites
 
-- Node.js **>= 22.5** (uses the built-in `node:sqlite`)
+- Node.js **>= 22.5**（没设 `DATABASE_URL` 时用内置 `node:sqlite`；设了就用 Postgres）
 - Cursor / Cline 账号在 **全局设置 → 账号池** 里管理（一把 key = 一个账号；
   Cline 下可以同时挂多把 DeepSeek、多把 MiniMax）。
   首次启动若池子是空的，会把旧的 `CURSOR_API_KEY` / `DEEPSEEK_API_KEY` 迁进去一次，之后不再读这些 env。

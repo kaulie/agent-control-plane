@@ -5,6 +5,7 @@ import type { ProviderRegistry } from "../providers/registry.js";
 import type { AppSettings, DepartmentConfig, DepartmentList } from "../types.js";
 import type { BillingRuleInput } from "../billing/index.js";
 import type { TaskEntry } from "../config.js";
+import { resolveLoginAuth, type LoginAuth } from "../login-auth.js";
 import { AGENT_PATHS, isAgentPath, normalizeAgentPath } from "../agent-path.js";
 import {
   AUTONOMY_TARGETS,
@@ -30,6 +31,7 @@ import {
   validateIncomingImages,
   type IncomingImage,
 } from "../attachments.js";
+import { registerLoginRoutes } from "./login-gate.js";
 import { registerUiVersionGuard } from "./ui-version.js";
 import {
   isTaskType,
@@ -102,6 +104,8 @@ export async function registerRoutes(
     autonomyRemote?: AutonomyProxy;
     /** 新建任务入口开关（`TASK_ENTRY`）：both（默认）/ autonomy / gateway。 */
     taskEntry?: TaskEntry;
+    /** Fixed-account login. Omitted → gate off (tests and local dev). */
+    loginAuth?: LoginAuth;
   },
 ): Promise<void> {
   const gracefulRestart = opts.gracefulRestart !== false;
@@ -112,6 +116,7 @@ export async function registerRoutes(
   // currently serves; a stale page gets 409/428 `ui-version-mismatch` instead
   // of writing (see ./ui-version.ts).
   registerUiVersionGuard(app, { serverVersion: version });
+  registerLoginRoutes(app, opts.loginAuth ?? resolveLoginAuth({}));
 
   app.get("/health", async (_req, reply) => {
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate");

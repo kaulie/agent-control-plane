@@ -68,7 +68,12 @@ npm run dev
 The gateway port resolves as **`SERVICE_PORT` → `PORT` → `4211`**; the Vite dev
 proxy follows the same order, so changing the port only requires setting it once.
 The listen host resolves as **`HOST` → `0.0.0.0`** (all IPv4 interfaces). Set
-`HOST=127.0.0.1` when the process should accept only local connections:
+`HOST=127.0.0.1` when the process should accept only local connections.
+
+Set `LOGIN_PASSWORD` (and optionally `LOGIN_USERNAME`, default `admin`) to
+require that fixed username and password from anyone who is not on loopback.
+The browser shows a login form; `127.0.0.1` callers such as the deploy
+platform are unchanged. Leave `LOGIN_PASSWORD` empty to disable the gate.
 
 ```bash
 SERVICE_PORT=4212 npm run dev      # backend + proxy both on 4212

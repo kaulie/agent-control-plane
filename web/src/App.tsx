@@ -45,6 +45,7 @@ import ChatInput, { type AgentMode, type ChatPayload } from "./components/ChatIn
 import ExecutorChat from "./components/ExecutorChat";
 import GlobalSettingsPage from "./components/GlobalSettingsPage";
 import ProjectSettingsPage from "./components/ProjectSettingsPage";
+import { useLogin } from "./components/LoginGate";
 
 /** 「本任务不再提醒」标记（localStorage；读写都容错）。 */
 function forkAckFor(taskId: string): boolean {
@@ -120,6 +121,7 @@ function mergeEventsBySeq(prev: AgentEvent[], incoming: AgentEvent[]): AgentEven
 }
 
 export default function App() {
+  const login = useLogin();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     () => loadStoredProjectId(),
@@ -1167,6 +1169,15 @@ export default function App() {
           >
             ⚙
           </button>
+          {login.required ? (
+            <button
+              type="button"
+              className="login-logout"
+              onClick={() => void login.logout()}
+            >
+              退出
+            </button>
+          ) : null}
         </div>
         <div className="status">
           <span className={`dot ${auth?.ok ? "ok" : "bad"}`} />

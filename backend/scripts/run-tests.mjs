@@ -14,6 +14,7 @@ const tests = [
   { file: "scripts/test-event-ids.mjs", via: "tsx" },
   { file: "scripts/test-port.mjs", via: "tsx" },
   { file: "scripts/test-host.mjs", via: "tsx" },
+  { file: "scripts/test-login-auth.mjs", via: "tsx" },
   { file: "scripts/test-max-concurrent-runs.mjs", via: "tsx" },
   // agent 短号（看板 / 时间线）：后端 agentDisplayName 与前端 shortAgentId 同一张用例表
   { file: "scripts/test-agent-id-format.mjs", via: "tsx" },

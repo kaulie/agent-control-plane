@@ -35,6 +35,10 @@ export const OPENAPI_INFO = {
 /** 分组目录（tags 只允许取这里的 name）。 */
 export const OPENAPI_TAGS: Array<{ name: string; description: string }> = [
   { name: "ops", description: "运维：健康检查、优雅重启契约、进程与并发状态" },
+  {
+    name: "login",
+    description: "控制面登录：固定用户名和密码（LOGIN_USERNAME / LOGIN_PASSWORD）",
+  },
   { name: "catalog", description: "运行目录：provider 鉴权状态、provider 列表、模型目录" },
   { name: "settings", description: "全局设置" },
   { name: "accounts", description: "Provider 账号池（Cursor / Cline vendor 多把 key）" },
@@ -62,6 +66,18 @@ export const OPENAPI_ROUTE_META: Record<string, RouteMeta> = {
   "GET /health": {
     summary: "健康检查（版本 / 运行时长 / 上次退出原因）",
     tags: ["ops"],
+  },
+  "GET /api/session": {
+    summary: "当前是否要登录、以及这份 cookie 是否已登录",
+    tags: ["login"],
+  },
+  "POST /api/login": {
+    summary: "用配置里的固定用户名和密码换一份会话 cookie",
+    tags: ["login"],
+  },
+  "POST /api/logout": {
+    summary: "清掉登录 cookie",
+    tags: ["login"],
   },
   "GET /api/ops/restart-status": {
     summary: "优雅重启轮询契约（平台轮询 canRestart / ready / canDeploy）",

@@ -6,6 +6,7 @@ import {
   resolveGitViaProxyServerPath,
   resolveProxyUrl,
 } from "./git-via-proxy.js";
+import { resolveLoginAuth, type LoginAuth } from "./login-auth.js";
 import { DEFAULT_RESUME_SEED_CHARS } from "./providers/cline/restart-resume.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -315,6 +316,11 @@ export interface Config {
   port: number;
   /** Listen host: HOST → 0.0.0.0 (see resolveHost). */
   host: string;
+  /**
+   * Fixed-account login. Off unless `LOGIN_PASSWORD` is set.
+   * Non-loopback clients must sign in; loopback stays open.
+   */
+  login: LoginAuth;
   apiKey: string | undefined;
   /** Root directory; new tasks use `<root>/agent-<agentid>/`. */
   agentWorkspaceRoot: string;
@@ -483,6 +489,7 @@ export function loadConfig(): Config {
     appVersion: process.env.APP_VERSION?.trim() || "dev",
     port: resolvePort(process.env),
     host: resolveHost(process.env),
+    login: resolveLoginAuth(process.env),
     apiKey: process.env.CURSOR_API_KEY || undefined,
     agentWorkspaceRoot,
     agentWorkspace: agentWorkspaceRoot,

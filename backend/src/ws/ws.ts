@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 
 const OPEN = 1; // WebSocket.OPEN
@@ -9,10 +9,15 @@ const OPEN = 1; // WebSocket.OPEN
  */
 export function registerWebSocket(
   app: FastifyInstance,
+  opts?: { authorize?: (req: FastifyRequest) => boolean },
 ): (message: Record<string, unknown>) => void {
   const clients = new Set<WebSocket>();
 
-  app.get("/ws", { websocket: true }, (socket: WebSocket) => {
+  app.get("/ws", { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
+    if (opts?.authorize && !opts.authorize(req)) {
+      socket.close(4401, "login required");
+      return;
+    }
     clients.add(socket);
     socket.on("close", () => clients.delete(socket));
     socket.on("error", () => clients.delete(socket));

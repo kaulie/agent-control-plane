@@ -17,6 +17,9 @@ import type { FastifyInstance } from "fastify";
  *  - anything outside `/api/` (static assets, `/health`, `/ws`);
  *  - `/api/ops/*` — the deployment platform's graceful-restart contract, called
  *    by that separate service, which has no UI version.
+ *  - `/api/login` and `/api/logout` — the login page posts these before (or
+ *    without) a versioned app shell, and a wrong version must not lock the
+ *    operator out of the form.
  */
 
 /** Request header carrying the UI build the browser is running. */
@@ -31,6 +34,9 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 /** Written by other services, never by the browser (see module docstring). */
 const NON_UI_WRITE_PREFIXES = ["/api/ops/"];
 
+/** Login form posts. Exact paths, so `/api/login-something` stays guarded. */
+const NON_UI_WRITE_PATHS = new Set(["/api/login", "/api/logout"]);
+
 export interface UiVersionGuardOptions {
   /** Version this project currently serves (disk VERSION → APP_VERSION). */
   serverVersion: () => string;
@@ -41,6 +47,7 @@ export function isGuardedWrite(method: string, url: string): boolean {
   if (!WRITE_METHODS.has(method.toUpperCase())) return false;
   const path = url.split("?")[0] ?? url;
   if (!path.startsWith("/api/")) return false;
+  if (NON_UI_WRITE_PATHS.has(path)) return false;
   return !NON_UI_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 

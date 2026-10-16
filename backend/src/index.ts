@@ -14,7 +14,9 @@ import { createBillingService } from "./billing/index.js";
 import { warmModelLimits } from "./context/index.js";
 import { createProviderRegistry } from "./providers/registry.js";
 import { AgentGateway } from "./gateway/gateway.js";
+import { createLoginGuard } from "./http/login-gate.js";
 import { registerRoutes } from "./http/routes.js";
+import { requestIsAuthenticated } from "./login-auth.js";
 import { registerWebSocket } from "./ws/ws.js";
 import { AutonomyClient } from "./autonomy.js";
 import { OrganizationClient } from "./organization.js";
@@ -196,11 +198,22 @@ app.addHook("onSend", async (_req, reply, payload) => {
   reply.header("X-App-Version", advertisedVersion());
   return payload;
 });
+// Before the websocket plugin so the upgrade to /ws is rejected too.
+app.addHook("onRequest", createLoginGuard(config.login));
 
 await app.register(cors, { origin: true });
 await app.register(websocket, { options: { maxPayload: 1048576 } });
 
-const publish = registerWebSocket(app);
+const publish = registerWebSocket(app, {
+  authorize(req) {
+    return requestIsAuthenticated(config.login, {
+      method: req.method,
+      url: req.url,
+      headers: { cookie: req.headers.cookie },
+      socket: { remoteAddress: req.socket.remoteAddress },
+    });
+  },
+});
 
 // Serve the built web UI if present (single-process mode after `npm run build`).
 if (fs.existsSync(config.webDistDir)) {
@@ -275,6 +288,7 @@ await registerRoutes(app, gateway, providers, {
       }
     : {}),
   taskEntry: config.taskEntry,
+  loginAuth: config.login,
 });
 app.log.info(
   `deploy graceful_restart=${config.gracefulRestart ? 1 : 0} maxWaitMs=${config.deployGracefulWaitMs}`,
@@ -301,6 +315,11 @@ app.log.info(
 );
 app.log.info(
   `service registry: ${config.serviceRegistryApiUrl} (project 组织 → 服务/仓库注入, timeout=${config.serviceRegistryTimeoutMs}ms)`,
+);
+app.log.info(
+  config.login.enabled
+    ? `login gate: on (user=${config.login.username}; loopback skips it)`
+    : "login gate: off (set LOGIN_PASSWORD to require a username and fixed password)",
 );
 
 try {

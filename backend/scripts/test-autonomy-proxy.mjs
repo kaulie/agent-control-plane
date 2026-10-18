@@ -216,6 +216,8 @@ const json = async (res) => JSON.parse(res.body);
   assert.equal(said.goalType, "dev_feature", "类型 general → 显式传 goal_type=dev_feature");
   assert.equal(said.completionContracts.steps[0].name, "merged_to_main", "默认 merge 钉合入契约");
   assert.match(said.completionContracts.steps[0].requirement, /合入主分支/, "契约 requirement 是交付目标原文");
+  assert.equal(said.completionContracts.steps[0].evidence.source, "step:edit.output.pr_url");
+  assert.deepEqual(said.completionContracts.steps[0].expect, { field: "merged", equals: "true" });
   assert.equal(task.goal, "merge", "没传目标 → 默认合入主分支");
 
   const deployRes = await post("/api/tasks", {
@@ -236,8 +238,17 @@ const json = async (res) => JSON.parse(res.body);
     "指定 deploy 时交接需求带上线目标",
   );
   assert.equal(deploySaid.goalType, "dev_feature", "feature → goal_type=dev_feature");
-  assert.equal(deploySaid.completionContracts.steps[0].name, "merged_and_deployed");
-  assert.match(deploySaid.completionContracts.steps[0].requirement, /部署上线/);
+  assert.equal(deploySaid.completionContracts.steps[0].name, "merged_to_main");
+  assert.equal(deploySaid.completionContracts.steps[1].name, "merged_and_deployed");
+  assert.match(deploySaid.completionContracts.steps[1].requirement, /部署上线/);
+  assert.equal(
+    deploySaid.completionContracts.steps[1].evidence.source,
+    "step:deploy.output.pipeline_id",
+  );
+  assert.deepEqual(deploySaid.completionContracts.steps[1].expect, {
+    field: "state",
+    equals: "succeeded",
+  });
 
   const bugfixRes = await post("/api/tasks", {
     description: "修登录",

@@ -32,14 +32,22 @@ assert.equal(
   merge.steps[0].requirement,
   TASK_GOAL_CATALOG.find((g) => g.id === "merge").directive,
 );
+assert.equal(merge.steps[0].evidence.source, "step:edit.output.pr_url");
+assert.deepEqual(merge.steps[0].expect, { field: "merged", equals: "true" });
 
 const deploy = autonomyCompletionContract("deploy");
 assert.ok(deploy);
-assert.equal(deploy.steps[0].name, "merged_and_deployed");
+assert.equal(deploy.steps.length, 2, "合入和上线各占一个证据槽");
+assert.equal(deploy.steps[0].name, "merged_to_main");
+assert.equal(deploy.steps[0].evidence.source, "step:edit.output.pr_url");
+assert.deepEqual(deploy.steps[0].expect, { field: "merged", equals: "true" });
+assert.equal(deploy.steps[1].name, "merged_and_deployed");
 assert.equal(
-  deploy.steps[0].requirement,
+  deploy.steps[1].requirement,
   TASK_GOAL_CATALOG.find((g) => g.id === "deploy").directive,
 );
+assert.equal(deploy.steps[1].evidence.source, "step:deploy.output.pipeline_id");
+assert.deepEqual(deploy.steps[1].expect, { field: "state", equals: "succeeded" });
 
 const featureMerge = autonomyHandoffFromTask({ taskType: "feature", goal: "merge" });
 assert.equal(featureMerge.goalType, AUTONOMY_GOAL_FEATURE);

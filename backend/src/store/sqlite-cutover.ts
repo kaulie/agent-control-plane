@@ -105,6 +105,38 @@ async function upsertBatch(
   );
 }
 
+/**
+ * Samples Postgres does not already have.
+ *
+ * Filtering with `t >= MAX(t)` drops older SQLite history once Postgres has any
+ * newer sample (written after DATABASE_URL pointed here). The full-count check
+ * then throws, and `sqlite_cutover_done` is never recorded, so every boot
+ * repeats the failure. Insert only the missing timestamps and leave rows
+ * Postgres already stored alone.
+ */
+async function concurrencySamplesToCopy(
+  sqlite: DatabaseSync,
+  query: CutoverQuery,
+  pk: string,
+  selected: string,
+  log: (line: string) => void,
+): Promise<Array<Record<string, unknown>>> {
+  const present = await query(
+    `SELECT ${quoteIdent(pk)} AS k FROM ${quoteIdent("concurrency_samples")}`,
+  );
+  const have = new Set(present.rows.map((row) => String((row as { k: unknown }).k)));
+  const all = sqlite
+    .prepare(
+      `SELECT ${selected} FROM concurrency_samples ORDER BY ${quoteIdent(pk)} ASC`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  const missing = all.filter((row) => !have.has(String(row[pk] ?? "")));
+  log(
+    `[sqlite-cutover] concurrency_samples sqlite=${all.length} postgres=${have.size} copying=${missing.length}`,
+  );
+  return missing;
+}
+
 function takeBatch(
   rows: Array<Record<string, unknown>>,
   columns: string[],
@@ -145,26 +177,13 @@ async function copyTable(
     throw new Error(`${table} is missing primary key ${pk} on one side of the copy`);
   }
 
-  let rows: Array<Record<string, unknown>>;
-  if (table === "concurrency_samples") {
-    const max = await query(`SELECT MAX(t) AS m FROM concurrency_samples`);
-    const marker = (max.rows[0] as { m: string | null } | undefined)?.m;
-    const selected = columns.map(quoteIdent).join(", ");
-    rows = (
-      marker
-        ? sqlite
-            .prepare(
-              `SELECT ${selected} FROM concurrency_samples WHERE t >= ? ORDER BY t ASC`,
-            )
-            .all(marker)
-        : sqlite.prepare(`SELECT ${selected} FROM concurrency_samples ORDER BY t ASC`).all()
-    ) as Array<Record<string, unknown>>;
-  } else {
-    const selected = columns.map(quoteIdent).join(", ");
-    rows = sqlite.prepare(`SELECT ${selected} FROM ${quoteIdent(table)}`).all() as Array<
-      Record<string, unknown>
-    >;
-  }
+  const selected = columns.map(quoteIdent).join(", ");
+  const rows =
+    table === "concurrency_samples"
+      ? await concurrencySamplesToCopy(sqlite, query, pk, selected, log)
+      : (sqlite.prepare(`SELECT ${selected} FROM ${quoteIdent(table)}`).all() as Array<
+          Record<string, unknown>
+        >);
 
   for (let i = 0; i < rows.length; ) {
     const { batch, next } = takeBatch(rows, columns, i);

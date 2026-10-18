@@ -13,6 +13,7 @@ const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const tests = [
   { file: "scripts/test-event-ids.mjs", via: "tsx" },
   { file: "scripts/test-store-dialect.mjs", via: "tsx" },
+  { file: "scripts/test-sqlite-cutover.mjs", via: "tsx" },
   { file: "scripts/test-port.mjs", via: "tsx" },
   { file: "scripts/test-host.mjs", via: "tsx" },
   { file: "scripts/test-login-auth.mjs", via: "tsx" },

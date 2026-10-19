@@ -19,8 +19,33 @@ cd "${ROOT}"
 log() { echo "[build] $*"; }
 die() { echo "[build][错误] $*" >&2; exit 1; }
 
-HASH="${APP_VERSION:-dev}"
+# Prefer the platform-injected hash; fall back to git so a missing APP_VERSION
+# cannot bake the SPA as "dev" (页脚 vdev). Full 40-char SHAs are shortened to
+# the 8-char form the runtime / UI already use.
+resolve_app_version() {
+  local v="${APP_VERSION:-}"
+  v="$(printf '%s' "${v}" | tr -d '[:space:]')"
+  if [ -z "${v}" ] || [ "${v}" = "dev" ]; then
+    if git -C "${ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      v="$(git -C "${ROOT}" rev-parse --short=8 HEAD 2>/dev/null || true)"
+    fi
+  fi
+  if printf '%s' "${v}" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+    v="$(printf '%s' "${v}" | cut -c1-8)"
+  fi
+  printf '%s' "${v:-dev}"
+}
+
+assert_web_dist() {
+  ASSERT_WEB_DIST_PREFIX="[build][错误]" \
+    bash "${ROOT}/scripts/assert-web-dist.sh" "$@"
+}
+
+HASH="$(resolve_app_version)"
 log "APP_VERSION=${HASH}"
+if [ "${HASH}" = "dev" ]; then
+  log "警告：解析不到 git 短哈希，SPA 会烘焙成 vdev"
+fi
 
 log "npm install"
 npm install
@@ -33,15 +58,12 @@ export APP_VERSION="${HASH}"
 npm run build
 
 [ -f backend/dist/index.js ] || die "缺少 backend/dist/index.js"
-[ -f web/dist/index.html ] || die "缺少 web/dist/index.html"
+assert_web_dist web/dist --version "${HASH}"
 [ -f scripts/restart.sh ] || die "缺少 scripts/restart.sh"
 [ -f mcp-servers/git-via-proxy/server.mjs ] || die "缺少 mcp-servers/git-via-proxy/server.mjs"
 [ -d mcp-servers/git-via-proxy/node_modules ] || die "缺少 mcp-servers/git-via-proxy/node_modules（先 npm install --prefix mcp-servers/git-via-proxy）"
 
-log "npm prune --omit=dev（瘦身生产依赖）"
-npm prune --omit=dev
-
-log "组装 outputs/（仅部署所需）"
+log "组装 outputs/（仅部署所需；先拷 SPA，避免 npm prune 丢掉 gitignore 的 dist）"
 rm -rf outputs
 mkdir -p \
   outputs/backend/dist \
@@ -54,15 +76,17 @@ cp package.json package-lock.json outputs/
 cp backend/package.json outputs/backend/
 cp web/package.json outputs/web/
 
-# Build artifacts.
+# Build artifacts. SPA must land in outputs/ before prune.
 rsync -a backend/dist/ outputs/backend/dist/
 rsync -a web/dist/ outputs/web/dist/
+assert_web_dist outputs/web/dist --version "${HASH}"
 
 # Runtime ops scripts (start/stop/restart/watchdog/…).
 # register-contract.sh 是 CI / 发版用的（服务中心契约登记），不进运行时快照。
 rsync -a \
   --exclude 'release.sh' \
   --exclude 'register-contract.sh' \
+  --exclude 'test-assert-web-dist.sh' \
   scripts/ outputs/scripts/
 
 # MCP helper (already production-installed).
@@ -70,12 +94,16 @@ rsync -a \
   --exclude 'README.md' \
   mcp-servers/git-via-proxy/ outputs/mcp-servers/git-via-proxy/
 
+log "npm prune --omit=dev（瘦身生产依赖）"
+npm prune --omit=dev
+
 # Production node_modules from the pruned build tree.
 rsync -a node_modules/ outputs/node_modules/
 
 [ -f outputs/scripts/restart.sh ] || die "outputs/ 缺少 scripts/restart.sh"
+[ -f outputs/scripts/assert-web-dist.sh ] || die "outputs/ 缺少 scripts/assert-web-dist.sh"
 [ -f outputs/backend/dist/index.js ] || die "outputs/ 缺少 backend/dist/index.js"
-[ -f outputs/web/dist/index.html ] || die "outputs/ 缺少 web/dist/index.html"
+assert_web_dist outputs/web/dist --version "${HASH}"
 [ -d outputs/node_modules ] || die "outputs/ 缺少 node_modules"
 [ -f outputs/mcp-servers/git-via-proxy/server.mjs ] || die "outputs/ 缺少 mcp-servers/git-via-proxy/server.mjs"
 

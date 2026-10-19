@@ -29,7 +29,7 @@ jobs:
         run: npm run typecheck --workspaces --if-present
 
       - name: Build
-        run: npm run build
+        run: APP_VERSION="${GITHUB_SHA:0:8}" npm run build
 
       # 对外契约（api/openapi.json）必须与真实路由 + route-meta.ts 双向对齐：
       # 新接口忘了写契约、或改了接口忘了重新生成 → 这一步直接红。

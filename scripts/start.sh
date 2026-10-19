@@ -39,6 +39,16 @@ fi
   echo "[start][错误] 未找到 ${BACKEND_DIR}/dist/index.js，请先由部署平台（~/runtime/agent-control-plane-deployment，:4220）完成一次部署" >&2
   exit 1
 }
+# hashed JS 缺失时进程能起来、页面却空白。打包校验漏了也要在启动时拦住。
+# 旧部署包还没有 assert-web-dist.sh，退回最小检查，避免现网重启直接起不来。
+WEB_DIST="${RUNTIME_DIR}/web/dist"
+if [ -f "${SCRIPT_DIR}/assert-web-dist.sh" ]; then
+  ASSERT_WEB_DIST_PREFIX="[start][错误]" \
+    bash "${SCRIPT_DIR}/assert-web-dist.sh" "${WEB_DIST}" || exit 1
+elif [ ! -f "${WEB_DIST}/index.html" ] || ! ls "${WEB_DIST}/assets"/*.js >/dev/null 2>&1; then
+  echo "[start][错误] 未找到 ${WEB_DIST}/assets/*.js，页面会空白。请重新走部署平台打包。" >&2
+  exit 1
+fi
 
 mkdir -p "${BACKEND_DIR}" "${REPORT_DIR}"
 

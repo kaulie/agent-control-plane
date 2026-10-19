@@ -9,8 +9,10 @@ import { fileURLToPath } from "node:url";
 
 const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** @type {Array<{ file: string; via: "node" | "tsx"; args?: string[] }>} */
+/** @type {Array<{ file: string; via: "node" | "tsx" | "bash"; args?: string[] }>} */
 const tests = [
+  // 打包产物必须带 hashed JS，否则部署平台 rsync --delete 会把线上页面打空白
+  { file: "../scripts/test-assert-web-dist.sh", via: "bash" },
   { file: "scripts/test-event-ids.mjs", via: "tsx" },
   { file: "scripts/test-store-dialect.mjs", via: "tsx" },
   { file: "scripts/test-sqlite-cutover.mjs", via: "tsx" },
@@ -157,11 +159,13 @@ if (needsDist && !fs.existsSync(path.join(backendDir, "dist/store/db.js"))) {
 
 let failed = 0;
 for (const t of tests) {
-  const command = t.via === "tsx" ? "npx" : process.execPath;
+  const command = t.via === "tsx" ? "npx" : t.via === "bash" ? "bash" : process.execPath;
   const args =
     t.via === "tsx"
       ? ["tsx", ...(t.args ?? []), t.file]
-      : [...(t.args ?? []), t.file];
+      : t.via === "bash"
+        ? [t.file, ...(t.args ?? [])]
+        : [...(t.args ?? []), t.file];
   console.log(`\n--- ${t.file} (${t.via}) ---`);
   const result = spawnSync(command, args, {
     cwd: backendDir,

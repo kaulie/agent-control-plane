@@ -220,10 +220,11 @@ export type TaskType = "general" | "feature" | "bugfix" | "diagnose";
 /**
  * 任务目标（见 `./task-goals.ts`）：和前两者不同，它**会改变 agent 的交付动作**。
  * - `merge`：做完合入主分支，不部署；
- * - `deploy`：合入主分支后再部署上线。
+ * - `deploy`：合入主分支后再部署上线；
+ * - `conclude`：只输出结论，不改代码。
  * 老任务（历史数据）没有这个字段 → 按老行为显示（开完 PR 停）。
  */
-export type TaskGoal = "merge" | "deploy";
+export type TaskGoal = "merge" | "deploy" | "conclude";
 
 export interface Task {
   taskId: string;

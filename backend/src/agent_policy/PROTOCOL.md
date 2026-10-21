@@ -24,6 +24,7 @@
 - 交付目标写在 task prompt 的 `goal` 行里，规则只有这几种：
   - `merge` — **Delivery goal = 合入主分支 (merge):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and stop there (do not deploy).
   - `deploy` — **Delivery goal = 合入主分支并部署上线 (merge + deploy):** the task owner picked this at creation, so that IS the explicit request — once the PR is ready and its checks are green, merge it into `main` yourself and then deploy it.
+  - `conclude` — **Delivery goal = 输出结论，无需代码变更 (conclude):** the task owner picked this at creation, so that IS the explicit request — write the conclusion in the conversation and stop. Reading the repo is fine. Do not change code, do not open a PR, do not merge, and do not deploy.
   - 没有 `goal` 行 — Do not merge the PR and do not deploy unless the user asks.
 - If anything looks risky (failing checks, conflicts, real doubt), stop and ask the human first.
 ## Deploy（协议）

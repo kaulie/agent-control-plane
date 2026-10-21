@@ -162,7 +162,7 @@ export default function TaskIntentPanel({ task, delivery, onSave }: Props) {
             ))}
           </div>
           <div className="intent-hint">
-            目标会改变 agent 的交付动作（合入主分支 / 再部署上线）
+            目标会改变 agent 的交付动作（只输出结论 / 合入主分支 / 再部署上线）
             {goal ? "" : "。这个老任务还没设目标 —— 选一个才会改变它的行为"}
           </div>
           <label className="runtime-field runtime-field-wide">

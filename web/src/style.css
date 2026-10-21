@@ -419,7 +419,7 @@ body {
   display: inline;
 }
 
-/* ---- 任务目标徽标（目标**会改变 agent 的动作**：合入主分支 / 再部署上线）---- */
+/* ---- 任务目标徽标（目标**会改变 agent 的动作**：合入主分支 / 再部署上线 / 只输出结论）---- */
 
 .task-goal-badge {
   display: inline-block;
@@ -441,6 +441,11 @@ body {
   color: #c2a1ff;
 }
 
+.task-goal-badge.goal-conclude {
+  background: color-mix(in srgb, #6aa6ff 18%, var(--bg-3));
+  color: #9cc4ff;
+}
+
 /* 老任务没设目标：灰一点，别抢眼。 */
 .task-goal-badge.goal-none {
   background: var(--bg-3);
@@ -456,6 +461,11 @@ body {
 .intent-type-chip.goal-deploy.selected {
   border-color: #a06bff;
   background: color-mix(in srgb, #a06bff 26%, var(--bg-3));
+}
+
+.intent-type-chip.goal-conclude.selected {
+  border-color: #6aa6ff;
+  background: color-mix(in srgb, #6aa6ff 24%, var(--bg-3));
 }
 
 /* ---- 任务意图面板：钉在主区上方，不跟事件流一起滚 ---- */

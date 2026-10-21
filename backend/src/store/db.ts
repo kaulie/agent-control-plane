@@ -417,7 +417,7 @@ export class Store {
       this.execSchema(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     }
     if (!taskCols.some((c) => c.name === "goal")) {
-      // 任务目标（合入主分支 / 合入并部署）。历史任务为 NULL = 没有目标，
+      // 任务目标（合入主分支 / 合入并部署 / 只输出结论）。历史任务为 NULL = 没有目标，
       // 保持老行为（开完 PR 停），所以这里**不做** backfill。
       this.execSchema(`ALTER TABLE tasks ADD COLUMN goal TEXT`);
     }

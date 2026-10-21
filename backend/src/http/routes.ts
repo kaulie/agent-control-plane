@@ -1046,7 +1046,8 @@ export async function registerRoutes(
       taskType?: string;
       /**
        * 交付目标（**会改变 agent 的动作**）：`merge` 合入主分支 /
-       * `deploy` 合入主分支并部署上线。缺省 `merge`。
+       * `deploy` 合入主分支并部署上线 / `conclude` 输出结论、无需代码变更。
+       * 缺省 `merge`。
        */
       goal?: string;
       /**

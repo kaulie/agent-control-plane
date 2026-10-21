@@ -1,8 +1,8 @@
 /**
- * 任务「目标」（合入主分支 / 合入主分支并部署上线）单测。
+ * 任务「目标」（合入主分支 / 合入主分支并部署上线 / 输出结论，无需代码变更）单测。
  *
  * 守住这几条：
- * 1. **目录就两项**，默认 `merge`；未知值一律拦 400（目标会改变 agent 的动作，不能脏写）；
+ * 1. **目录就三项**，默认 `merge`；未知值一律拦 400（目标会改变 agent 的动作，不能脏写）；
  * 2. **落库 + 投递**：新建时选的目标进 `tasks.goal`，并写进系统投递的需求消息；
  * 3. **简报**：有目标 → 多一行 `- goal:`，且那句「不要 merge / 不要部署」按目标改写；
  *    老任务（没有目标）→ 简报里没有 `- goal:` 行，并保留原来那句话（老行为不变）；
@@ -100,11 +100,11 @@ const bootstrapOf = (task) =>
   }).text;
 
 // ---- 1) 目录口径 ----
-assert.deepEqual(TASK_GOAL_IDS, ["merge", "deploy"]);
+assert.deepEqual(TASK_GOAL_IDS, ["merge", "deploy", "conclude"]);
 assert.equal(DEFAULT_TASK_GOAL, "merge");
 assert.deepEqual(
   TASK_GOAL_CATALOG.map((g) => g.label),
-  ["合入主分支", "合入主分支并部署上线"],
+  ["合入主分支", "合入主分支并部署上线", "输出结论，无需代码变更"],
 );
 for (const goal of TASK_GOAL_CATALOG) {
   assert.ok(goal.hint.trim(), `${goal.id} 要有说明`);
@@ -156,6 +156,23 @@ const deployText = store
 assert.match(deployText, /目标：合入主分支并部署上线（deploy）/);
 assert.ok(deployText.includes(TASK_GOAL_CATALOG[1].directive));
 
+const concludeRes = await post({
+  title: "只要结论的任务",
+  description: "这段逻辑为什么这样写？",
+  goal: "conclude",
+  projectId: project.projectId,
+});
+assert.equal(concludeRes.statusCode, 201, concludeRes.body);
+const concludeTask = JSON.parse(concludeRes.body);
+assert.equal(concludeTask.goal, "conclude");
+const concludeText = store
+  .listEvents(concludeTask.taskId, { limit: 50 })
+  .events.filter((e) => e.payload.deliveredBy === "system")[0].payload.text;
+assert.match(concludeText, /目标：输出结论，无需代码变更（conclude）/);
+assert.ok(concludeText.includes(TASK_GOAL_CATALOG[2].directive));
+assert.match(concludeText, /不要修改任何代码/);
+assert.match(concludeText, /不要开 PR/);
+
 // 没传 goal → 用默认目标（保证新建的任务都有明确交付目标）
 const defaulted = JSON.parse(
   (await post({ title: "默认目标", description: "x", projectId: project.projectId })).body,
@@ -186,6 +203,7 @@ const listed = JSON.parse(
   ).body,
 );
 assert.equal(listed.find((t) => t.taskId === deployTask.taskId).goal, "deploy");
+assert.equal(listed.find((t) => t.taskId === concludeTask.taskId).goal, "conclude");
 
 
 // ---- 3) 两份 prompt：**目标值**在 task prompt 里，**目标规则**在系统 prompt 的协议里 ----
@@ -193,7 +211,7 @@ const mergeBootstrap = bootstrapOf(store.getTask(mergeTask.taskId));
 assert.ok(mergeBootstrap.includes("- goal: 合入主分支 (merge)"), "这一单的目标值是具体信息 → task prompt 里");
 assert.ok(mergeBootstrap.includes("Delivery goal = 合入主分支 (merge)"));
 assert.ok(mergeBootstrap.includes("merge it into `main` yourself"));
-// 协议那半现在是一张**条件表**（三种情况各自绑在自己的 goal 值上）：所以「不许 merge」那句
+// 协议那半现在是一张**条件表**（每种 goal 值各自绑自己的交付动作）：所以「不许 merge」那句
 // 只能以「没有 goal 行」为前提出现，绝不能是无条件的老约束（否则模型会收到互相矛盾的指令）。
 assert.ok(
   mergeBootstrap.includes(
@@ -212,6 +230,15 @@ assert.ok(mergeBootstrap.includes("Never** run a deploy/restart script"));
 const deployBootstrap = bootstrapOf(store.getTask(deployTask.taskId));
 assert.ok(deployBootstrap.includes("- goal: 合入主分支并部署上线 (deploy)"));
 assert.ok(deployBootstrap.includes("and then deploy it"));
+
+const concludeBootstrap = bootstrapOf(store.getTask(concludeTask.taskId));
+assert.ok(concludeBootstrap.includes("- goal: 输出结论，无需代码变更 (conclude)"));
+assert.ok(concludeBootstrap.includes("Delivery goal = 输出结论，无需代码变更 (conclude)"));
+assert.ok(concludeBootstrap.includes("Do not change code, do not open a PR, do not merge, and do not deploy."));
+assert.ok(
+  !/- goal: 合入主分支 \(merge\)/.test(concludeBootstrap),
+  "结论型任务的 goal 行不能写成合入",
+);
 
 const legacy = store.createTask({
   taskId: "task-legacy",

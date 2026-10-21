@@ -15,6 +15,7 @@ const tests = [
   { file: "../scripts/test-assert-web-dist.sh", via: "bash" },
   { file: "scripts/test-event-ids.mjs", via: "tsx" },
   { file: "scripts/test-store-dialect.mjs", via: "tsx" },
+  { file: "scripts/test-pg-ssl.mjs", via: "tsx" },
   { file: "scripts/test-sqlite-cutover.mjs", via: "tsx" },
   { file: "scripts/test-port.mjs", via: "tsx" },
   { file: "scripts/test-host.mjs", via: "tsx" },

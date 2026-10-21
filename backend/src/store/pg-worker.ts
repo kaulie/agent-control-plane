@@ -5,6 +5,7 @@
  */
 import { parentPort, type MessagePort } from "node:worker_threads";
 import pg from "pg";
+import { connectWithSslFallback } from "./pg-ssl.js";
 import { toPostgresPlaceholders } from "./sql-dialect.js";
 import { importSqliteDatabase } from "./sqlite-cutover.js";
 
@@ -36,38 +37,24 @@ function reply(port: MessagePort, flag: Flag, message: unknown): void {
   Atomics.notify(flag, 0);
 }
 
-function clientConfig(url: string): pg.ClientConfig {
-  // node-pg lets `sslmode` in the URL overwrite an explicit `ssl` object, and
-  // then treats `require` as "verify the cert". libpq `require` only encrypts.
-  // This server's cert is self-signed, so keep that libpq meaning.
-  const mode = /(?:\?|&)sslmode=([^&]*)/i.exec(url)?.[1]?.toLowerCase() ?? "require";
-  const connectionString = url
-    .replace(/([?&])sslmode=[^&]*/i, "$1")
-    .replace(/[?&]$/, "")
-    .replace(/\?&/, "?");
-  const ssl =
-    mode === "disable" || mode === "allow"
-      ? false
-      : mode === "verify-ca" || mode === "verify-full"
-        ? { rejectUnauthorized: true }
-        : { rejectUnauthorized: false };
-  return {
-    connectionString,
-    ssl,
-    application_name: "web-cursor",
-    connectionTimeoutMillis: 15_000,
-    statement_timeout: 120_000,
-    query_timeout: 120_000,
-  };
-}
-
 async function connect(): Promise<pg.Client> {
-  const next = new pg.Client(clientConfig(connectionString));
-  next.on("error", (err: Error) => {
-    console.warn(`[store] postgres connection error: ${err.message}`);
-  });
-  await next.connect();
-  return next;
+  return connectWithSslFallback(
+    connectionString,
+    async (config) => {
+      const next = new pg.Client(config);
+      next.on("error", (err: Error) => {
+        console.warn(`[store] postgres connection error: ${err.message}`);
+      });
+      try {
+        await next.connect();
+      } catch (err) {
+        await next.end().catch(() => {});
+        throw err;
+      }
+      return next;
+    },
+    (line) => console.warn(line),
+  );
 }
 
 function isDisconnect(err: unknown): boolean {

@@ -22,7 +22,7 @@ export interface CreateTaskInput {
   title?: string;
   description: string;
   taskType: TaskType;
-  /** 交付目标（会改变 agent 的动作：合入主分支 / 合入并部署上线）。 */
+  /** 交付目标（会改变 agent 的动作：合入主分支 / 合入并部署上线 / 只输出结论）。 */
   goal: TaskGoal;
   provider?: string;
   model?: string;
@@ -53,7 +53,7 @@ interface Props {
     title?: string;
     description: string;
     taskType: TaskType;
-    /** 创建时必须指定：合入主分支 / 合入并部署。 */
+    /** 创建时必须指定：合入主分支 / 合入并部署 / 只输出结论。 */
     goal: TaskGoal;
     /** autonomy 账号池里的账号 id；不传 = 由它的池子解析。 */
     accountId?: string;
@@ -510,7 +510,7 @@ export default function CreateTaskDialog({
           <span className="intent-hint">{option.hint}</span>
         </div>
         {/* 目标：和「类型」不同 —— 它会改变 agent 的交付动作（做到哪一步算完），
-            所以默认选中「合入主分支」，并把「不部署 / 要部署」写清楚。 */}
+            所以默认选中「合入主分支」，并把「只出结论 / 不部署 / 要部署」写清楚。 */}
         <div className="runtime-field runtime-field-wide">
           <span className="runtime-field-label">目标</span>
           <div className="intent-type-chips">

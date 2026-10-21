@@ -5,7 +5,7 @@ import type { TaskGoal } from "./types";
  * —— 两个 workspace 不共享代码，所以两边各一份，靠
  * `web/scripts/test-task-goal-ui.mjs` 与 `backend/scripts/test-task-goal.mjs` 守住口径一致。
  *
- * 和「类型」不同：**目标会改变 agent 的交付动作**（合入主分支 / 再部署上线），
+ * 和「类型」不同：**目标会改变 agent 的交付动作**（合入主分支 / 再部署上线 / 只输出结论），
  * 类型只是分类标签。
  */
 export interface TaskGoalOption {
@@ -18,7 +18,7 @@ export interface TaskGoalOption {
   hint: string;
 }
 
-/** 新建任务的默认目标：合入主分支（两个选项里更保守的那个）。 */
+/** 新建任务的默认目标：合入主分支（需要改代码时更常见的交付边界；结论型必须显式选）。 */
 export const DEFAULT_TASK_GOAL: TaskGoal = "merge";
 
 export const TASK_GOAL_OPTIONS: TaskGoalOption[] = [
@@ -33,6 +33,12 @@ export const TASK_GOAL_OPTIONS: TaskGoalOption[] = [
     label: "合入主分支并部署上线",
     short: "合入+上线",
     hint: "在「合入主分支」基础上，再走部署平台把这次改动部署上线。",
+  },
+  {
+    id: "conclude",
+    label: "输出结论，无需代码变更",
+    short: "结论",
+    hint: "只在对话里给出结论。可以阅读代码，但不改代码、不开 PR、不合入、不部署。",
   },
 ];
 

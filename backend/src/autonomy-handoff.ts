@@ -84,6 +84,9 @@ function mergedAndDeployed(requirement: string): AutonomyContractCriterion {
  *
  * `merge` 只钉「PR 已合入」。`deploy` 在这之上再钉「部署流水线成功」——
  * 一条判据只有一个证据槽，合入和上线必须分成两条，否则其中一件事验不到。
+ * `conclude` 不钉合入/部署契约：那会要求改代码并开 PR，和「只输出结论」相反。
+ * autonomy 没有「书面结论」的系统验真槽，编造证据槽会让 done 永远 inconclusive，
+ * 所以不传契约，交付边界留在需求原文里，由 planner 按原文自己钉。
  */
 export function autonomyCompletionContract(
   goal: unknown,
@@ -98,7 +101,10 @@ export function autonomyCompletionContract(
       ],
     };
   }
-  return { steps: [mergedToMain(info.directive)] };
+  if (info.id === "merge") {
+    return { steps: [mergedToMain(info.directive)] };
+  }
+  return undefined;
 }
 
 export type AutonomyHandoffFields = {

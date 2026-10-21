@@ -49,6 +49,23 @@ assert.equal(
 assert.equal(deploy.steps[1].evidence.source, "step:deploy.output.pipeline_id");
 assert.deepEqual(deploy.steps[1].expect, { field: "state", equals: "succeeded" });
 
+const conclude = autonomyCompletionContract("conclude");
+assert.equal(
+  conclude,
+  undefined,
+  "只输出结论不钉合入/部署契约（那会要求改代码并开 PR）",
+);
+const concludeHandoff = autonomyHandoffFromTask({
+  taskType: "general",
+  goal: "conclude",
+});
+assert.equal(concludeHandoff.goalType, AUTONOMY_GOAL_FEATURE);
+assert.equal(
+  "completionContracts" in concludeHandoff,
+  false,
+  "conclude 不传 completion_contracts",
+);
+
 const featureMerge = autonomyHandoffFromTask({ taskType: "feature", goal: "merge" });
 assert.equal(featureMerge.goalType, AUTONOMY_GOAL_FEATURE);
 assert.deepEqual(featureMerge.completionContracts, merge);

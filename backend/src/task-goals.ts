@@ -6,7 +6,8 @@ import type { TaskGoal } from "./types.js";
  * 和「类型」不同：**目标会改变 agent 的交付动作**。类型只是分类标签（见 `./task-types.ts`），
  * 目标回答的是「这个任务做到哪一步才算完」：
  * - `merge`：做完 + 开 PR + **合入主分支**，到此为止；
- * - `deploy`：在 `merge` 之上再**部署上线**（走部署平台打包已合入的提交）。
+ * - `deploy`：在 `merge` 之上再**部署上线**（走部署平台打包已合入的提交）；
+ * - `conclude`：只**输出结论**，不改代码、不开 PR、不合入、不部署。
  *
  * 所以它必须：
  * 1. 落库（`tasks.goal`），列表 / 面板能显示；
@@ -32,7 +33,7 @@ export interface TaskGoalInfo {
   directive: string;
 }
 
-/** 新建任务的默认目标：合入主分支（两个选项里更保守的那个）。 */
+/** 新建任务的默认目标：合入主分支（需要改代码时更常见的交付边界；结论型必须显式选）。 */
 export const DEFAULT_TASK_GOAL: TaskGoal = "merge";
 
 export const TASK_GOAL_CATALOG: TaskGoalInfo[] = [
@@ -51,6 +52,14 @@ export const TASK_GOAL_CATALOG: TaskGoalInfo[] = [
     hint: "在「合入主分支」基础上，再走部署平台把这次改动部署上线。",
     directive:
       "合入主分支后还要部署上线：走部署平台（~/runtime/agent-control-plane-deployment，:4220）打包已合入的提交并重启服务，不要在 agent 进程里同步跑发版/重启脚本。",
+  },
+  {
+    id: "conclude",
+    label: "输出结论，无需代码变更",
+    short: "结论",
+    hint: "只在对话里给出结论。可以阅读代码，但不改代码、不开 PR、不合入、不部署。",
+    directive:
+      "只输出结论即算交付完成：可以阅读代码以便下结论，但不要修改任何代码，不要开 PR，不要合入主分支，不要部署上线。",
   },
 ];
 

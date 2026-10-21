@@ -13,10 +13,11 @@ export type TaskType = "general" | "feature" | "bugfix" | "diagnose";
 /**
  * 任务目标：**会改变 agent 的交付动作**（目录见 `./task-goals.ts`）。
  * - `merge`：做完合入主分支，不部署；
- * - `deploy`：合入主分支后再部署上线。
+ * - `deploy`：合入主分支后再部署上线；
+ * - `conclude`：只输出结论，不改代码、不开 PR、不合入、不部署。
  * 缺省（`undefined`）= 历史任务 / 内部任务，没有目标 → 老行为（开完 PR 停）。
  */
-export type TaskGoal = "merge" | "deploy";
+export type TaskGoal = "merge" | "deploy" | "conclude";
 
 /** Per-project (or global) defaults for which agent runtime to use. */
 export interface RuntimeConfig {

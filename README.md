@@ -71,9 +71,10 @@ The listen host resolves as **`HOST` → `0.0.0.0`** (all IPv4 interfaces). Set
 `HOST=127.0.0.1` when the process should accept only local connections.
 
 Set `LOGIN_PASSWORD` (and optionally `LOGIN_USERNAME`, default `admin`) to
-require that fixed username and password from anyone who is not on loopback.
-The browser shows a login form; `127.0.0.1` callers such as the deploy
-platform are unchanged. Leave `LOGIN_PASSWORD` empty to disable the gate.
+require that fixed username and password in the browser. With no valid
+session cookie the page shows the login form, including on localhost.
+Loopback callers of other routes (the deploy platform, on-box autonomy)
+stay open. Leave `LOGIN_PASSWORD` empty to disable the gate.
 
 ```bash
 SERVICE_PORT=4212 npm run dev      # backend + proxy both on 4212

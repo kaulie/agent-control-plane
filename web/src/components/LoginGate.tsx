@@ -33,7 +33,10 @@ export function useLogin(): LoginContextValue {
 
 async function readSession(): Promise<Session> {
   const res = await fetch("/api/session");
-  if (res.status === 404) return { required: false, authenticated: true };
+  // No session resource and no cookie are the same outcome: ask for login.
+  if (res.status === 404 || res.status === 401) {
+    return { required: true, authenticated: false };
+  }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
@@ -48,9 +51,9 @@ async function readSession(): Promise<Session> {
 }
 
 /**
- * Shows the username / fixed-password form when the gateway has
- * `LOGIN_PASSWORD` set and this browser is not already signed in.
- * Loopback sessions come back as `required: false` and skip the form.
+ * Shows the username / password form unless this browser already has a
+ * valid session cookie. A missing session is not a login, including when
+ * the page was opened on localhost.
  */
 export default function LoginGate({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });

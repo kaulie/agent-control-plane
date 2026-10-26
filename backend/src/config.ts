@@ -318,7 +318,7 @@ export interface Config {
   host: string;
   /**
    * Fixed-account login. Off unless `LOGIN_PASSWORD` is set.
-   * Non-loopback clients must sign in; loopback stays open.
+   * Browsers need a session cookie. Loopback machine calls stay open.
    */
   login: LoginAuth;
   apiKey: string | undefined;

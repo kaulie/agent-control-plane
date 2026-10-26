@@ -10,7 +10,6 @@ import {
   LOGIN_SESSION_TTL_MS,
   LoginAttemptLimiter,
   fixedCredentialsMatch,
-  isLoopbackAddress,
   type LoginAuth,
   type LoginRequestView,
   requestIsAuthenticated,
@@ -45,12 +44,11 @@ export function registerLoginRoutes(
 ): void {
   app.get("/api/session", async (req) => {
     if (!auth.enabled) return { required: false, authenticated: true };
+    // Cookie only. A loopback browser is not a session: same-machine pages
+    // (and a local reverse proxy) must show the login form until they sign in.
+    // Machine callers still skip the cookie on other routes; see requestIsAuthenticated.
     const username = sessionUsername(auth, viewOf(req));
     if (username) return { required: true, authenticated: true, username };
-    // Same-machine callers (and a browser on 127.0.0.1) are already inside.
-    if (isLoopbackAddress(req.socket.remoteAddress)) {
-      return { required: false, authenticated: true, username: auth.username };
-    }
     return { required: true, authenticated: false };
   });
 

@@ -1,7 +1,8 @@
 /**
  * Fixed-account login: password comes from LOGIN_PASSWORD, username from
  * LOGIN_USERNAME (default admin). Non-loopback /api and /ws require the
- * session cookie; loopback and /health do not.
+ * session cookie. Loopback machine calls and /health do not. GET /api/session
+ * reports the cookie only, so a loopback browser without a cookie is logged out.
  *
  * Usage: npx tsx backend/scripts/test-login-auth.mjs   (or: npm test)
  */
@@ -223,6 +224,63 @@ await check("public /api requires the cookie; loopback and /health do not", asyn
     }),
     true,
   );
+
+  await app.close();
+});
+
+await check("loopback browser has no session until it logs in", async () => {
+  const app = Fastify({ logger: false });
+  app.addHook("onRequest", createLoginGuard(auth));
+  registerLoginRoutes(app, auth);
+  app.get("/api/projects", async () => [{ name: "secret" }]);
+
+  const session = await app.inject({
+    method: "GET",
+    url: "/api/session",
+    remoteAddress: "127.0.0.1",
+  });
+  assert.deepEqual(JSON.parse(session.body), {
+    required: true,
+    authenticated: false,
+  });
+
+  const projects = await app.inject({
+    method: "GET",
+    url: "/api/projects",
+    remoteAddress: "127.0.0.1",
+  });
+  assert.equal(projects.statusCode, 200, "loopback machine calls stay open");
+
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: { username: "ada", password: "s3cret-pass" },
+    remoteAddress: "127.0.0.1",
+  });
+  assert.equal(login.statusCode, 200);
+  const setCookie = login.headers["set-cookie"];
+  const cookieLine = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+  const pair = cookieLine.split(";")[0];
+  const who = await app.inject({
+    method: "GET",
+    url: "/api/session",
+    headers: { cookie: pair },
+    remoteAddress: "::1",
+  });
+  assert.deepEqual(JSON.parse(who.body), {
+    required: true,
+    authenticated: true,
+    username: "ada",
+  });
+
+  const empty = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: { username: "", password: "" },
+    remoteAddress: "127.0.0.1",
+  });
+  assert.equal(empty.statusCode, 400);
+  assert.equal(JSON.parse(empty.body).error, "请输入用户名和密码");
 
   await app.close();
 });

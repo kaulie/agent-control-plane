@@ -1,12 +1,14 @@
 /**
  * Fixed-account login for the control plane.
  *
- * Set `LOGIN_PASSWORD` to require a username + that password from non-loopback
- * clients (the public URL). Leave it empty and the gate stays off, which is
- * the local-dev default. `LOGIN_USERNAME` defaults to `admin`.
+ * Set `LOGIN_PASSWORD` to require a username + that password. Leave it empty
+ * and the gate stays off, which is the local-dev default. `LOGIN_USERNAME`
+ * defaults to `admin`.
  *
- * Loopback callers (deployment platform, on-box autonomy) skip the gate so
- * those contracts keep working after the password is turned on.
+ * The browser session (`GET /api/session`) is the cookie only: no cookie means
+ * the login form, including from 127.0.0.1. Loopback callers of other routes
+ * (deployment platform, on-box autonomy) still skip the cookie so those
+ * contracts keep working after the password is turned on.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 

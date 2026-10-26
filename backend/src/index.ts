@@ -318,7 +318,7 @@ app.log.info(
 );
 app.log.info(
   config.login.enabled
-    ? `login gate: on (user=${config.login.username}; loopback skips it)`
+    ? `login gate: on (user=${config.login.username}; browser needs a session cookie, loopback API calls skip it)`
     : "login gate: off (set LOGIN_PASSWORD to require a username and fixed password)",
 );
 

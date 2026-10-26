@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import AgentPathChip from "./AgentPathChip";
+import { copyText } from "../copy-text";
 import type { AgentPath, AutonomyTarget, Task } from "../types";
 import { autonomyTargetHint, autonomyTargetLabel } from "../autonomy-target";
 
@@ -91,18 +92,7 @@ interface Props {
 }
 
 const COPIED_MS = 1200;
-
-/** 复制到剪贴板：权限 / 非安全上下文下可能不可用，失败就静默（不影响看 id）。 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    const clipboard = navigator.clipboard;
-    if (!clipboard?.writeText) return false;
-    await clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const COPY_FAILED_MS = 2000;
 
 /**
  * 任务详情页顶部常驻的一条「基础信息」：Task / Project / Org（+ Agent）。
@@ -118,7 +108,7 @@ export default function TaskIdsBar({
   agentPathSource,
   autonomyTarget,
 }: Props) {
-  const [copied, setCopied] = useState<string | null>(null);
+  const [flash, setFlash] = useState<{ key: string; ok: boolean } | null>(null);
   const timerRef = useRef<number | null>(null);
 
   useEffect(
@@ -132,10 +122,13 @@ export default function TaskIdsBar({
 
   const onCopy = async (row: TaskIdRow): Promise<void> => {
     if (row.missing) return;
-    if (!(await copyText(row.value))) return;
-    setCopied(row.key);
+    const ok = await copyText(row.value);
+    setFlash({ key: row.key, ok });
     if (timerRef.current != null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => setCopied(null), COPIED_MS);
+    timerRef.current = window.setTimeout(
+      () => setFlash(null),
+      ok ? COPIED_MS : COPY_FAILED_MS,
+    );
   };
 
   return (
@@ -154,14 +147,16 @@ export default function TaskIdsBar({
           <button
             key={row.key}
             type="button"
-            className={`task-id-chip${copied === row.key ? " copied" : ""}`}
+            className={`task-id-chip${
+              flash?.key === row.key ? (flash.ok ? " copied" : " copy-failed") : ""
+            }`}
             title={`${row.hint}\n点一下复制：${row.value}`}
             onClick={() => void onCopy(row)}
           >
             <span className="task-id-label">{row.label}</span>
             <code className="task-id-value">{row.value}</code>
-            <span className="task-id-copied">
-              {copied === row.key ? "已复制" : "复制"}
+            <span className="task-id-copied" aria-live="polite">
+              {flash?.key === row.key ? (flash.ok ? "已复制" : "复制失败") : "复制"}
             </span>
           </button>
         ),

@@ -844,6 +844,10 @@ body {
   border-color: var(--accent);
 }
 
+.task-id-chip.copy-failed {
+  border-color: var(--red);
+}
+
 .task-id-chip.is-missing {
   cursor: default;
   color: var(--text-dim);
@@ -866,12 +870,17 @@ body {
 }
 
 .task-id-chip:hover .task-id-copied,
-.task-id-chip.copied .task-id-copied {
+.task-id-chip.copied .task-id-copied,
+.task-id-chip.copy-failed .task-id-copied {
   opacity: 1;
 }
 
 .task-id-chip.copied .task-id-copied {
   color: var(--accent);
+}
+
+.task-id-chip.copy-failed .task-id-copied {
+  color: var(--red);
 }
 
 /* 当前 agent 已执行轮次：主界面顶部一条（纯展示）。 */

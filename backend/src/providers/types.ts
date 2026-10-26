@@ -134,7 +134,12 @@ export interface AgentProvider {
   readonly name: string;
   verifyAuth(opts?: AuthVerifyOpts): Promise<{ ok: boolean; detail: string }>;
   listModels(opts?: ListModelsOpts): Promise<ModelInfo[]>;
-  resolveModel(): Promise<string | undefined>;
+  /**
+   * Model used when a task does not name one. Pass the same account key /
+   * vendor as `listModels` — catalog calls are authenticated, and a keyless
+   * lookup returns nothing.
+   */
+  resolveModel(opts?: ListModelsOpts): Promise<string | undefined>;
   run(input: RunInput): Promise<RunResultData>;
   /** Request cancellation of an in-flight run. Returns false if unknown. */
   cancel(runId: string): Promise<boolean>;

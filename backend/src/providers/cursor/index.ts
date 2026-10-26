@@ -1,5 +1,5 @@
 import { Agent, AgentBusyError, Cursor } from "@cursor/sdk";
-import type { AgentOptions, Run, SDKAgent, SDKMessage, SDKUserMessage } from "@cursor/sdk";
+import type { AgentOptions, Run, SDKAgent, SDKMessage, SDKUserMessage, SendOptions } from "@cursor/sdk";
 import type { CostInfo, EventType, TokenUsage } from "../../types.js";
 import { mapSdkMessage } from "./mapper.js";
 import { buildCost, type SdkCostLike } from "../../usage/cost.js";
@@ -74,7 +74,8 @@ function isAgentBusy(err: unknown): boolean {
 
 export class CursorProvider implements AgentProvider {
   readonly name = "cursor";
-  private modelsCache: ModelInfo[] | undefined;
+  /** Successful catalog responses, keyed by the API key that fetched them. */
+  private modelsCacheByKey = new Map<string, ModelInfo[]>();
   private active = new Map<string, ActiveHandle>();
   /** Long-lived SDK agents keyed by taskId (1 task = 1 agent). */
   private agentsByTask = new Map<string, SDKAgent>();
@@ -99,12 +100,14 @@ export class CursorProvider implements AgentProvider {
   }
 
   async listModels(opts?: { apiKey?: string }): Promise<ModelInfo[]> {
-    const apiKey = opts?.apiKey?.trim() || this.config.apiKey;
-    if (!opts?.apiKey && this.modelsCache) return this.modelsCache;
+    const apiKey = opts?.apiKey?.trim() || this.config.apiKey || "";
+    const cached = this.modelsCacheByKey.get(apiKey);
+    if (cached) return cached;
     try {
       const models = await Cursor.models.list(apiKey ? { apiKey } : undefined);
       const mapped = models.map((m) => ({ id: m.id, displayName: m.displayName }));
-      if (!opts?.apiKey) this.modelsCache = mapped;
+      // Don't cache a failure or an empty catalog — the next run should retry.
+      if (mapped.length) this.modelsCacheByKey.set(apiKey, mapped);
       return mapped;
     } catch (err) {
       console.warn("[cursor] listModels failed:", err instanceof Error ? err.message : err);
@@ -112,9 +115,14 @@ export class CursorProvider implements AgentProvider {
     }
   }
 
-  async resolveModel(): Promise<string | undefined> {
+  async resolveModel(opts?: { apiKey?: string }): Promise<string | undefined> {
     if (this.config.model) return this.config.model;
-    const models = await this.listModels();
+    // `Cursor.models.list` is a cloud call. Runs auth with the task account
+    // key, not `CURSOR_API_KEY`. Without that key the catalog call fails, the
+    // id stays empty, and local `send()` rejects the agent
+    // ("Local SDK agents require an explicit model").
+    const apiKey = opts?.apiKey?.trim();
+    const models = await this.listModels(apiKey ? { apiKey } : undefined);
     return models[0]?.id;
   }
 
@@ -301,16 +309,36 @@ export class CursorProvider implements AgentProvider {
    * agent.send, with recovery when the SDK still holds an active run from a
    * previous (crashed / interrupted) gateway process.
    */
+  /**
+   * Local `send()` throws if neither create nor a previous send stored a
+   * model. Resume of an agent that was created without one leaves
+   * `agent.model` empty, so pass the resolved id on that send.
+   */
+  private sendOptions(
+    agent: SDKAgent,
+    input: RunInput,
+    modelId: string | undefined,
+  ): SendOptions | undefined {
+    const mode = input.mode === "plan" || input.mode === "agent" ? input.mode : undefined;
+    const model = !agent.model && modelId ? { id: modelId } : undefined;
+    if (!mode && !model) return undefined;
+    return {
+      ...(mode ? { mode } : {}),
+      ...(model ? { model } : {}),
+    };
+  }
+
   private async sendPrompt(
     agent: SDKAgent,
     input: RunInput,
     options: AgentOptions,
     prependBootstrap: boolean,
+    modelId: string | undefined,
   ): Promise<{ agent: SDKAgent; run: Run }> {
     const trySend = (a: SDKAgent, withBootstrap: boolean) =>
       a.send(
         this.buildSendPayload(input, withBootstrap),
-        input.mode ? { mode: input.mode } : undefined,
+        this.sendOptions(a, input, modelId),
       );
 
     try {
@@ -353,7 +381,37 @@ export class CursorProvider implements AgentProvider {
     // cancel this run (otherwise cancel() returns false → HTTP 400).
     this.active.set(input.runId, handle);
 
-    const modelId = input.model || (await this.resolveModel());
+    const modelId =
+      input.model?.trim() ||
+      (await this.resolveModel(input.apiKey ? { apiKey: input.apiKey } : undefined));
+    if (!modelId) {
+      const error =
+        "本地 Cursor agent 需要明确的模型。任务没有指定 model，且当前账号无法列出模型（检查账号 API key，或在项目/全局设置里指定默认模型）。";
+      await input.onEvent({
+        eventId: newId("evt"),
+        taskId: input.taskId,
+        runId: input.runId,
+        agentId: input.agentId || "",
+        timestamp: new Date().toISOString(),
+        eventType: "run_error",
+        payload: {
+          error,
+          rawError: error,
+          kind: "other",
+          durationMs: 0,
+          modelCalls: 0,
+          toolCalls: 0,
+        },
+      });
+      this.active.delete(input.runId);
+      return {
+        status: "error",
+        error,
+        durationMs: 0,
+        modelCalls: 0,
+        toolCalls: 0,
+      };
+    }
     const options = this.buildOptions(input, modelId);
 
     // 自动轮转兜底（PR-4）：cursor 推不出上下文体量（usage 是 agent 累计值），
@@ -474,7 +532,7 @@ export class CursorProvider implements AgentProvider {
         let lastActivityAt = attemptStartedAt;
         let streamMessages = 0;
 
-        const sent = await this.sendPrompt(agent, input, options, prependBootstrap);
+        const sent = await this.sendPrompt(agent, input, options, prependBootstrap, modelId);
         agent = sent.agent;
         handle.agent = agent;
         const run = sent.run;

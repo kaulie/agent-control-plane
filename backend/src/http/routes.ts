@@ -258,11 +258,12 @@ export async function registerRoutes(
         providers.defaultProviderName;
       try {
         const provider = providers.get(name);
-        const models = await provider.listModels({
+        const modelOpts = {
           ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
           ...(account?.vendor ? { vendor: account.vendor } : {}),
-        });
-        const resolved = await provider.resolveModel();
+        };
+        const models = await provider.listModels(modelOpts);
+        const resolved = await provider.resolveModel(modelOpts);
         return {
           provider: provider.name,
           ...(account ? { accountId: account.accountId, vendor: account.vendor } : {}),
